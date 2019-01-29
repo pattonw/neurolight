@@ -2,6 +2,7 @@ import gunpowder as gp
 from gunpowder import Roi
 import numpy as np
 
+
 #todo: list of channels to be merged
 class MergeChannel(gp.BatchFilter):
 
@@ -19,11 +20,13 @@ class MergeChannel(gp.BatchFilter):
         pass
 
     def process(self, batch, request):
+
         spec = self.spec[self.fg].copy()
-        merged = np.stack([batch[self.fg].data, batch[self.bg].data],
-                          axis=0)
+        voxel_size = (1,) + spec.voxel_size
+        merged = np.stack([batch[self.fg].data, batch[self.bg].data], axis=0)
+
         batch[self.raw] = gp.Array(data=merged.astype(spec.dtype),
                                    spec=gp.ArraySpec(dtype=spec.dtype,
-                                                     roi=Roi((0, 0, 0, 0), merged.shape),
+                                                     roi=Roi((0, 0, 0, 0), merged.shape) * voxel_size,
                                                      interpolatable=True,
-                                                     voxel_size=gp.Coordinate((1, 1, 1, 1))))
+                                                     voxel_size=voxel_size))
