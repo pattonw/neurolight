@@ -4,14 +4,14 @@ import copy
 from scipy import ndimage
 
 
-class FusionAugment(BatchProvider):
+class FusionAugment(BatchProvider): #todo: use Fusion Augment as BatchFilter
     """Combine foreground of one or more volumes with another using soft mask and convex combination.
         Args:
-            fg (:class:``ArrayKey``):
+            ch1 (:class:``ArrayKey``):
 
                 The intensity array to modify. Should be of type float and within range [-1, 1] or [0, 1].
 
-            bg (:class:``ArrayKey``):
+            ch2 (:class:``ArrayKey``):
 
                 The intensity array to modify. Should be of type float and within range [-1, 1] or [0, 1].
 
@@ -25,26 +25,26 @@ class FusionAugment(BatchProvider):
 
             return_intermediate (``bool``, optional):
 
-                If intermediate results should be returned (fg and bg of the two merged volumes + soft mask)
+                If intermediate results should be returned (ch1 and ch2 of the two merged volumes (A and B) + soft mask)
     """
 
-    def __init__(self, fg, bg, gt, smoothness=3, return_intermediate=False):
+    def __init__(self, ch1, ch2, gt, smoothness=3, return_intermediate=False):
 
-        self.fg = fg
-        self.bg = bg
+        self.ch1 = ch1
+        self.ch2 = ch2
         self.gt = gt
         self.gt_spec = None
-        self.fg_spec = None
+        self.ch1_spec = None
         self.smoothness = smoothness
 
         self.intermediates = None
         if return_intermediate:
 
             self.intermediates = (
-                ArrayKey('A_' + self.fg.identifier),
-                ArrayKey('A_' + self.bg.identifier),
-                ArrayKey('B_' + self.fg.identifier),
-                ArrayKey('B_' + self.bg.identifier),
+                ArrayKey('A_' + self.ch1.identifier),
+                ArrayKey('A_' + self.ch2.identifier),
+                ArrayKey('B_' + self.ch1.identifier),
+                ArrayKey('B_' + self.ch2.identifier),
                 ArrayKey('SOFT_MASK')
             )
 
@@ -70,7 +70,7 @@ class FusionAugment(BatchProvider):
 
         if self.intermediates is not None:
             for intermediate in self.intermediates:
-                self.provides(intermediate, common_spec[self.fg])
+                self.provides(intermediate, common_spec[self.ch1])
 
     def provide(self, request):
 
@@ -78,8 +78,8 @@ class FusionAugment(BatchProvider):
 
         # prepare: enlarge gt requested roi to be the same as the raw data
         self.gt_spec = request[self.gt].roi.copy()
-        self.fg_spec = request[self.fg].roi.copy()
-        request[self.gt].roi = request[self.fg].roi.copy()
+        self.ch1_spec = request[self.ch1].roi.copy()
+        request[self.gt].roi = request[self.ch1].roi.copy()
 
         if self.intermediates is not None:
             # copy requested intermediates
@@ -88,73 +88,71 @@ class FusionAugment(BatchProvider):
                 intermediate_request[intermediate] = request[intermediate].copy()
                 del request[intermediate]
 
-        # take one volume as base to cut the other objects into
-        base_request = np.random.choice(self.get_upstream_providers(), replace=False).request_batch(request)
-        fg = base_request[self.fg].data
-        bg = base_request[self.bg].data
-        gt = base_request[self.gt].data
+        # get volume A
+        a_request = np.random.choice(self.get_upstream_providers(), replace=False).request_batch(request)
+        a_ch1 = a_request[self.ch1].data
+        a_ch2 = a_request[self.ch2].data
+        a_gt = a_request[self.gt].data
 
         # get object from another volume
-        cutout_request = np.random.choice(self.get_upstream_providers(), replace=False).request_batch(request)
-        cutout_fg = cutout_request[self.fg].data
-        cutout_bg = cutout_request[self.bg].data
-        cutout_gt = cutout_request[self.gt].data
+        b_request = np.random.choice(self.get_upstream_providers(), replace=False).request_batch(request)
+        b_ch1 = b_request[self.ch1].data
+        b_ch2 = b_request[self.ch2].data
+        b_gt = b_request[self.gt].data
 
         if self.intermediates is not None:
-            batch.arrays[ArrayKey('A_' + self.fg.identifier)] = Array(data=base_request[self.fg].data,
-                                                                      spec=base_request[self.fg].spec.copy())
-            batch.arrays[ArrayKey('A_' + self.bg.identifier)] = Array(data=base_request[self.bg].data,
-                                                                      spec=base_request[self.bg].spec.copy())
-            batch.arrays[ArrayKey('B_' + self.fg.identifier)] = Array(data=cutout_request[self.fg].data,
-                                                                      spec=cutout_request[self.fg].spec.copy())
-            batch.arrays[ArrayKey('B_' + self.bg.identifier)] = Array(data=cutout_request[self.bg].data,
-                                                                      spec=cutout_request[self.bg].spec.copy())
+            batch.arrays[ArrayKey('A_' + self.ch1.identifier)] = Array(
+                data=a_request[self.ch1].data, spec=a_request[self.ch1].spec.copy())
+            batch.arrays[ArrayKey('A_' + self.ch2.identifier)] = Array(
+                data=a_request[self.ch2].data, spec=a_request[self.ch2].spec.copy())
+            batch.arrays[ArrayKey('B_' + self.ch1.identifier)] = Array(
+                data=b_request[self.ch1].data, spec=b_request[self.ch1].spec.copy())
+            batch.arrays[ArrayKey('B_' + self.ch2.identifier)] = Array(
+                data=b_request[self.ch2].data, spec=b_request[self.ch2].spec.copy())
 
-        labels, counts = np.unique(cutout_gt, return_counts=True)
+        labels, counts = np.unique(b_gt, return_counts=True)
         labels = np.delete(labels, 0)
         counts = np.delete(counts, 0)
         label = labels[np.argmax(counts)]
-        mask = cutout_gt == label
+        mask = b_gt == label
 
         # position object
-        mask = self._position_object(gt, mask)
+        mask = self._position_object(a_gt, mask)
 
         # create soft mask
         soft_mask = np.zeros_like(mask, dtype='float32')
         ndimage.gaussian_filter(mask.astype('float32'), sigma=self.smoothness, output=soft_mask, mode='nearest')
         soft_mask /= np.max(soft_mask)
+        soft_mask = np.clip((soft_mask*1.2), 0, 1)
 
         if self.intermediates is not None:
-            soft_mask_spec = base_request[self.fg].spec.copy()
+            soft_mask_spec = a_request[self.ch1].spec.copy()
             soft_mask_spec.dtype = np.float32
             batch.arrays[ArrayKey('SOFT_MASK')] = Array(data=soft_mask, spec=soft_mask_spec)
 
-        # paste object into base using convex combination
-        fg = soft_mask * cutout_fg + (1 - soft_mask) * fg
-        bg = soft_mask * cutout_bg + (1 - soft_mask) * bg
-        gt[mask] = np.max(gt) + 1
+        # paste object from b to a using convex combination
+        a_ch1 = soft_mask * b_ch1 + (1 - soft_mask) * a_ch1
+        a_ch2 = soft_mask * b_ch2 + (1 - soft_mask) * a_ch2
+        a_gt[mask] = np.max(a_gt) + 1
 
-        gt = self._relabel(gt.astype(np.int32))
+        a_gt = self._relabel(a_gt.astype(np.int32))
 
         gt_spec = self.spec[self.gt].copy()
         gt_spec.roi = request[self.gt].roi.copy()
 
-        fg_spec = self.spec[self.fg].copy()
-        fg_spec.roi = request[self.fg].roi.copy()
+        ch1_spec = self.spec[self.ch1].copy()
+        ch1_spec.roi = request[self.ch1].roi.copy()
 
-        bg_spec = self.spec[self.bg].copy()
-        bg_spec.roi = request[self.bg].roi.copy()
-
-        skeleton = Array(data=gt.astype(gt_spec.dtype), spec=gt_spec)
-        skeleton = skeleton.crop(self.gt_spec)
+        ch2_spec = self.spec[self.ch2].copy()
+        ch2_spec.roi = request[self.ch2].roi.copy()
 
         # return augmented raw and gt volume
-        batch.arrays[self.fg] = Array(data=fg.astype(fg_spec.dtype), spec=fg_spec)
-        batch.arrays[self.bg] = Array(data=bg.astype(bg_spec.dtype), spec=bg_spec)
-        batch.arrays[self.gt] = skeleton
+        batch.arrays[self.ch1] = Array(data=a_ch1.astype(ch1_spec.dtype), spec=ch1_spec)
+        batch.arrays[self.ch2] = Array(data=a_ch2.astype(ch2_spec.dtype), spec=ch2_spec)
+        batch.arrays[self.gt] = Array(data=a_gt.astype(gt_spec.dtype), spec=gt_spec).crop(self.gt_spec)
 
-        for points_key in base_request.points:
-            batch.points[points_key] = base_request.points[points_key]
+        for points_key in a_request.points:
+            batch.points[points_key] = a_request.points[points_key]
 
         return batch
 
@@ -171,7 +169,6 @@ class FusionAugment(BatchProvider):
         values_map[old_values] = new_values
 
         return values_map[a]
-
 
     def _get_overlap(self, a, b):
 

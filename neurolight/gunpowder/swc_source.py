@@ -156,8 +156,8 @@ class SwcSource(BatchProvider):
                 pos_grow = np.round(np.maximum(np.zeros((3,)),
                                                np.max(locs, axis=0) - np.asarray(points_spec.roi.get_end())))
 
-                neg_grow += 1
-                pos_grow += 1
+                neg_grow += np.asarray(self.scale) - np.mod(neg_grow, self.scale)
+                pos_grow += np.asarray(self.scale) - np.mod(pos_grow, self.scale)
 
                 points_env_spec.roi = points_env_spec.roi.grow(Coordinate(neg_grow), Coordinate(pos_grow))
 
