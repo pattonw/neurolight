@@ -53,23 +53,18 @@ class SwcSource(BatchProvider):
             is useful to set a missing ``voxel_size``, for example. Only fields
             that are not ``None`` in the given :class:`ArraySpec` will be used.
 
-        return_env (``bool``, optional):
-
-            If parent and children nodes should be returned.
-
         scale (scalar or array-like, optional):
 
             An optional scaling to apply to the coordinates of the points.
             This is useful if the points refer to voxel positions to convert them to world units.
     """
 
-    def __init__(self, filename, dataset, points, point_specs=None, return_env=False, scale=None):
+    def __init__(self, filename, dataset, points, point_specs=None, scale=None):
 
         self.filename = filename
         self.dataset = dataset
         self.points = points
         self.point_specs = point_specs
-        self.return_env = return_env
         self.scale = scale
 
         # variables to keep track of swc skeleton graphs
@@ -113,7 +108,7 @@ class SwcSource(BatchProvider):
 
             # get points for output size / center region
             min_bb = request[points_key].roi.get_begin()
-            max_bb = request[points_key].roi.get_end()
+            max_bb = request[points_key].roi.get_end() - Coordinate([1,1,1])
 
             logger.debug(
                 "SWC points source got request for %s",
@@ -122,46 +117,42 @@ class SwcSource(BatchProvider):
             point_filter = np.ones((self.data.shape[0],), dtype=np.bool)
             for d in range(self.ndims):
                 point_filter = np.logical_and(point_filter, self.data[:, d] >= min_bb[d])
-                point_filter = np.logical_and(point_filter, self.data[:, d] < max_bb[d])
+                point_filter = np.logical_and(point_filter, self.data[:, d] <= max_bb[d])
 
             points_data = self._get_points(point_filter)
             points_spec = PointsSpec(roi=request[points_key].roi.copy())
+            relatives_resampled = {}
 
-            # get neighboring points in order to draw skeleton correctly
+            # in order to draw skeleton in the entire roi, get parent and children and resample them
+            # to be at the edge of the roi, add them to points_data
+            # create new SwcPoint(location, point_id, parent_id, label_id)
+            if len(points_data) < self.data.shape[0]:
 
-            if len(points_data) < self.data.shape[0] and self.return_env:
+                for point_id in points_data:
+                    point = points_data[point_id]
 
-                points_env = PointsKey(points_key.identifier + '_ENV')
-                points_env_data = {}
-                points_env_spec = points_spec.copy()
+                    # processing parent node
+                    if point_id not in self.sources:
+                        parent_id = self.child_to_parent[point_id]
 
-                # get children and parent of center points and include them to points_env
-                for p in points_data:
-                    if p not in self.sources:
-                        parent_id = self.child_to_parent[p]
-                        parent = self._get_point(self.data[:, 3] == parent_id)
-                        points_env_data[int(parent_id)] = parent
+                        if parent_id not in points_data:
 
-                    if p in self.parent_to_children.keys():
-                        for child_id in self.parent_to_children[p]:
-                            child = self._get_point(self.data[:, 3] == child_id)
-                            points_env_data[int(child_id)] = child
+                            parent = self._get_point(self.data[:, 3] == parent_id)
+                            loc = self._resample_relative(point, parent, min_bb, max_bb)
+                            relatives_resampled.update({parent_id: SwcPoint(loc, parent_id, -1, point.label_id)})
 
-                    # add also original points to points env
-                    points_env_data[p] = points_data[p].copy()
+                    # processing children
+                    if point_id in self.parent_to_children.keys():
 
-                locs = np.asarray([p.location for p in points_env_data.values()])
-                neg_grow = np.round(np.maximum(np.zeros((3,)),
-                                               np.asarray(points_spec.roi.get_begin()) - np.min(locs, axis=0)))
-                pos_grow = np.round(np.maximum(np.zeros((3,)),
-                                               np.max(locs, axis=0) - np.asarray(points_spec.roi.get_end())))
+                        for child_id in self.parent_to_children[point_id]:
 
-                neg_grow += np.asarray(self.scale) - np.mod(neg_grow, self.scale)
-                pos_grow += np.asarray(self.scale) - np.mod(pos_grow, self.scale)
+                            if child_id not in points_data:
 
-                points_env_spec.roi = points_env_spec.roi.grow(Coordinate(neg_grow), Coordinate(pos_grow))
+                                child = self._get_point(self.data[:, 3] == child_id)
+                                loc = self._resample_relative(point, child, min_bb, max_bb)
+                                relatives_resampled.update({child_id: SwcPoint(loc, child_id, point_id, point.label_id)})
 
-                batch.points[points_env] = Points(points_env_data, points_env_spec)
+            points_data.update(relatives_resampled)
 
             batch.points[points_key] = Points(points_data, points_spec)
 
@@ -196,7 +187,20 @@ class SwcSource(BatchProvider):
             int(filtered[self.ndims + 2])
         )
 
+    def _resample_relative(self, p, relative, min_bb, max_bb):
+
+        dist = relative.location - p.location
+        s_bb = np.asarray([(np.asarray(min_bb) - p.location) / dist,
+                           (np.asarray(max_bb) - p.location) / dist])
+
+        assert np.sum(np.logical_and((s_bb >= 0),(s_bb <= 1))) > 0, \
+            ("Cannot resample point between point %p and relative %p, please check!" %p.location, relative.location)
+
+        s = np.min(s_bb[np.logical_and((s_bb >= 0),(s_bb <= 1))])
+        return np.floor(p.location + s * dist)
+
     def _label_skeleton(self, p, label_id):
+
         self.data[self.data[:, 3] == p, 5] = label_id
         if p in self.parent_to_children.keys():
             for child in self.parent_to_children[p]:

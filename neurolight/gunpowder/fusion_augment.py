@@ -56,7 +56,7 @@ class FusionAugment(BatchFilter):
         self.labels_fused = labels_fused
         self.blend_mode = blend_mode
         self.blend_smoothness = blend_smoothness
-        self.num_blended_obj = num_blended_objects
+        self.num_blended_objects = num_blended_objects
 
         assert self.blend_mode in ['intensity', 'labels_mask'], (
                 "Unknown blend mode %s." % self.blend_mode)
@@ -69,14 +69,12 @@ class FusionAugment(BatchFilter):
     def prepare(self, request):
 
         # add "base" and "add" volume to request
-        raw_fused_spec = request[self.raw_fused].copy()
-        # enlarge roi for labels to be the same size as the raw data for mask generation
-        labels_fused_spec = request[self.raw_fused].copy()
+        request[self.raw_base] = request[self.raw_fused].copy()
+        request[self.raw_add] = request[self.raw_fused].copy()
 
-        request.add(self.raw_base, raw_fused_spec.roi.get_shape())
-        request.add(self.raw_add, raw_fused_spec.roi.get_shape())
-        request.add(self.labels_base, labels_fused_spec.roi.get_shape())
-        request.add(self.labels_base, labels_fused_spec.roi.get_shape())
+        # enlarge roi for labels to be the same size as the raw data for mask generation
+        request[self.labels_base] = request[self.raw_fused].copy()
+        request[self.labels_add] = request[self.raw_fused].copy()
 
     def process(self, batch, request):
 
@@ -93,10 +91,10 @@ class FusionAugment(BatchFilter):
         # fuse labels, create labels_mask of "add" volume
         labels = np.unique(labels_add_array)
         if 0 in labels:
-            np.delete(labels, 0)
+            labels = np.delete(labels, 0)
 
-        if 0 < self.num_blended_obj < len(labels):
-            labels = np.random.sample(labels, self.num_blended_obj)
+        if 0 < self.num_blended_objects < len(labels):
+            labels = np.random.choice(labels, self.num_blended_objects)
 
         labels_fused_array = self._relabel(labels_fused_array.astype(np.int32))
         labels_fused_mask = labels_fused_array > 0

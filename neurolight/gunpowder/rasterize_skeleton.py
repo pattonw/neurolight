@@ -8,9 +8,6 @@ class RasterizeSkeleton(BatchFilter):
 
         Args:
 
-            points (:class:``PointsKey``):
-                The key of the points to form the skeleton.
-
             array (:class:``ArrayKey``):
                 The key of the binary array to create.
 
@@ -19,23 +16,25 @@ class RasterizeSkeleton(BatchFilter):
                 The spec of the array to create. Use this to set the datatype and
                 voxel size.
 
+            points (:class:``PointsKey``):
+                The key of the points to form the skeleton.
+
             iteration (``float``, optional):
 
                 The number of iterations to apply binary dilation to the skeleton.
         """
 
-    def __init__(self, points, array, array_spec=None, points_env=None, iteration=1):
+    def __init__(self, points, array, array_spec, iteration=1):
 
         self.points = points
         self.array = array
         self.array_spec = array_spec
-        self.points_env = points_env
         self.iteration = iteration
 
     def setup(self):
 
+        # todo: ensure that both rois are the same
         points_roi = self.spec[self.points].roi
-
         if self.array_spec is None:
             self.array_spec = ArraySpec(roi=points_roi.copy(),
                                         voxel_size=Coordinate((1,) * points_roi.dims()),
@@ -54,27 +53,6 @@ class RasterizeSkeleton(BatchFilter):
     def process(self, batch, request):
 
         points = batch.points[self.points]
-
-        if self.points_env is not None:
-            if self.points_env in batch.points:
-                points_env = batch.points[self.points_env]
-
-                # exchange environment data without specifying size in request
-                # apply random shift from random location to swc env
-                random_shift = None
-                for k, p in points.data.items():
-                    if k in points_env.data.keys():
-                        random_shift = points_env.data[k].location - p.location
-                        break
-
-                if random_shift is not None:
-                    for k, p in points_env.data.items():
-                        p.location -= random_shift
-
-                    points_env.spec.roi.set_offset(points_env.spec.roi.get_offset() - tuple(random_shift.astype(int)))
-
-                points = points_env
-
         assert len(points.data.items()) > 0, 'No Swc Points in enlarged Roi.'
 
         voxel_size = self.array_spec.voxel_size
@@ -98,30 +76,23 @@ class RasterizeSkeleton(BatchFilter):
                         p2 = (points.data[p.parent_id].location / voxel_size).astype(int) - offset
                         binarized = self._rasterize_line_segment(p1, p2, binarized)
 
-            if self.iteration >= 1:
+            if self.iteration > 0:
                 binarized = ndimage.binary_dilation(binarized, iterations=self.iteration)
 
             array_data[binarized] = label
 
         print('sum > 0: ', np.sum(array_data > 0), ', num points in roi: ', len(points.data.items()))
 
-        array_spec = ArraySpec(roi=array_roi * voxel_size,
-                               voxel_size=voxel_size,
-                               interpolatable=False,
-                               dtype=self.array_spec.dtype
-                               )
-        array = Array(data=array_data, spec=array_spec)
+        array = Array(data=array_data,
+                      spec=ArraySpec(
+                          roi=array_roi * voxel_size,
+                          voxel_size=voxel_size,
+                          interpolatable=False,
+                          dtype=self.array_spec.dtype
+                      ))
 
         array = array.crop(request[self.array].roi)
         batch.arrays[self.array] = array
-
-        # get rid of all env point keys which are not in request
-        delete_point_keys = []
-        for points_key in batch.points:
-            if points_key not in request:
-                delete_point_keys.append(points_key)
-        for points_key in delete_point_keys:
-            del batch.points[points_key]
 
     def _bresenhamline_nslope(self, slope):
 
