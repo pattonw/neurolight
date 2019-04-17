@@ -1,6 +1,6 @@
 import numpy as np
 from gunpowder import *
-from scipy import ndimage
+from scipy.ndimage.morphology import distance_transform_edt
 
 
 class RasterizeSkeleton(BatchFilter):
@@ -19,17 +19,17 @@ class RasterizeSkeleton(BatchFilter):
             points (:class:``PointsKey``):
                 The key of the points to form the skeleton.
 
-            iteration (``float``, optional):
+            radius (``float``, optional):
 
-                The number of iterations to apply binary dilation to the skeleton.
+                The radius of the rasterized skeleton in world units.
         """
 
-    def __init__(self, points, array, array_spec, iteration=1):
+    def __init__(self, points, array, array_spec, radius=1.0):
 
         self.points = points
         self.array = array
         self.array_spec = array_spec
-        self.iteration = iteration
+        self.radius = radius
 
     def setup(self):
 
@@ -48,7 +48,8 @@ class RasterizeSkeleton(BatchFilter):
         self.provides(self.array, self.array_spec)
 
     def prepare(self, request):
-        pass
+
+        request[self.points] = PointsSpec(request[self.array].roi)
 
     def process(self, batch, request):
 
@@ -76,8 +77,9 @@ class RasterizeSkeleton(BatchFilter):
                         p2 = (points.data[p.parent_id].location / voxel_size).astype(int) - offset
                         binarized = self._rasterize_line_segment(p1, p2, binarized)
 
-            if self.iteration > 0:
-                binarized = ndimage.binary_dilation(binarized, iterations=self.iteration)
+            if self.radius > 1:
+                dt = distance_transform_edt(np.logical_not(binarized), sampling=voxel_size)
+                binarized = dt <= self.radius
 
             array_data[binarized] = label
 
