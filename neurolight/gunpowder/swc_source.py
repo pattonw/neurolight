@@ -49,14 +49,13 @@ class SwcSource(BatchProvider):
         point_specs (``dict``, :class:`PointsKey`, optional):
 
             An optional dictionary of point keys to point specs to overwrite
-            the array specs automatically determined from the data file. This
-            is useful to set a missing ``voxel_size``, for example. Only fields
-            that are not ``None`` in the given :class:`ArraySpec` will be used.
+            the points specs automatically determined from the data file.
 
         scale (scalar or array-like, optional):
 
-            An optional scaling to apply to the coordinates of the points.
-            This is useful if the points refer to voxel positions to convert them to world units.
+            An optional scaling to apply to the coordinates of the points. This
+            is useful if the points refer to voxel positions to convert them to
+            world units.
     """
 
     def __init__(self, filename, dataset, points, point_specs=None, scale=None):
@@ -201,37 +200,63 @@ class SwcSource(BatchProvider):
 
     def _label_skeleton(self, p, label_id):
 
-        self.data[self.data[:, 3] == p, 5] = label_id
-        if p in self.parent_to_children.keys():
-            for child in self.parent_to_children[p]:
-                self._label_skeleton(child, label_id)
+        while True:
+
+            if p in self.point_to_label:
+                raise RuntimeError("Loop detected in skeleton")
+
+            self.point_to_label[p] = label_id
+
+            children = self.parent_to_children.get(p)
+            if children is None:
+                break
+
+            if len(children) == 1:
+                p = children[0]
+                continue
+            else:
+                for child in children:
+                    self._label_skeleton(child, label_id)
+                break
 
     def _label_skeletons(self):
 
         self.child_to_parent = {}
         self.parent_to_children = {}
         self.sources = []
+        self.point_to_label = {}
+
+        logger.info("Finding root nodes...")
 
         # data = [x, y, z, point_id, parent_id, label_id]
-        # indices = 0: x, 1: y, 2:z, 3: point_id, 4: parent_id, 5: label_id
         for p in self.data:
 
-            if p[3] == p[4]:
-                self.sources.append(int(p[3]))
-            else:
-                self.child_to_parent[p[3]] = p[4]
+            _, _, _, point_id, parent_id, label_id = (int(x) for x in p)
 
-                if p[4] in self.parent_to_children:
-                    self.parent_to_children[p[4]].append(p[3])
+            if point_id == parent_id:
+                self.sources.append(point_id)
+            else:
+                self.child_to_parent[point_id] = parent_id
+
+                if parent_id in self.parent_to_children:
+                    self.parent_to_children[parent_id].append(point_id)
                 else:
-                    self.parent_to_children[p[4]] = [p[3]]
+                    self.parent_to_children[parent_id] = [point_id]
+
+        logger.info("Relabelling skeletons...")
 
         label_id = 1
         for source in self.sources:
             self._label_skeleton(source, label_id)
             label_id += 1
 
+        for point in self.data:
+            point_id = point[3]
+            point[5] = self.point_to_label[point_id]
+
     def _read_points(self):
+
+        logger.info("Reading SWC file %s", self.filename)
 
         with self._open_file(self.filename) as data_file:
 
