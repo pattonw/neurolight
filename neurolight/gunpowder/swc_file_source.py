@@ -75,6 +75,14 @@ class SwcFileSource(BatchProvider):
             An optional scaling to apply to the coordinates of the points read
             from the CSV file. This is useful if the points refer to voxel
             positions to convert them to world units.
+
+        keep_ids (boolean):
+
+            In the case of having to generate a new node at the intersection
+            of a parent-child edge and the bounding box, should the generated
+            node be given the id of the outside node? Default behavior is to
+            always relabel nodes for each request so that the node id's lie
+            in [0,n) if the request contains n nodes.
     """
 
     def __init__(
@@ -83,6 +91,7 @@ class SwcFileSource(BatchProvider):
         points: PointsKey,
         points_spec: PointsSpec = None,
         scale: Coordinate = Coordinate([1, 1, 1]),
+        keep_ids: bool = False,
     ):
 
         self.filename = filename
@@ -90,6 +99,7 @@ class SwcFileSource(BatchProvider):
         self.points_spec = points_spec
         self.scale = scale
         self.connected_component_label = 0
+        self.keep_ids = keep_ids
         self.g = nx.DiGraph()
 
     def setup(self):
@@ -99,19 +109,18 @@ class SwcFileSource(BatchProvider):
         if self.points_spec is not None:
 
             self.provides(self.points, self.points_spec)
-            return
+        else:
+            # If you don't provide a queryset, the roi will shrink to fit the
+            # points in the swc(s). This may cause problems if you expect empty point
+            # sets when querying the edges of your volume
+            logging.warning("No point spec provided!")
+            min_bb = Coordinate(self.data.mins[0:3])
+            # cKDTree max is inclusive
+            max_bb = Coordinate(self.data.maxes[0:3]) + Coordinate([1, 1, 1])
 
-        # If you don't provide a queryset, the roi will shrink to fit the
-        # points in the swc(s). This may cause problems if you expect empty point
-        # sets when querying the edges of your volume
-        logging.warning("No point spec provided!")
-        min_bb = Coordinate(self.data.mins)
-        # cKDTree max is inclusive
-        max_bb = Coordinate(self.data.maxes) + Coordinate([1, 1, 1])
+            roi = Roi(min_bb, max_bb - min_bb)
 
-        roi = Roi(min_bb, max_bb - min_bb)
-
-        self.provides(self.points, PointsSpec(roi=roi))
+            self.provides(self.points, PointsSpec(roi=roi))
 
     def provide(self, request: BatchRequest) -> Batch:
 
@@ -154,7 +163,7 @@ class SwcFileSource(BatchProvider):
     def _points_to_graph(
         self, points: List[np.ndarray]
     ) -> Tuple[nx.DiGraph, List[Tuple[int, int]], List[Tuple[int, int]]]:
-        nodes = set([self._location_to_node_id_map[tuple(p)] for p in points])
+        nodes = set([p[3] for p in points])
 
         sub_g = nx.DiGraph()
         sub_g.add_nodes_from((n, self.g.nodes[n]) for n in nodes)
@@ -245,6 +254,12 @@ class SwcFileSource(BatchProvider):
                 s = np.min(bb_x[np.logical_and((bb_x > 0), (bb_x <= 1))])
                 return Coordinate(np.floor(np.array(inside) + s * offset))
             else:
+                logging.debug(
+                    (
+                        "Could not create a node on the bounding box {} "
+                        + "given points (inside:{}, ouside:{})"
+                    ).format(bb, inside, outside)
+                )
                 return None
 
     def _read_points(self) -> None:
@@ -268,23 +283,25 @@ class SwcFileSource(BatchProvider):
         self._graph_to_kdtree()
 
     def _graph_to_kdtree(self) -> None:
-        # extract node coordinates
-        data = {
-            tuple(node["location"]): node_id for node_id, node in self.g.nodes.items()
-        }
-        # store a mapping from coordinate to node id
-        self._location_to_node_id_map = data
+        # add node_ids to coordinates to support overlapping nodes in cKDTree
+        data = [
+            tuple(node["location"]) + (node_id,)
+            for node_id, node in self.g.nodes.items()
+        ]
         # place nodes in the kdtree
-        self.data = cKDTree(np.array(list(data.keys())))
+        self.data = cKDTree(np.array(list(data)))
 
     def _query_kdtree(
         self, node: cKDTreeNode, bb: Tuple[np.ndarray, np.ndarray]
     ) -> List[np.ndarray]:
         def substitute_dim(bound: np.ndarray, sub_dim: int, sub: float):
             # replace bound[sub_dim] with sub
-            return [bound[i] if i != sub_dim else sub for i in range(3)]
+            return np.array([bound[i] if i != sub_dim else sub for i in range(3)])
 
-        if node.split_dim:
+        if node is None:
+            return []
+
+        if node.split_dim != -1:
             # recursive handling of child nodes
             greater_roi = (substitute_dim(bb[0], node.split_dim, node.split), bb[1])
             lesser_roi = (bb[0], substitute_dim(bb[1], node.split_dim, node.split))
@@ -293,6 +310,7 @@ class SwcFileSource(BatchProvider):
             )
         else:
             # handle leaf node
+            # TODO: handle bounding box properly. bb[0], and bb[1] may not be integers.
             bbox = Roi(Coordinate(bb[0]), Coordinate(bb[1] - bb[0]))
             points = [point for point in node.data_points if bbox.contains(point)]
             return points
@@ -378,6 +396,8 @@ class SwcFileSource(BatchProvider):
         self.g = nx.disjoint_union(self.g, temp_graph)
 
     def _relabel_connected_components(self, graph: nx.DiGraph, local: bool = False):
+        # define i in case there are no connected components
+        i = -1
         for i, connected_component in enumerate(nx.weakly_connected_components(graph)):
             label = i + self.connected_component_label if not local else i
             for node in connected_component:
@@ -386,5 +406,8 @@ class SwcFileSource(BatchProvider):
         if not local:
             self.connected_component_label += i + 1
 
-        return nx.convert_node_labels_to_integers(graph)
+        if not self.keep_ids:
+            graph = nx.convert_node_labels_to_integers(graph)
+
+        return graph
 
