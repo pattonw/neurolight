@@ -2,6 +2,10 @@ import numpy as np
 from gunpowder import *
 from scipy import ndimage
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class FusionAugment(BatchFilter):
     """Combine foreground of one or more volumes with another using soft mask and convex combination.
@@ -45,8 +49,18 @@ class FusionAugment(BatchFilter):
                 Use 0 to copy all objects. Can only be applied to blend mode "labels_mask".
     """
 
-    def __init__(self, raw_base, raw_add, labels_base, labels_add, raw_fused, labels_fused,
-                      blend_mode='labels_mask', blend_smoothness=3, num_blended_objects=0):
+    def __init__(
+        self,
+        raw_base,
+        raw_add,
+        labels_base,
+        labels_add,
+        raw_fused,
+        labels_fused,
+        blend_mode="labels_mask",
+        blend_smoothness=3,
+        num_blended_objects=0,
+    ):
 
         self.raw_base = raw_base
         self.raw_add = raw_add
@@ -58,8 +72,9 @@ class FusionAugment(BatchFilter):
         self.blend_smoothness = blend_smoothness
         self.num_blended_objects = num_blended_objects
 
-        assert self.blend_mode in ['intensity', 'labels_mask'], (
-                "Unknown blend mode %s." % self.blend_mode)
+        assert self.blend_mode in ["intensity", "labels_mask"], (
+            "Unknown blend mode %s." % self.blend_mode
+        )
 
     def setup(self):
 
@@ -78,61 +93,86 @@ class FusionAugment(BatchFilter):
 
     def process(self, batch, request):
 
-        # copy "base" volume to "fused"
-        raw_fused_array = batch[self.raw_base].data.copy()
-        raw_fused_spec = batch[self.raw_base].spec.copy()
-        labels_fused_array = batch[self.labels_base].data.copy()
-        labels_fused_spec = request[self.labels_fused].copy()
+        # Get base arrays
+        raw_base_array = batch[self.raw_base].data.copy()
+        labels_base_array = batch[self.labels_base].data.copy()
 
+        # Get add arrays
         raw_add_array = batch[self.raw_add].data
         labels_add_array = batch[self.labels_add].data
-        labels_add_spec = batch[self.labels_add].spec.copy()
 
-        # fuse labels, create labels_mask of "add" volume
-        labels = np.unique(labels_add_array)
-        if 0 in labels:
-            labels = np.delete(labels, 0)
+        # base labels are relabelled from 1 to num_labels + 1
+        labels_base_array = self._relabel(labels_base_array.astype(np.int32))
+        # boolean mask that keeps track of all masks. Used for finding label overlap
+        all_labels_mask = labels_base_array > 0
 
-        if 0 < self.num_blended_objects < len(labels):
-            labels = np.random.choice(labels, self.num_blended_objects)
+        # Handle add arrays
+        raw_add_array = batch[self.raw_add].data
+        labels_add_array = batch[self.labels_add].data
+        # mask to store added labels
+        add_mask = np.zeros_like(labels_base_array, dtype=bool)
+        # keep track of new label ids
+        next_label_id = np.max(labels_base_array) + 1
 
-        labels_fused_array = self._relabel(labels_fused_array.astype(np.int32))
-        labels_fused_mask = labels_fused_array > 0
-        mask = np.zeros_like(labels_fused_array, dtype=bool)
-        cnt = np.max(labels_fused_array) + 1
+        # get labels from add_array to fuse onto base
+        labels_to_fuse = np.unique(labels_add_array)
+        if 0 in labels_to_fuse:
+            labels_to_fuse = np.delete(labels_to_fuse, 0)
+        if 0 < self.num_blended_objects < len(labels_to_fuse):
+            # why do we do this? If it is to avoid overcrowding of a volume, wouldn't
+            # we need to subsample labels in the base volume as well?
+            labels_to_fuse = np.random.choice(labels_to_fuse, self.num_blended_objects)
 
-        for label in labels:
+        # labels corresponds to add_labels
+        for label in labels_to_fuse:
+            # get add mask for this label
             label_mask = labels_add_array == label
-            overlap = np.logical_and(labels_fused_mask, label_mask)
-            mask[label_mask] = True
-            labels_fused_array[label_mask] = cnt    # todo: position object randomly or with specified overlap/distance
-            labels_fused_array[overlap] = 0     # set label 0 for overlapping neurons
-            cnt += 1
+            # get overlap with base and previous add labels
+            overlap = np.logical_and(all_labels_mask, label_mask)
+            # set add mask to true where necessary
+            add_mask[label_mask] = True
+            # set label in fused array at mask to next label
+            labels_base_array[label_mask] = next_label_id
+            # todo: position object randomly or with specified overlap/distance
+            labels_base_array[overlap] = 0  # set label 0 for overlapping neurons
+            next_label_id += 1
 
         # fuse raw
-        if self.blend_mode == 'intensity':
+        if self.blend_mode == "intensity":
 
             add_mask = raw_add_array.astype(np.float32) / np.max(raw_add_array)
-            raw_fused_array = add_mask * raw_add_array + (1 - add_mask) * raw_fused_array
+            raw_fused_array = add_mask * raw_add_array + (1 - add_mask) * raw_base_array
 
-        elif self.blend_mode == 'labels_mask':
+        elif self.blend_mode == "labels_mask":
 
             # create soft mask
-            soft_mask = np.zeros_like(mask, dtype='float32')
-            ndimage.gaussian_filter(mask.astype('float32'), sigma=self.blend_smoothness, output=soft_mask,
-                                    mode='nearest')
+            soft_mask = np.zeros_like(add_mask, dtype="float32")
+            ndimage.gaussian_filter(
+                add_mask.astype("float32"),
+                sigma=self.blend_smoothness,
+                output=soft_mask,
+                mode="nearest",
+            )
             soft_mask /= np.max(soft_mask)
             soft_mask = np.clip((soft_mask * 2), 0, 1)
 
-            raw_fused_array = soft_mask * raw_add_array + raw_fused_array
+            raw_fused_array = soft_mask * raw_add_array + raw_base_array
 
         else:
             raise NotImplementedError("Unknown blend mode %s." % self.blend_mode)
 
+        # load specs
+        labels_add_spec = batch[self.labels_add].spec.copy()
+        labels_fused_spec = request[self.labels_fused].copy()
+        raw_base_spec = batch[self.raw_base].spec.copy()
+
         # return raw and labels for "fused" volume
-        batch.arrays[self.raw_fused] = Array(data=raw_fused_array.astype(raw_fused_spec.dtype), spec=raw_fused_spec)
-        batch.arrays[self.labels_fused] = Array(data=labels_fused_array.astype(labels_fused_spec.dtype),
-                                                spec=labels_add_spec).crop(labels_fused_spec.roi)
+        batch.arrays[self.raw_fused] = Array(
+            data=raw_fused_array.astype(raw_base_spec.dtype), spec=raw_base_spec
+        )
+        batch.arrays[self.labels_fused] = Array(
+            data=labels_base_array.astype(labels_fused_spec.dtype), spec=labels_add_spec
+        ).crop(labels_fused_spec.roi)
 
         return batch
 
