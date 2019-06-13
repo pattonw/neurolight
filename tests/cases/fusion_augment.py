@@ -15,11 +15,16 @@ from gunpowder import (
 )
 
 import numpy as np
-from spimagine import volshow
+
+try:
+    from spimagine import volshow
+
+    imported_volshow = True
+except Exception:
+    imported_volshow = False
 
 from typing import Dict, List, Tuple, Optional
 from pathlib import Path
-import unittest
 
 
 class FusionAugmentTest(TestWithTempFiles):
@@ -229,7 +234,6 @@ class FusionAugmentTest(TestWithTempFiles):
         diff = np.linalg.norm(fused_data - a_data - b_data)
         self.assertAlmostEqual(diff, 0)
 
-    @unittest.expectedFailure
     def test_two_disjoint_lines_softmask(self):
         LABEL_RADIUS = 3
         RAW_RADIUS = 3
@@ -348,8 +352,9 @@ class FusionAugmentTest(TestWithTempFiles):
         all_data[4, :, :, :] = b_data
 
         # Uncomment to visualize problem
-        # volshow(all_data)
-        # input("Press enter when you are done viewing the data: ")
+        if imported_volshow:
+            volshow(all_data)
+            # input("Press enter when you are done viewing the data: ")
 
         diff = np.linalg.norm(fused_data - a_data - b_data)
         self.assertAlmostEqual(diff, 0)
