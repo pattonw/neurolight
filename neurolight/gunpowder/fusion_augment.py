@@ -124,7 +124,7 @@ class FusionAugment(BatchFilter):
             soft_mask /= np.max(soft_mask)
             soft_mask = np.clip((soft_mask * 2), 0, 1)
 
-            raw_fused_array = soft_mask * raw_add_array + (1 - soft_mask) * raw_fused_array
+            raw_fused_array = soft_mask * raw_add_array + raw_fused_array
 
         else:
             raise NotImplementedError("Unknown blend mode %s." % self.blend_mode)
