@@ -49,6 +49,9 @@ class SwcPoint(Point):
             label_id=self.label_id,
         )
 
+    def __repr__(self):
+        return "({}, {})".format(self.parent_id, self.location)
+
 
 class SwcFileSource(BatchProvider):
     """Read a set of points from a comma-separated-values text file. Each line
@@ -83,15 +86,24 @@ class SwcFileSource(BatchProvider):
             node be given the id of the outside node? Default behavior is to
             always relabel nodes for each request so that the node id's lie
             in [0,n) if the request contains n nodes.
+
+        transpose:
+
+            The swc's store coordinates in xyz order as defined by the spec: 
+            "http://www.neuronland.org/NLMorphologyConverter/MorphologyFormats/SWC/Spec.html"
+            This transpose term allows you to transpose the coordinates upon
+            parsing the swc.
+
     """
 
     def __init__(
         self,
         filename: Path,
-        points: PointsKey,
+        points: List[PointsKey],
         points_spec: PointsSpec = None,
         scale: Coordinate = Coordinate([1, 1, 1]),
         keep_ids: bool = False,
+        transpose: Tuple[int] = (0, 1, 2),
     ):
 
         self.filename = filename
@@ -101,6 +113,7 @@ class SwcFileSource(BatchProvider):
         self.connected_component_label = 0
         self.keep_ids = keep_ids
         self.g = nx.DiGraph()
+        self.transpose = transpose
 
     def setup(self):
 
@@ -108,52 +121,64 @@ class SwcFileSource(BatchProvider):
 
         if self.points_spec is not None:
 
-            self.provides(self.points, self.points_spec)
+            assert len(self.points) == len(self.points_spec)
+            for point, point_spec in zip(self.points, self.points_spec):
+                self.provides(point, point_spec)
         else:
             # If you don't provide a queryset, the roi will shrink to fit the
             # points in the swc(s). This may cause problems if you expect empty point
             # sets when querying the edges of your volume
-            logging.warning("No point spec provided!")
+            logger.debug("No point spec provided!")
             min_bb = Coordinate(self.data.mins[0:3])
             # cKDTree max is inclusive
             max_bb = Coordinate(self.data.maxes[0:3]) + Coordinate([1, 1, 1])
 
             roi = Roi(min_bb, max_bb - min_bb)
 
-            self.provides(self.points, PointsSpec(roi=roi))
+            for point in self.points:
+                self.provides(point, PointsSpec(roi=roi))
 
     def provide(self, request: BatchRequest) -> Batch:
 
         timing = Timing(self)
         timing.start()
 
-        logger.debug("Swc points source got request for %s", request[self.points].roi)
-
-        # Retrieve all points in the requested region using a kdtree for speed
-        points = self._query_kdtree(
-            self.data.tree,
-            (
-                np.array(request[self.points].roi.get_begin()),
-                np.array(request[self.points].roi.get_end()),
-            ),
-        )
-
-        # Obtain subgraph that contains these points. Keep track of edges that
-        # are present in the main graph, but not the subgraph
-        sub_graph, predecessors, successors = self._points_to_graph(points)
-
-        # Handle boundary cases
-        self._handle_boundary_crossings(
-            sub_graph, predecessors, successors, request[self.points].roi
-        )
-
-        # Convert graph into Points format
-        points_data = self._graph_to_data(sub_graph)
-
-        points_spec = PointsSpec(roi=request[self.points].roi.copy())
-
         batch = Batch()
-        batch.points[self.points] = Points(points_data, points_spec)
+
+        for points_key in self.points:
+
+            if points_key not in request:
+                continue
+
+            logger.debug(
+                "Swc points source got request for %s", request[points_key].roi
+            )
+
+            # Retrieve all points in the requested region using a kdtree for speed
+            points = self._query_kdtree(
+                self.data.tree,
+                (
+                    np.array(request[points_key].roi.get_begin()),
+                    np.array(request[points_key].roi.get_end()),
+                ),
+            )
+
+            # Obtain subgraph that contains these points. Keep track of edges that
+            # are present in the main graph, but not the subgraph
+            sub_graph, predecessors, successors = self._points_to_graph(points)
+
+            # Handle boundary cases
+            self._handle_boundary_crossings(
+                sub_graph, predecessors, successors, request[points_key].roi
+            )
+
+            # Convert graph into Points format
+            points_data = self._graph_to_data(sub_graph)
+
+            points_spec = PointsSpec(roi=request[points_key].roi.copy())
+
+            batch = Batch()
+            batch.points[points_key] = Points(points_data, points_spec)
 
         timing.stop()
         batch.profiling_stats.add(timing)
@@ -352,8 +377,10 @@ class SwcFileSource(BatchProvider):
                         "point_id": int(row[0]),
                         "parent_id": int(row[6]),
                         "point_type": int(row[1]),
-                        "location": (np.array([float(x) for x in row[2:5]]) + offset)
-                        * resolution,
+                        "location": (
+                            (np.array([float(x) for x in row[2:5]]) + offset)
+                            * resolution
+                        ).take(self.transpose),
                         "radius": float(row[5]),
                     }
                 )

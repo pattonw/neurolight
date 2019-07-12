@@ -1,4 +1,4 @@
-from .provider_test import TestWithTempFiles
+from .swc_base_test import SWCBaseTest
 from neurolight.gunpowder.swc_file_source import SwcFileSource, SwcPoint
 from neurolight.gunpowder.fusion_augment import FusionAugment
 from neurolight.gunpowder.rasterize_skeleton import RasterizeSkeleton
@@ -15,105 +15,21 @@ from gunpowder import (
 )
 
 import numpy as np
-from spimagine import volshow
+
+try:
+    from spimagine import volshow
+
+    imported_volshow = True
+except Exception:
+    imported_volshow = False
 
 from typing import Dict, List, Tuple, Optional
 from pathlib import Path
-import unittest
 
 
-class FusionAugmentTest(TestWithTempFiles):
+class FusionAugmentTest(SWCBaseTest):
     def setUp(self):
         super(FusionAugmentTest, self).setUp()
-
-    def _write_swc(
-        self,
-        file_path: Path,
-        points: List[SwcPoint],
-        constants: Dict[str, Coordinate] = {},
-    ):
-        swc = ""
-        for key, shape in constants.items():
-            swc += "# {} {}\n".format(key.upper(), " ".join([str(x) for x in shape]))
-        swc += "\n".join(
-            [
-                "{} {} {} {} {} {} {}".format(
-                    p.point_id, p.point_type, *p.location, p.radius, p.parent_id
-                )
-                for p in points
-            ]
-        )
-        with file_path.open("w") as f:
-            f.write(swc)
-
-    def _get_points(
-        self, inside: np.ndarray, slope: np.ndarray, bb: Roi
-    ) -> List[SwcPoint]:
-        slope = slope / max(slope)
-        shape = np.array(bb.get_shape())
-        outside_down = inside - shape * slope
-        outside_up = inside + shape * slope
-        down_intercept = self._resample_relative(inside, outside_down, bb)
-        up_intercept = self._resample_relative(inside, outside_up, bb)
-
-        points = [
-            # line
-            SwcPoint(0, 0, down_intercept, 0, 0),
-            SwcPoint(1, 0, up_intercept, 0, 0),
-        ]
-        return points
-
-    def _resample_relative(
-        self, inside: np.ndarray, outside: np.ndarray, bb: Roi
-    ) -> Optional[np.ndarray]:
-        offset = outside - inside
-        # get_end() is not contained in the Roi. We want the point to be included,
-        # thus we decriment by 1. Technically we only need to decriment by 0.000001,
-        # but that is not possible using Roi's and Coordinates. Should we change this?
-        bb_x = np.asarray(
-            [
-                (np.asarray(bb.get_begin()) - inside) / offset,
-                (np.asarray(bb.get_end() - Coordinate([1, 1, 1])) - inside) / offset,
-            ]
-        )
-
-        if np.sum(np.logical_and((bb_x > 0), (bb_x <= 1))) > 0:
-            s = np.min(bb_x[np.logical_and((bb_x > 0), (bb_x <= 1))])
-            return np.array(inside) + s * offset
-        else:
-            return None
-
-    def _get_line_pair(
-        self,
-        roi: Roi = Roi(Coordinate([0, 0, 0]), Coordinate([10, 10, 10])),
-        dist: float = 3,
-    ) -> Tuple[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]:
-        bb_size = np.array(roi.get_shape()) - Coordinate([1, 1, 1])
-        pad = min(dist / np.array(bb_size))
-        center = np.random.random((3,)).clip(pad, 1 - pad) * (bb_size)
-        slope = np.random.random((3,))
-        slope /= np.linalg.norm(slope)
-
-        intercepts = (center + slope * dist / 2, center - slope * dist / 2)
-        slope_a = np.random.random(3)
-        slope_a -= np.dot(slope_a, slope) * slope
-        slope_a /= np.linalg.norm(slope_a)
-        slope_b = np.cross(slope_a, slope)
-
-        return (intercepts, (slope_a, slope_b))
-
-    def test_get_line_pair(self):
-        dist = 3
-        intercepts, slopes = self._get_line_pair(
-            roi=Roi(Coordinate([0, 0, 0]), Coordinate([10, 10, 10])), dist=dist
-        )
-        a, b = intercepts
-
-        # check that the line connecting the closest points is perp to both slopes
-        self.assertAlmostEqual(np.linalg.norm(np.dot(b - a, slopes[0])), 0)
-        self.assertAlmostEqual(np.linalg.norm(np.dot(b - a, slopes[1])), 0)
-        # check the intercepts are the expected distance
-        self.assertAlmostEqual(np.linalg.norm(intercepts[1] - intercepts[0]) - dist, 0)
 
     def test_two_disjoin_lines_intensity(self):
         # This is worryingly slow for such a small volume (256**3) and only 2
@@ -229,7 +145,6 @@ class FusionAugmentTest(TestWithTempFiles):
         diff = np.linalg.norm(fused_data - a_data - b_data)
         self.assertAlmostEqual(diff, 0)
 
-    @unittest.expectedFailure
     def test_two_disjoint_lines_softmask(self):
         LABEL_RADIUS = 3
         RAW_RADIUS = 3
@@ -348,6 +263,7 @@ class FusionAugmentTest(TestWithTempFiles):
         all_data[4, :, :, :] = b_data
 
         # Uncomment to visualize problem
+        # if imported_volshow:
         # volshow(all_data)
         # input("Press enter when you are done viewing the data: ")
 

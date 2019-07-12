@@ -1,0 +1,4 @@
+flake8==3.7.7
+black==19.3b0
+spimagine==0.2.6
+tifffile==2019.7.2
