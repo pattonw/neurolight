@@ -86,6 +86,14 @@ class SwcFileSource(BatchProvider):
             node be given the id of the outside node? Default behavior is to
             always relabel nodes for each request so that the node id's lie
             in [0,n) if the request contains n nodes.
+
+        transpose:
+
+            The swc's store coordinates in xyz order as defined by the spec: 
+            "http://www.neuronland.org/NLMorphologyConverter/MorphologyFormats/SWC/Spec.html"
+            This transpose term allows you to transpose the coordinates upon
+            parsing the swc.
+
     """
 
     def __init__(
@@ -95,6 +103,7 @@ class SwcFileSource(BatchProvider):
         points_spec: PointsSpec = None,
         scale: Coordinate = Coordinate([1, 1, 1]),
         keep_ids: bool = False,
+        transpose: Tuple[int] = (0, 1, 2),
     ):
 
         self.filename = filename
@@ -104,6 +113,7 @@ class SwcFileSource(BatchProvider):
         self.connected_component_label = 0
         self.keep_ids = keep_ids
         self.g = nx.DiGraph()
+        self.transpose = transpose
 
     def setup(self):
 
@@ -367,8 +377,10 @@ class SwcFileSource(BatchProvider):
                         "point_id": int(row[0]),
                         "parent_id": int(row[6]),
                         "point_type": int(row[1]),
-                        "location": (np.array([float(x) for x in row[2:5]]) + offset)
-                        * resolution,
+                        "location": (
+                            (np.array([float(x) for x in row[2:5]]) + offset)
+                            * resolution
+                        ).take(self.transpose),
                         "radius": float(row[5]),
                     }
                 )
