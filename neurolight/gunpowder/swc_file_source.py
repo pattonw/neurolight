@@ -380,6 +380,7 @@ class SwcFileSource(BatchProvider):
                         "location": (
                             (np.array([float(x) for x in row[2:5]]) + offset)
                             * resolution
+                            * self.scale
                         ).take(self.transpose),
                         "radius": float(row[5]),
                     }
