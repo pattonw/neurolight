@@ -56,16 +56,20 @@ class GetNeuronPair(BatchFilter):
         self,
         point_source: PointsKey,
         array_source: ArrayKey,
+        label_source: ArrayKey,
         points: Tuple[PointsKey, PointsKey],
         arrays: Tuple[ArrayKey, ArrayKey],
+        labels: Tuple[ArrayKey, ArrayKey],
         seperate_by: float = 1.0,
         shift_attempts: int = 3,
         request_attempts: int = 3,
     ):
         self.point_source = point_source
         self.array_source = array_source
+        self.label_source = label_source
         self.points = points
         self.arrays = arrays
+        self.labels = labels
         self.seperate_by = seperate_by
 
         self.shift_attempts = shift_attempts
@@ -75,9 +79,12 @@ class GetNeuronPair(BatchFilter):
         """
         Provide the two copies of the upstream points and images
         """
-        for point_key, array_key in zip(self.points, self.arrays):
+        for point_key, array_key, label_key in zip(
+            self.points, self.arrays, self.labels
+        ):
             self.provides(point_key, self.spec[self.point_source])
             self.provides(array_key, self.spec[self.array_source])
+            self.provides(label_key, self.spec[self.label_source])
 
     def prepare(self, request):
         """
@@ -106,6 +113,15 @@ class GetNeuronPair(BatchFilter):
             )
         else:
             request[self.array_source].roi = arrays_roi
+
+        if self.label_source not in request:
+            request.add(
+                self.label_source,
+                arrays_roi.get_shape(),
+                voxel_size=self.spec[self.label_source].voxel_size,
+            )
+        else:
+            request[self.label_source].roi = arrays_roi
 
     def provide(self, request):
         """
@@ -166,8 +182,10 @@ class GetNeuronPair(BatchFilter):
     def process(self, batch_base, batch_add, request):
         points_base = batch_base.points[self.point_source]
         array_base = batch_base.arrays[self.array_source]
+        label_base = batch_base.arrays[self.label_source]
         points_add = batch_add.points[self.point_source]
         array_add = batch_add.arrays[self.array_source]
+        label_add = batch_add.arrays[self.label_source]
 
         # there should be a better way of doing this. If distances are small,
         # the rounding may make a big difference. Rounding (1.3, 1.3, 1.3) would
@@ -180,28 +198,37 @@ class GetNeuronPair(BatchFilter):
         random_direction = Coordinate(np.round(random_direction))
 
         # Shift and crop points and array
-        points_base, array_base = self._shift_and_crop(
+        points_base, array_base, label_base = self._shift_and_crop(
             points_base,
             array_base,
+            label_base,
             direction=random_direction,
             output_roi=request[self.points[0]].roi,
         )
-        points_add, array_add = self._shift_and_crop(
+        points_add, array_add, label_add = self._shift_and_crop(
             points_add,
             array_add,
+            label_add,
             direction=-random_direction,
             output_roi=request[self.points[0]].roi,
         )
 
         batch_base.points[self.points[0]] = points_base
         batch_base.arrays[self.arrays[0]] = array_base
+        batch_base.arrays[self.labels[0]] = label_base
         batch_base.points[self.points[1]] = points_add
         batch_base.arrays[self.arrays[1]] = array_add
+        batch_base.arrays[self.labels[1]] = label_add
 
         return batch_base
 
     def _shift_and_crop(
-        self, points: Points, array: Array, direction: Coordinate, output_roi: Roi
+        self,
+        points: Points,
+        array: Array,
+        labels: Array,
+        direction: Coordinate,
+        output_roi: Roi,
     ):
         # Shift and crop the array
         center = array.spec.roi.get_offset() + array.spec.roi.get_shape() // 2
@@ -209,6 +236,10 @@ class GetNeuronPair(BatchFilter):
         new_offset = new_center - output_roi.get_shape() // 2
         new_roi = Roi(new_offset, output_roi.get_shape())
         array = array.crop(new_roi)
+        array.spec.roi = output_roi
+
+        # Shift and crop the labels
+        labels = labels.crop(new_roi)
         array.spec.roi = output_roi
 
         new_points_data = {}
@@ -258,7 +289,7 @@ class GetNeuronPair(BatchFilter):
         }
         points = Points(new_points_data, new_points_spec)
         points.spec.roi = output_roi
-        return points, array
+        return points, array, labels
 
     def _get_growth(self):
         """
