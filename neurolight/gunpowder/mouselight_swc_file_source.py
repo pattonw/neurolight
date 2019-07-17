@@ -92,7 +92,7 @@ class MouselightSwcFileSource(SwcFileSource):
                         "point_type": int(row[1]),
                         "location": (
                             (np.array([float(x) for x in row[2:5]]) + offset - origin)
-                            / spacing
+                            / spacing * self.scale
                         ).take(self.transpose),
                         "radius": float(row[5]),
                     }

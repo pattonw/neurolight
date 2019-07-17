@@ -46,9 +46,6 @@ class EnsureCentered(SWCBaseTest):
         img_a = ArrayKey("VOLUME_A")
         img_b = ArrayKey("VOLUME_B")
 
-        fused_points = PointsKey("OUT_POINTS")
-        fused_image = ArrayKey("OUT_ARRAY")
-
         # Get points from test swc
         swc_file_source = SwcFileSource(
             path, [swc_source], [PointsSpec(roi=Roi((-10, -10, -10), (31, 31, 31)))]
@@ -84,8 +81,6 @@ class EnsureCentered(SWCBaseTest):
             points=(points_a, points_b),
             arrays=(img_a, img_b),
             seperate_by=4,
-            shift_attempts=10,
-            request_attempts=10,
         )
 
         request = BatchRequest()

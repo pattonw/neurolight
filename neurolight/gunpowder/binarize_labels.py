@@ -3,7 +3,6 @@ from gunpowder import *
 
 
 class BinarizeLabels(BatchFilter):
-
     def __init__(self, labels, labels_binary):
 
         self.labels = labels
@@ -16,6 +15,7 @@ class BinarizeLabels(BatchFilter):
         self.provides(self.labels_binary, spec)
 
     def prepare(self, request):
+        request[self.labels] = request[self.labels_binary]
         pass
 
     def process(self, batch, request):
@@ -24,7 +24,7 @@ class BinarizeLabels(BatchFilter):
         spec.dtype = np.uint8
 
         binarized = Array(
-            data=(batch[self.labels].data > 0).astype(np.uint8),
-            spec=spec)
+            data=(batch[self.labels].data > 0).astype(np.uint8), spec=spec
+        )
 
         batch[self.labels_binary] = binarized
