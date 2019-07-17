@@ -179,6 +179,10 @@ class SwcFileSource(BatchProvider):
             batch = Batch()
             batch.points[points_key] = Points(points_data, points_spec)
 
+            logger.debug(
+                "Swc points source provided {} points".format(len(points_data))
+            )
+
         timing.stop()
         batch.profiling_stats.add(timing)
 
@@ -312,6 +316,7 @@ class SwcFileSource(BatchProvider):
             tuple(node["location"]) + (node_id,)
             for node_id, node in self.g.nodes.items()
         ]
+        logger.debug("placing {} nodes in the kdtree".format(len(data)))
         # place nodes in the kdtree
         self.data = cKDTree(np.array(list(data)))
 
@@ -329,12 +334,12 @@ class SwcFileSource(BatchProvider):
 
         if node.split_dim != -1:
             # recursive handling of child nodes
-            if node.split > bb[1][node.split_dim-1]:
+            if node.split_dim < 3 and node.split > bb[1][node.split_dim]:
                 return self._query_kdtree(node.lesser, bb)
-            elif node.split < bb[0][node.split_dim-1]:
+            elif node.split_dim < 3 and node.split < bb[0][node.split_dim]:
                 return self._query_kdtree(node.greater, bb)
             else:
-                greater_roi = (substitute_dim(bb[0], node.split_dim-1, node.split), bb[1])
+                greater_roi = (substitute_dim(bb[0], node.split_dim, node.split), bb[1])
                 lesser_roi = (bb[0], substitute_dim(bb[1], node.split_dim, node.split))
                 return self._query_kdtree(node.greater, greater_roi) + self._query_kdtree(
                     node.lesser, lesser_roi
@@ -403,7 +408,7 @@ class SwcFileSource(BatchProvider):
                     [float(x) for x in line.lower().split(key)[1].split()]
                 )
             except Exception as e:
-                print(line)
+                logger.debug("Invalid line: {}".format(line))
                 raise e
             return value
         else:
@@ -411,6 +416,7 @@ class SwcFileSource(BatchProvider):
 
     def _add_points_to_source(self, points: List[Dict]):
         # add points to a temporary graph
+        logger.debug("adding {} nodes to graph".format(len(points)))
         temp_graph = nx.DiGraph()
         for point in points:
             temp_graph.add_node(
@@ -432,6 +438,7 @@ class SwcFileSource(BatchProvider):
 
         # merge with the main graph
         self.g = nx.disjoint_union(self.g, temp_graph)
+        logger.debug("graph has {} nodes".format(len(self.g.nodes)))
 
     def _relabel_connected_components(self, graph: nx.DiGraph, local: bool = False):
         # define i in case there are no connected components

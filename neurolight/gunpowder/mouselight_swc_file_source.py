@@ -93,9 +93,10 @@ class MouselightSwcFileSource(SwcFileSource):
                         "point_type": int(row[1]),
                         "location": (
                             (np.array([float(x) for x in row[2:5]]) + offset - origin)
-                            / spacing * self.scale
-                        ).take(self.transpose),
+                            / spacing
+                        ).take(self.transpose) * self.scale,
                         "radius": float(row[5]),
                     }
                 )
+            logger.debug("mouselight swc file source found {} points for file {}".format(len(points), filename.name))
             self._add_points_to_source(points)
