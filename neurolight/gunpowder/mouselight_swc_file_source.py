@@ -47,8 +47,9 @@ class MouselightSwcFileSource(SwcFileSource):
     """
 
     def __init__(self, *args, **kwargs):
-        super().__init__(args, kwargs)
-        self.transform_file = Path(kwargs["transform_file"])
+        transform_file = kwargs.pop("transform_file")
+        super().__init__(*args, **kwargs)
+        self.transform_file = Path(transform_file)
 
     def _parse_swc(self, filename: Path):
         """Read one point per line. If ``ndims`` is 0, all values in one line

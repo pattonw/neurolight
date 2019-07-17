@@ -105,7 +105,6 @@ class SwcFileSource(BatchProvider):
         keep_ids: bool = False,
         transpose: Tuple[int] = (0, 1, 2),
     ):
-
         self.filename = filename
         self.points = points
         self.points_spec = points_spec
@@ -323,21 +322,28 @@ class SwcFileSource(BatchProvider):
             # replace bound[sub_dim] with sub
             return np.array([bound[i] if i != sub_dim else sub for i in range(3)])
 
+        logging.debug("Querying bounds: {}".format(bb))
+
         if node is None:
             return []
 
         if node.split_dim != -1:
             # recursive handling of child nodes
-            greater_roi = (substitute_dim(bb[0], node.split_dim, node.split), bb[1])
-            lesser_roi = (bb[0], substitute_dim(bb[1], node.split_dim, node.split))
-            return self._query_kdtree(node.greater, greater_roi) + self._query_kdtree(
-                node.lesser, lesser_roi
-            )
+            if node.split > bb[1][node.split_dim-1]:
+                return self._query_kdtree(node.lesser, bb)
+            elif node.split < bb[0][node.split_dim-1]:
+                return self._query_kdtree(node.greater, bb)
+            else:
+                greater_roi = (substitute_dim(bb[0], node.split_dim-1, node.split), bb[1])
+                lesser_roi = (bb[0], substitute_dim(bb[1], node.split_dim, node.split))
+                return self._query_kdtree(node.greater, greater_roi) + self._query_kdtree(
+                    node.lesser, lesser_roi
+                )
         else:
             # handle leaf node
-            # TODO: handle bounding box properly. bb[0], and bb[1] may not be integers.
             bbox = Roi(Coordinate(bb[0]), Coordinate(bb[1] - bb[0]))
             points = [point for point in node.data_points if bbox.contains(point)]
+            logging.debug("Found points: {} in roi: {}".format(points, bbox))
             return points
 
     def _parse_swc(self, filename: Path):
@@ -392,9 +398,13 @@ class SwcFileSource(BatchProvider):
     ) -> np.ndarray:
         # assumes header variables are seperated by spaces
         if key in line.lower():
-            value = np.array(
-                [float(x) for x in line.lower().split(key)[1].strip().split(" ")]
-            )
+            try:
+                value = np.array(
+                    [float(x) for x in line.lower().split(key)[1].split()]
+                )
+            except Exception as e:
+                print(line)
+                raise e
             return value
         else:
             return default
