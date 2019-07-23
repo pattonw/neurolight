@@ -58,7 +58,7 @@ class MouselightSwcFileSource(SwcFileSource):
         used.
         """
         # initialize file specific variables
-        points = []
+        points = {}
         header = True
         offset = np.array([0, 0, 0])
 
@@ -86,17 +86,18 @@ class MouselightSwcFileSource(SwcFileSource):
                     raise ValueError("SWC has a malformed line: {}".format(line))
 
                 # extract data from row (point_id, type, x, y, z, radius, parent_id)
-                points.append(
-                    {
-                        "point_id": int(row[0]),
-                        "parent_id": int(row[6]),
-                        "point_type": int(row[1]),
-                        "location": (
+                points[int(row[0])] = SwcPoint(
+                    point_id=int(row[0]),
+                    parent_id=int(row[6]),
+                    point_type=int(row[1]),
+                    location=np.array(
+                        (
                             (np.array([float(x) for x in row[2:5]]) + offset - origin)
                             / spacing
-                        ).take(self.transpose) * self.scale,
-                        "radius": float(row[5]),
-                    }
+                        ).take(self.transpose)
+                        * self.scale,
+                        dtype=int,
+                    ),
+                    radius=float(row[5]),
                 )
-            logger.debug("mouselight swc file source found {} points for file {}".format(len(points), filename.name))
             self._add_points_to_source(points)

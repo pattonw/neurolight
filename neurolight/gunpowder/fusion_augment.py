@@ -1,6 +1,11 @@
 import numpy as np
-from gunpowder import Array, BatchFilter
+from gunpowder import Array, Points, BatchFilter, PointsSpec
 from scipy import ndimage
+import networkx as nx
+from .swc_file_source import SwcPoint
+from typing import Dict
+
+from .swc_nx_graph import points_to_graph, graph_to_swc_points
 
 import logging
 
@@ -70,8 +75,11 @@ class FusionAugment(BatchFilter):
         raw_add,
         labels_base,
         labels_add,
+        points_base,
+        points_add,
         raw_fused,
         labels_fused,
+        points_fused,
         blend_mode="labels_mask",
         blend_smoothness=3,
         num_blended_objects=0,
@@ -81,8 +89,11 @@ class FusionAugment(BatchFilter):
         self.raw_add = raw_add
         self.labels_base = labels_base
         self.labels_add = labels_add
+        self.points_base = points_base
+        self.points_add = points_add
         self.raw_fused = raw_fused
         self.labels_fused = labels_fused
+        self.points_fused = points_fused
         self.blend_mode = blend_mode
         self.blend_smoothness = blend_smoothness
         self.num_blended_objects = num_blended_objects
@@ -95,9 +106,9 @@ class FusionAugment(BatchFilter):
 
         self.provides(self.raw_fused, self.spec[self.raw_base].copy())
         self.provides(self.labels_fused, self.spec[self.labels_base].copy())
+        self.provides(self.points_fused, self.spec[self.points_base].copy())
 
     def prepare(self, request):
-
         # add "base" and "add" volume to request
         request[self.raw_base] = request[self.raw_fused].copy()
         request[self.raw_add] = request[self.raw_fused].copy()
@@ -105,6 +116,10 @@ class FusionAugment(BatchFilter):
         # enlarge roi for labels to be the same size as the raw data for mask generation
         request[self.labels_base] = request[self.raw_fused].copy()
         request[self.labels_add] = request[self.raw_fused].copy()
+
+        # enlarge roi for points to be the same as the raw data
+        request[self.points_base] = PointsSpec(roi=request[self.raw_fused].roi)
+        request[self.points_add] = PointsSpec(roi=request[self.raw_fused].roi)
 
     def process(self, batch, request):
 
@@ -125,12 +140,15 @@ class FusionAugment(BatchFilter):
             if label == 0:
                 continue
             label_mask = labels_add_array == label
-            add_mask[label_mask] = True
-            fused_labels_array[label_mask] = next_label_id
-            next_label_id += 1
+
             # handle overlap
             overlap = np.logical_and(fused_labels_array, label_mask)
             fused_labels_array[overlap] = -1
+
+            # assign new label
+            add_mask[label_mask] = True
+            fused_labels_array[label_mask] = next_label_id
+            next_label_id += 1
 
         # fuse raw
         if self.blend_mode == "intensity":
@@ -150,7 +168,7 @@ class FusionAugment(BatchFilter):
             soft_mask /= np.max(soft_mask)
             soft_mask = np.clip((soft_mask * 2), 0, 1)
 
-            raw_fused_array = soft_mask * raw_add_array + raw_base_array
+            raw_fused_array = soft_mask * raw_add_array + (1-soft_mask) * raw_base_array
 
         else:
             raise NotImplementedError("Unknown blend mode %s." % self.blend_mode)
@@ -159,14 +177,25 @@ class FusionAugment(BatchFilter):
         labels_add_spec = batch[self.labels_add].spec.copy()
         labels_fused_spec = request[self.labels_fused].copy()
         raw_base_spec = batch[self.raw_base].spec.copy()
+        points_base_spec = batch[self.points_base].spec.copy()
 
         # return raw and labels for "fused" volume
-        batch.arrays[self.raw_fused] = Array(
-            data=raw_fused_array.astype(raw_base_spec.dtype), spec=raw_base_spec
-        )
+        # raw_fused_array.astype(raw_base_spec.dtype)
+        batch.arrays[self.raw_fused] = Array(data=raw_fused_array, spec=raw_base_spec)
         batch.arrays[self.labels_fused] = Array(
-            data=labels_base_array.astype(labels_fused_spec.dtype), spec=labels_add_spec
+            data=fused_labels_array.astype(labels_fused_spec.dtype),
+            spec=labels_add_spec,
         ).crop(labels_fused_spec.roi)
+
+        # merge points:
+        g1, g2 = (
+            points_to_graph(batch[self.points_base].data),
+            points_to_graph(batch[self.points_add].data),
+        )
+        g = nx.disjoint_union(g1, g2)
+        batch.points[self.points_fused] = Points(
+            data=graph_to_swc_points(g), spec=points_base_spec
+        )
 
         return batch
 

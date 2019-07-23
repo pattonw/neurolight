@@ -1,4 +1,4 @@
-from gunpowder.points import Point, Points, PointsKey
+from gunpowder.points import Points, PointsKey
 from gunpowder.nodes.batch_provider import BatchProvider
 from gunpowder.batch_request import BatchRequest
 from gunpowder.coordinate import Coordinate
@@ -12,45 +12,19 @@ from scipy.spatial.ckdtree import cKDTree, cKDTreeNode
 import networkx as nx
 
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple
 import logging
 
+from .swc_nx_graph import (
+    subgraph_from_points,
+    points_to_graph,
+    graph_to_swc_points,
+    relabel_connected_components,
+    crop_graph,
+)
+from .swc_point import SwcPoint
+
 logger = logging.getLogger(__name__)
-
-
-class SwcPoint(Point):
-    def __init__(
-        self,
-        point_id: int,
-        point_type: int,
-        location: np.ndarray,
-        radius: int,
-        parent_id: int,
-        label_id: int = None,
-    ):
-
-        super(SwcPoint, self).__init__(location)
-
-        self.thaw()
-        self.point_id = point_id
-        self.parent_id = parent_id
-        self.label_id = label_id
-        self.radius = radius
-        self.point_type = point_type
-        self.freeze()
-
-    def copy(self):
-        return SwcPoint(
-            point_id=self.point_id,
-            point_type=self.point_type,
-            location=self.location,
-            radius=self.radius,
-            parent_id=self.parent_id,
-            label_id=self.label_id,
-        )
-
-    def __repr__(self):
-        return "({}, {})".format(self.parent_id, self.location)
 
 
 class SwcFileSource(BatchProvider):
@@ -150,7 +124,9 @@ class SwcFileSource(BatchProvider):
                 continue
 
             logger.debug(
-                "Swc points source got request for %s", request[points_key].roi
+                "Swc points source got request for {}: {}".format(
+                    points_key, request[points_key].roi
+                )
             )
 
             # Retrieve all points in the requested region using a kdtree for speed
@@ -164,15 +140,15 @@ class SwcFileSource(BatchProvider):
 
             # Obtain subgraph that contains these points. Keep track of edges that
             # are present in the main graph, but not the subgraph
-            sub_graph, predecessors, successors = self._points_to_graph(points)
-
-            # Handle boundary cases
-            self._handle_boundary_crossings(
-                sub_graph, predecessors, successors, request[points_key].roi
+            sub_graph = subgraph_from_points(
+                self.g, [point[3] for point in points], with_neighbors=True
             )
 
+            # Handle boundary cases
+            sub_graph = crop_graph(sub_graph, request[points_key].roi)
+
             # Convert graph into Points format
-            points_data = self._graph_to_data(sub_graph)
+            points_data = graph_to_swc_points(sub_graph)
 
             points_spec = PointsSpec(roi=request[points_key].roi.copy())
 
@@ -180,115 +156,15 @@ class SwcFileSource(BatchProvider):
             batch.points[points_key] = Points(points_data, points_spec)
 
             logger.debug(
-                "Swc points source provided {} points".format(len(points_data))
+                "Swc points source provided {} points for roi: {}".format(
+                    len(points_data), request[points_key].roi
+                )
             )
 
         timing.stop()
         batch.profiling_stats.add(timing)
 
         return batch
-
-    def _points_to_graph(
-        self, points: List[np.ndarray]
-    ) -> Tuple[nx.DiGraph, List[Tuple[int, int]], List[Tuple[int, int]]]:
-        nodes = set([p[3] for p in points])
-
-        sub_g = nx.DiGraph()
-        sub_g.add_nodes_from((n, self.g.nodes[n]) for n in nodes)
-        edges = []
-        crossing_successors = []
-        crossing_predecessors = []
-        for n in nodes:
-            for successor in self.g.successors(n):
-                if successor in nodes:
-                    edges.append((n, successor))
-                else:
-                    crossing_successors.append((n, successor))
-            for predecessor in self.g.predecessors(n):
-                if predecessor not in nodes:
-                    crossing_predecessors.append((predecessor, n))
-
-        sub_g.add_edges_from(edges)
-        sub_g.graph.update(self.g.graph)
-
-        return (sub_g, crossing_predecessors, crossing_successors)
-
-    def _graph_to_data(self, graph: nx.DiGraph) -> Dict[int, SwcPoint]:
-        graph = self._relabel_connected_components(graph, False)
-        return {
-            node: SwcPoint(
-                point_id=node,
-                parent_id=list(graph._pred[node].keys())[0]
-                if len(graph._pred[node]) == 1
-                else -1,
-                **graph.nodes[node]
-            )
-            for node in graph.nodes
-        }
-
-    def _handle_boundary_crossings(
-        self,
-        graph: nx.DiGraph,
-        predecessors: List[Tuple[int, int]],
-        successors: List[Tuple[int, int]],
-        roi: Roi,
-    ):
-        for pre, post in predecessors:
-            out_parent = self.g.nodes[pre]
-            current = self.g.nodes[post]
-            loc = self._resample_relative(
-                current["location"], out_parent["location"], roi
-            )
-            if loc is not None:
-                graph.add_node(
-                    pre,
-                    point_type=out_parent["point_type"],
-                    location=loc,
-                    radius=out_parent["radius"],
-                )
-                graph.add_edge(pre, post)
-        for pre, post in successors:
-            current = self.g.nodes[pre]
-            out_child = self.g.nodes[post]
-            loc = self._resample_relative(
-                current["location"], out_child["location"], roi
-            )
-            if loc is not None:
-                graph.add_node(
-                    post,
-                    point_type=out_child["point_type"],
-                    location=loc,
-                    radius=out_child["radius"],
-                )
-                graph.add_edge(pre, post)
-
-    def _resample_relative(
-        self, inside: np.ndarray, outside: np.ndarray, bb: Roi
-    ) -> Optional[np.ndarray]:
-        offset = outside - inside
-        with np.errstate(divide="ignore", invalid="ignore"):
-            # bb_crossings will be 0 if inside is on the bb, 1 if outside is on the bb
-            bb_x = np.asarray(
-                [
-                    (np.asarray(bb.get_begin()) - inside) / offset,
-                    (np.asarray(bb.get_end() - Coordinate([1, 1, 1])) - inside)
-                    / offset,
-                ]
-            )
-
-            if np.sum(np.logical_and((bb_x > 0), (bb_x <= 1))) > 0:
-                # all values of bb_x between 0, 1 represent a crossing of a bounding plane
-                # the minimum of which is the (normalized) distance to the closest bounding plane
-                s = np.min(bb_x[np.logical_and((bb_x > 0), (bb_x <= 1))])
-                return Coordinate(np.floor(np.array(inside) + s * offset))
-            else:
-                logging.debug(
-                    (
-                        "Could not create a node on the bounding box {} "
-                        + "given points (inside:{}, ouside:{})"
-                    ).format(bb, inside, outside)
-                )
-                return None
 
     def _read_points(self) -> None:
         filepath = Path(self.filename)
@@ -341,9 +217,9 @@ class SwcFileSource(BatchProvider):
             else:
                 greater_roi = (substitute_dim(bb[0], node.split_dim, node.split), bb[1])
                 lesser_roi = (bb[0], substitute_dim(bb[1], node.split_dim, node.split))
-                return self._query_kdtree(node.greater, greater_roi) + self._query_kdtree(
-                    node.lesser, lesser_roi
-                )
+                return self._query_kdtree(
+                    node.greater, greater_roi
+                ) + self._query_kdtree(node.lesser, lesser_roi)
         else:
             # handle leaf node
             bbox = Roi(Coordinate(bb[0]), Coordinate(bb[1] - bb[0]))
@@ -358,7 +234,7 @@ class SwcFileSource(BatchProvider):
         used.
         """
         # initialize file specific variables
-        points = []
+        points = {}
         header = True
         offset = np.array([0, 0, 0])
         resolution = np.array([1, 1, 1])
@@ -383,18 +259,19 @@ class SwcFileSource(BatchProvider):
                     raise ValueError("SWC has a malformed line: {}".format(line))
 
                 # extract data from row (point_id, type, x, y, z, radius, parent_id)
-                points.append(
-                    {
-                        "point_id": int(row[0]),
-                        "parent_id": int(row[6]),
-                        "point_type": int(row[1]),
-                        "location": (
+                points[int(row[0])] = SwcPoint(
+                    point_id=int(row[0]),
+                    parent_id=int(row[6]),
+                    point_type=int(row[1]),
+                    location=np.array(
+                        (
                             (np.array([float(x) for x in row[2:5]]) + offset)
                             * resolution
                             * self.scale
                         ).take(self.transpose),
-                        "radius": float(row[5]),
-                    }
+                        dtype=int,
+                    ),
+                    radius=float(row[5]),
                 )
             self._add_points_to_source(points)
 
@@ -404,9 +281,7 @@ class SwcFileSource(BatchProvider):
         # assumes header variables are seperated by spaces
         if key in line.lower():
             try:
-                value = np.array(
-                    [float(x) for x in line.lower().split(key)[1].split()]
-                )
+                value = np.array([float(x) for x in line.lower().split(key)[1].split()])
             except Exception as e:
                 logger.debug("Invalid line: {}".format(line))
                 raise e
@@ -414,45 +289,18 @@ class SwcFileSource(BatchProvider):
         else:
             return default
 
-    def _add_points_to_source(self, points: List[Dict]):
+    def _add_points_to_source(self, points: Dict[int, SwcPoint]):
         # add points to a temporary graph
         logger.debug("adding {} nodes to graph".format(len(points)))
-        temp_graph = nx.DiGraph()
-        for point in points:
-            temp_graph.add_node(
-                point["point_id"],
-                point_type=point["point_type"],
-                location=point["location"],
-                radius=point["radius"],
-            )
-            if point["parent_id"] != -1 and point["parent_id"] != point["point_id"]:
-                # new connected component
-                temp_graph.add_edge(point["parent_id"], point["point_id"])
-
-        # check if the temporary graph is tree like
-        if not nx.is_directed_acyclic_graph(temp_graph):
-            raise ValueError("SWC skeleton is malformed: it contains a cycle.")
+        temp_graph = points_to_graph(points)
 
         # assign unique label id's to each connected component
-        temp_graph = self._relabel_connected_components(temp_graph)
+        temp_graph, num_components_added = relabel_connected_components(
+            temp_graph, self.connected_component_label
+        )
+        self.connected_component_label += num_components_added
 
         # merge with the main graph
         self.g = nx.disjoint_union(self.g, temp_graph)
         logger.debug("graph has {} nodes".format(len(self.g.nodes)))
-
-    def _relabel_connected_components(self, graph: nx.DiGraph, local: bool = False):
-        # define i in case there are no connected components
-        i = -1
-        for i, connected_component in enumerate(nx.weakly_connected_components(graph)):
-            label = i + self.connected_component_label if not local else i
-            for node in connected_component:
-                graph.nodes[node]["label_id"] = label
-
-        if not local:
-            self.connected_component_label += i + 1
-
-        if not self.keep_ids:
-            graph = nx.convert_node_labels_to_integers(graph)
-
-        return graph
 
