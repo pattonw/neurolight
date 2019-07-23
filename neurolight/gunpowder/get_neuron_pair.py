@@ -14,9 +14,17 @@ from gunpowder import (
 )
 from neurolight.gunpowder.swc_file_source import SwcPoint
 from gunpowder.profiling import Timing
-from typing import List, Optional, Tuple, Union
-import networkx as nx
+from typing import Tuple
 import logging
+
+from .swc_nx_graph import (
+    points_to_graph,
+    crop_graph,
+    shift_graph,
+    graph_to_swc_points,
+    relabel_connected_components,
+    interpolate_points,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,37 +99,53 @@ class GetNeuronPair(BatchFilter):
         The request from upstream not ask for the points or arrays provided
         by this node. Instead it should just add a request to the point_source
         and image_source which will then be retrieved twice in provide.
+
+
+        TODO:
+        How to handle strange cases:
+        Requesting one or two out of the 3 pieces (raw, labels, points)
+        Requesting varying sized rois
+        Requestiong multiple copies (points in output_size and input_size)
         """
         growth = self._get_growth()
-        points_roi = request[self.points[0]].roi
-        points_roi = points_roi.grow(growth, growth)
-        arrays_roi = request[self.arrays[0]].roi
-        arrays_roi = arrays_roi.grow(growth, growth)
+
+        upstream_request = BatchRequest()
 
         # prepare requests
         # if point_key is not requested request it
+        points_roi = request[self.points[0]].roi
+        points_roi = points_roi.grow(growth, growth)
         if self.point_source not in request:
-            request.add(self.point_source, points_roi.get_shape())
+            upstream_request.add(self.point_source, points_roi.get_shape())
         else:
-            request[self.point_source].roi = points_roi
+            upstream_request[self.point_source] = request[self.point_source]
+            upstream_request[self.point_source].roi = points_roi
 
+        arrays_roi = request[self.arrays[0]].roi
+        arrays_roi = arrays_roi.grow(growth, growth)
         if self.array_source not in request:
-            request.add(
+            upstream_request.add(
                 self.array_source,
                 arrays_roi.get_shape(),
                 voxel_size=self.spec[self.array_source].voxel_size,
             )
         else:
-            request[self.array_source].roi = arrays_roi
+            upstream_request[self.array_source] = request[self.array_source]
+            upstream_request[self.array_source].roi = arrays_roi
 
+        labels_roi = request[self.labels[0]].roi
+        labels_roi = labels_roi.grow(growth, growth)
         if self.label_source not in request:
-            request.add(
+            upstream_request.add(
                 self.label_source,
-                arrays_roi.get_shape(),
+                labels_roi.get_shape(),
                 voxel_size=self.spec[self.label_source].voxel_size,
             )
         else:
-            request[self.label_source].roi = arrays_roi
+            upstream_request[self.label_source] = request[self.label_source]
+            upstream_request[self.label_source].roi = labels_roi
+
+        return upstream_request
 
     def provide(self, request):
         """
@@ -140,7 +164,7 @@ class GetNeuronPair(BatchFilter):
         timing_prepare.start()
 
         if not skip:
-            self.prepare(upstream_request)
+            upstream_request = self.prepare(upstream_request)
             self.remove_provided(upstream_request)
 
         request_attempts = 0
@@ -192,10 +216,14 @@ class GetNeuronPair(BatchFilter):
         # give a euclidean distance of ~1.7 instead of ~2.25
         # A better solution might be to do a distance transform on an array with a centered
         # dot and then find all potential moves that have a distance equal to delta +- 0.5
+        voxel_size = np.array(self.spec[self.array_source].voxel_size)
         random_direction = np.random.randn(3)
-        random_direction /= np.linalg.norm(random_direction)
-        random_direction *= (self.seperate_by + 1) // 2
-        random_direction = Coordinate(np.round(random_direction))
+        random_direction /= np.linalg.norm(random_direction)  # unit vector
+        random_direction *= self.seperate_by  # physical units
+        random_direction = (
+            (np.round(random_direction / voxel_size) + 1) // 2
+        ) * voxel_size  # physical units rounded to nearest voxel size
+        random_direction = Coordinate(random_direction)
 
         # Shift and crop points and array
         points_base, array_base, label_base = self._shift_and_crop(
@@ -203,14 +231,16 @@ class GetNeuronPair(BatchFilter):
             array_base,
             label_base,
             direction=random_direction,
-            output_roi=request[self.points[0]].roi,
+            request=request,
+            k=0,
         )
         points_add, array_add, label_add = self._shift_and_crop(
             points_add,
             array_add,
             label_add,
             direction=-random_direction,
-            output_roi=request[self.points[0]].roi,
+            request=request,
+            k=1,
         )
 
         batch_base.points[self.points[0]] = points_base
@@ -228,67 +258,51 @@ class GetNeuronPair(BatchFilter):
         array: Array,
         labels: Array,
         direction: Coordinate,
-        output_roi: Roi,
+        request: BatchRequest,
+        k: int,
     ):
+
         # Shift and crop the array
+        output_roi = request[self.arrays[k]].roi
         center = array.spec.roi.get_offset() + array.spec.roi.get_shape() // 2
         new_center = center + direction
         new_offset = new_center - output_roi.get_shape() // 2
         new_roi = Roi(new_offset, output_roi.get_shape())
+
         array = array.crop(new_roi)
         array.spec.roi = output_roi
 
         # Shift and crop the labels
+        output_roi = request[self.labels[k]].roi
+        center = labels.spec.roi.get_offset() + labels.spec.roi.get_shape() // 2
+        new_center = center + direction
+        new_offset = new_center - output_roi.get_shape() // 2
+        new_roi = Roi(new_offset, output_roi.get_shape())
+
         labels = labels.crop(new_roi)
-        array.spec.roi = output_roi
+        labels.spec.roi = output_roi
 
-        new_points_data = {}
-        new_points_spec = points.spec
-        new_points_spec.roi = new_roi
-        new_points_graph = nx.DiGraph()
+        # Shift and crop the points
+        output_roi = request[self.points[k]].roi
+        center = points.spec.roi.get_offset() + points.spec.roi.get_shape() // 2
+        new_center = center + direction
+        new_offset = new_center - output_roi.get_shape() // 2
+        new_roi = Roi(new_offset, output_roi.get_shape())
 
-        # shift points and add them to a graph
-        for point_id, point in points.data.items():
-            if new_roi.contains(point.location):
-                new_point = point.copy()
-                new_point.location = (
-                    point.location - new_offset + output_roi.get_begin()
-                )
-                new_points_graph.add_node(
-                    new_point.point_id,
-                    point_id=new_point.point_id,
-                    parent_id=new_point.parent_id,
-                    location=new_point.location,
-                    label_id=new_point.label_id,
-                    radius=new_point.radius,
-                    point_type=new_point.point_type,
-                )
-                if points.data.get(new_point.parent_id, False) and new_roi.contains(
-                    points.data[new_point.parent_id].location
-                ):
-                    new_points_graph.add_edge(new_point.parent_id, new_point.point_id)
+        print("original roi: {}".format(points.spec.roi))
+        print("new roi: {}".format(new_roi))
+        print("output roi: {}".format(output_roi))
 
-        # relabel connected components
-        for i, connected_component in enumerate(
-            nx.weakly_connected_components(new_points_graph)
-        ):
-            for node in connected_component:
-                new_points_graph.nodes[node]["label_id"] = i
+        g = points_to_graph(points.data)
+        g = crop_graph(g, new_roi)
+        g = shift_graph(g, -np.array(new_offset, dtype=float))
+        g, _ = relabel_connected_components(g)
 
-        # store new graph data in points
-        new_points_data = {
-            point_id: SwcPoint(
-                point_id=point["point_id"],
-                point_type=point["point_type"],
-                location=point["location"],
-                radius=point["radius"],
-                parent_id=point["parent_id"],
-                label_id=point["label_id"],
-            )
-            for point_id, point in new_points_graph.nodes.items()
-        }
-        points = Points(new_points_data, new_points_spec)
+        new_points_data = graph_to_swc_points(g)
+
+        points = Points(new_points_data, points.spec.copy())
         points.spec.roi = output_roi
+
         return points, array, labels
 
     def _get_growth(self):
@@ -306,30 +320,47 @@ class GetNeuronPair(BatchFilter):
         voxel_shift = (distance + voxel_size - 1) // voxel_size
         # expand positive and negative sides enough to contain any desired shift
         half_shift = (voxel_shift + 1) // 2
-        return Coordinate(half_shift * 2)
+        return Coordinate(half_shift * 2 * voxel_size)
 
     def _valid_pair(self, batch):
         """
         Simply checks for every pair of points, is the distance between them
         greater than the desired seperation criterion.
         """
-        points_base = batch[self.points[0]]
-        points_add = batch[self.points[1]]
-        min_dist = self.seperate_by + 2
-        for point_id_base, point_base in points_base.data.items():
-            for point_id_add, point_add in points_add.data.items():
+        voxel_size = np.array(self.spec[self.array_source].voxel_size)
+        points_base = batch[self.points[0]].data
+        points_add = batch[self.points[1]].data
+
+        # add interpolated points:
+        base_graph = points_to_graph(points_base)
+        base_graph = interpolate_points(base_graph)
+        add_graph = points_to_graph(points_add)
+        add_graph = interpolate_points(add_graph)
+
+        min_dist = self.seperate_by + 2 * voxel_size.mean()
+        for point_id_base, point_base in base_graph.nodes.items():
+            for point_id_add, point_add in add_graph.nodes.items():
                 min_dist = min(
-                    np.linalg.norm(point_base.location - point_add.location), min_dist
+                    np.linalg.norm(point_base["location"] - point_add["location"]),
+                    min_dist,
                 )
-        if self.seperate_by - 1 <= min_dist <= self.seperate_by + 1:
-            print(("Got a min distance of {}").format(min_dist))
+        if (
+            self.seperate_by - voxel_size.max()
+            <= min_dist
+            <= self.seperate_by + voxel_size.max()
+        ):
+            logger.debug(("Got a min distance of {}").format(min_dist))
             return True
         else:
-            print(
+            logger.debug(
                 (
                     "expected a minimum distance between the two neurons"
                     + "to be in the range ({}, {}), however saw a min distance of {}"
-                ).format(self.seperate_by - 1, self.seperate_by + 1, min_dist)
+                ).format(
+                    self.seperate_by - voxel_size.max() * 2,
+                    self.seperate_by + voxel_size.max() * 2,
+                    min_dist,
+                )
             )
             return False
 
