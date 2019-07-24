@@ -53,7 +53,7 @@ def points_to_graph(points: Dict[int, SwcPoint]) -> nx.DiGraph:
     return g
 
 
-def relabel_connected_components(graph: nx.DiGraph, offset=0):
+def relabel_connected_components(graph: nx.DiGraph, offset=0, keep_ids: bool = False):
     temp_g = copy.deepcopy(graph)
     i = -1
     for i, connected_component in enumerate(nx.weakly_connected_components(temp_g)):
@@ -61,12 +61,15 @@ def relabel_connected_components(graph: nx.DiGraph, offset=0):
         for node in connected_component:
             temp_g.nodes[node]["label_id"] = label
 
-    temp_g = nx.convert_node_labels_to_integers(temp_g)
+    if not keep_ids:
+        temp_g = nx.convert_node_labels_to_integers(temp_g)
     return temp_g, i
 
 
-def graph_to_swc_points(graph: nx.DiGraph) -> Dict[int, SwcPoint]:
-    graph, _ = relabel_connected_components(graph)
+def graph_to_swc_points(
+    graph: nx.DiGraph, keep_ids: bool = False
+) -> Dict[int, SwcPoint]:
+    graph, _ = relabel_connected_components(graph, keep_ids=keep_ids)
     return {
         node: SwcPoint(
             point_id=node,
@@ -110,10 +113,10 @@ def crop_graph(graph: nx.DiGraph, roi: Roi, keep_ids=False):
     zero = Coordinate((0, 0, 0))
     # shrink bottom by 1, since roi already doesn't allow points at the top
     allowable_points = copy.deepcopy(roi)
-    allowable_points = allowable_points.grow(-one, zero)
+    allowable_points = allowable_points.grow(zero, zero)
     # bbox on which points may lie
     bbox = copy.deepcopy(roi)
-    bbox = bbox.grow(-one, -one)
+    bbox = bbox.grow(zero, -one)
 
     to_remove = set()
     predecessors = set()  # u if u is out

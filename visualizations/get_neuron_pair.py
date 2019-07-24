@@ -37,14 +37,19 @@ class EnsureCentered(SWCBaseTest):
         self._write_swc(path, self._toy_swc_points())
 
         # read arrays
-        swc_source = PointsKey("SWC")
-        img_source = ArrayKey("IMG")
-        imgswc = PointsKey("IMGSWC")
-        label = ArrayKey("LABEL")
+        swc_source = PointsKey("SWC_SOURCE")
+        labels_source = ArrayKey("LABELS_SOURCE")
+        img_source = ArrayKey("IMG_SOURCE")
+        img_swc = PointsKey("IMG_SWC")
+        label_swc = PointsKey("LABEL_SWC")
+        imgs = ArrayKey("IMGS")
+        labels = ArrayKey("LABELS")
         points_a = PointsKey("SKELETON_A")
         points_b = PointsKey("SKELETON_B")
         img_a = ArrayKey("VOLUME_A")
         img_b = ArrayKey("VOLUME_B")
+        labels_a = ArrayKey("LABELS_A")
+        labels_b = ArrayKey("LABELS_B")
 
         # Get points from test swc
         swc_file_source = SwcFileSource(
@@ -53,10 +58,10 @@ class EnsureCentered(SWCBaseTest):
         # Create an artificial image source by rasterizing the points
         image_source = (
             SwcFileSource(
-                path, [imgswc], [PointsSpec(roi=Roi((-10, -10, -10), (31, 31, 31)))]
+                path, [img_swc], [PointsSpec(roi=Roi((-10, -10, -10), (31, 31, 31)))]
             )
             + RasterizeSkeleton(
-                points=imgswc,
+                points=img_swc,
                 array=img_source,
                 array_spec=ArraySpec(
                     interpolatable=True,
@@ -64,33 +69,54 @@ class EnsureCentered(SWCBaseTest):
                     voxel_size=Coordinate((1, 1, 1)),
                 ),
             )
-            + BinarizeLabels(labels=img_source, labels_binary=label)
-            + GrowLabels(array=label, radius=0)
+            + BinarizeLabels(labels=img_source, labels_binary=imgs)
+            + GrowLabels(array=imgs, radius=0)
+        )
+        # Create an artificial label source by rasterizing the points
+        label_source = (
+            SwcFileSource(
+                path, [label_swc], [PointsSpec(roi=Roi((-10, -10, -10), (31, 31, 31)))]
+            )
+            + RasterizeSkeleton(
+                points=label_swc,
+                array=labels_source,
+                array_spec=ArraySpec(
+                    interpolatable=True,
+                    dtype=np.uint32,
+                    voxel_size=Coordinate((1, 1, 1)),
+                ),
+            )
+            + BinarizeLabels(labels=labels_source, labels_binary=labels)
+            + GrowLabels(array=labels, radius=1)
         )
 
         skeleton = tuple()
         skeleton += (
-            (swc_file_source, image_source)
+            (swc_file_source, image_source, label_source)
             + MergeProvider()
             + RandomLocation(ensure_nonempty=swc_source, ensure_centered=True)
         )
 
         pipeline = skeleton + GetNeuronPair(
             point_source=swc_source,
-            array_source=label,
+            array_source=imgs,
+            label_source=labels,
             points=(points_a, points_b),
             arrays=(img_a, img_b),
-            seperate_by=4,
+            labels=(labels_a, labels_b),
+            seperate_by=2,
         )
 
         request = BatchRequest()
 
-        data_shape = 9
+        data_shape = 5
 
         request.add(points_a, Coordinate((data_shape, data_shape, data_shape)))
         request.add(points_b, Coordinate((data_shape, data_shape, data_shape)))
         request.add(img_a, Coordinate((data_shape, data_shape, data_shape)))
         request.add(img_b, Coordinate((data_shape, data_shape, data_shape)))
+        request.add(labels_a, Coordinate((data_shape, data_shape, data_shape)))
+        request.add(labels_b, Coordinate((data_shape, data_shape, data_shape)))
 
         with build(pipeline):
             batch = pipeline.request_batch(request)
@@ -116,5 +142,4 @@ class EnsureCentered(SWCBaseTest):
                 data[(1,) + tuple(int(x) + 1 for x in point.location)] == 1
             ), "data at {} is not 1".format(point.location)
 
-        volshow(data)
-        input("wait")
+        # volshow(data)

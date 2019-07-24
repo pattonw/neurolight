@@ -16,13 +16,6 @@ from gunpowder import (
 
 import numpy as np
 
-try:
-    from spimagine import volshow
-
-    imported_volshow = True
-except Exception:
-    imported_volshow = False
-
 from typing import Dict, List, Tuple, Optional
 from pathlib import Path
 
@@ -31,12 +24,11 @@ class FusionAugmentTest(SWCBaseTest):
     def setUp(self):
         super(FusionAugmentTest, self).setUp()
 
-    def test_two_disjoin_lines_intensity(self):
-        # This is worryingly slow for such a small volume (256**3) and only 2
-        # straight lines for skeletons.
+    def test_two_disjoint_lines_intensity(self):
         LABEL_RADIUS = 3
         RAW_RADIUS = 3
-        BLEND_SMOOTHNESS = 3
+        # exagerated to show problem
+        BLEND_SMOOTHNESS = 10
 
         bb = Roi(Coordinate([0, 0, 0]), ([256, 256, 256]))
         voxel_size = Coordinate([1, 1, 1])
@@ -52,6 +44,7 @@ class FusionAugmentTest(SWCBaseTest):
         # create swc sources
         fused = ArrayKey("FUSED")
         fused_labels = ArrayKey("FUSED_LABELS")
+        fused_swc = PointsKey("FUSED_SWC")
         swc_key_names = ("SWC_A", "SWC_B")
         labels_key_names = ("LABELS_A", "LABELS_B")
         raw_key_names = ("RAW_A", "RAW_B")
@@ -64,6 +57,7 @@ class FusionAugmentTest(SWCBaseTest):
         request = BatchRequest()
         request.add(fused, bb.get_shape())
         request.add(fused_labels, bb.get_shape())
+        request.add(fused_swc, bb.get_shape())
         request.add(labels_keys[0], bb.get_shape())
         request.add(labels_keys[1], bb.get_shape())
         request.add(raw_keys[0], bb.get_shape())
@@ -75,7 +69,7 @@ class FusionAugmentTest(SWCBaseTest):
         data_sources_a = tuple()
         data_sources_a = (
             data_sources_a
-            + SwcFileSource(swc_paths[0], swc_keys[0], PointsSpec(roi=bb))
+            + SwcFileSource(swc_paths[0], [swc_keys[0]], [PointsSpec(roi=bb)])
             + RasterizeSkeleton(
                 points=swc_keys[0],
                 array=labels_keys[0],
@@ -98,7 +92,7 @@ class FusionAugmentTest(SWCBaseTest):
         data_sources_b = tuple()
         data_sources_b = (
             data_sources_b
-            + SwcFileSource(swc_paths[1], swc_keys[1], PointsSpec(roi=bb))
+            + SwcFileSource(swc_paths[1], [swc_keys[1]], [PointsSpec(roi=bb)])
             + RasterizeSkeleton(
                 points=swc_keys[1],
                 array=labels_keys[1],
@@ -123,8 +117,11 @@ class FusionAugmentTest(SWCBaseTest):
             raw_keys[1],
             labels_keys[0],
             labels_keys[1],
+            swc_keys[0],
+            swc_keys[1],
             fused,
             fused_labels,
+            fused_swc,
             blend_mode="intensity",
             blend_smoothness=BLEND_SMOOTHNESS,
             num_blended_objects=0,
@@ -165,6 +162,7 @@ class FusionAugmentTest(SWCBaseTest):
         # create swc sources
         fused = ArrayKey("FUSED")
         fused_labels = ArrayKey("FUSED_LABELS")
+        fused_swc = PointsKey("FUSED_SWC")
         swc_key_names = ("SWC_A", "SWC_B")
         labels_key_names = ("LABELS_A", "LABELS_B")
         raw_key_names = ("RAW_A", "RAW_B")
@@ -177,6 +175,7 @@ class FusionAugmentTest(SWCBaseTest):
         request = BatchRequest()
         request.add(fused, bb.get_shape())
         request.add(fused_labels, bb.get_shape())
+        request.add(fused_swc, bb.get_shape())
         request.add(labels_keys[0], bb.get_shape())
         request.add(labels_keys[1], bb.get_shape())
         request.add(raw_keys[0], bb.get_shape())
@@ -188,7 +187,7 @@ class FusionAugmentTest(SWCBaseTest):
         data_sources_a = tuple()
         data_sources_a = (
             data_sources_a
-            + SwcFileSource(swc_paths[0], swc_keys[0], PointsSpec(roi=bb))
+            + SwcFileSource(swc_paths[0], [swc_keys[0]], [PointsSpec(roi=bb)])
             + RasterizeSkeleton(
                 points=swc_keys[0],
                 array=labels_keys[0],
@@ -211,7 +210,7 @@ class FusionAugmentTest(SWCBaseTest):
         data_sources_b = tuple()
         data_sources_b = (
             data_sources_b
-            + SwcFileSource(swc_paths[1], swc_keys[1], PointsSpec(roi=bb))
+            + SwcFileSource(swc_paths[1], [swc_keys[1]], [PointsSpec(roi=bb)])
             + RasterizeSkeleton(
                 points=swc_keys[1],
                 array=labels_keys[1],
@@ -236,8 +235,11 @@ class FusionAugmentTest(SWCBaseTest):
             raw_keys[1],
             labels_keys[0],
             labels_keys[1],
+            swc_keys[0],
+            swc_keys[1],
             fused,
             fused_labels,
+            fused_swc,
             blend_mode="labels_mask",
             blend_smoothness=BLEND_SMOOTHNESS,
             num_blended_objects=0,
@@ -261,11 +263,6 @@ class FusionAugmentTest(SWCBaseTest):
         all_data[2, :, :, :] = fused_data - a_data - b_data
         all_data[3, :, :, :] = a_data
         all_data[4, :, :, :] = b_data
-
-        # Uncomment to visualize problem
-        # if imported_volshow:
-        # volshow(all_data)
-        # input("Press enter when you are done viewing the data: ")
 
         diff = np.linalg.norm(fused_data - a_data - b_data)
         self.assertAlmostEqual(diff, 0)

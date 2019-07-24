@@ -285,13 +285,14 @@ class GetNeuronPair(BatchFilter):
         # Shift and crop the points
         output_roi = request[self.points[k]].roi
         center = points.spec.roi.get_offset() + points.spec.roi.get_shape() // 2
+
         new_center = center + direction
         new_offset = new_center - output_roi.get_shape() // 2
         new_roi = Roi(new_offset, output_roi.get_shape())
 
         g = points_to_graph(points.data)
         g = crop_graph(g, new_roi)
-        g = shift_graph(g, -np.array(new_offset, dtype=float))
+        g = shift_graph(g, np.array(output_roi.get_begin() - new_offset, dtype=float))
         g, _ = relabel_connected_components(g)
 
         new_points_data = graph_to_swc_points(g)

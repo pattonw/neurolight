@@ -34,7 +34,7 @@ class EnsureCentered(SWCBaseTest):
         swc = PointsKey("SWC")
         img = ArrayKey("IMG")
         pipeline = (
-            SwcFileSource(path, swc, PointsSpec(roi=Roi((0, 0, 0), (11, 11, 11))))
+            SwcFileSource(path, [swc], [PointsSpec(roi=Roi((0, 0, 0), (11, 11, 11)))])
             + RandomLocation(ensure_nonempty=swc, ensure_centered=True)
             + RasterizeSkeleton(
                 points=swc,

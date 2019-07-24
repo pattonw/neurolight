@@ -48,7 +48,7 @@ class GrowLabelsTest(SWCBaseTest):
         data_source = tuple()
         data_source = (
             data_source
-            + SwcFileSource(swc_path, swc_key, PointsSpec(roi=bb))
+            + SwcFileSource(swc_path, [swc_key], [PointsSpec(roi=bb)])
             + RasterizeSkeleton(
                 points=swc_key,
                 array=labels_key,

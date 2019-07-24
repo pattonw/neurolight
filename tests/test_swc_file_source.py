@@ -21,7 +21,7 @@ class SwcTest(SWCBaseTest):
 
         # read arrays
         swc = PointsKey("SWC")
-        source = SwcFileSource(path, swc)
+        source = SwcFileSource(path, [swc])
 
         with build(source):
             batch = source.request_batch(
@@ -41,7 +41,7 @@ class SwcTest(SWCBaseTest):
 
         # read arrays
         swc = PointsKey("SWC")
-        source = SwcFileSource(path, swc)
+        source = SwcFileSource(path, [swc])
 
         with build(source):
             batch = source.request_batch(
@@ -81,7 +81,7 @@ class SwcTest(SWCBaseTest):
 
         # read arrays
         swc = PointsKey("SWC")
-        source = SwcFileSource(path, swc)
+        source = SwcFileSource(path, [swc])
 
         with build(source):
             batch = source.request_batch(
@@ -130,7 +130,7 @@ class SwcTest(SWCBaseTest):
 
         # read arrays
         swc = PointsKey("SWC")
-        source = SwcFileSource(path, swc, keep_ids=True)
+        source = SwcFileSource(path, [swc], keep_ids=True)
 
         with build(source):
             batch = source.request_batch(
@@ -179,7 +179,7 @@ class SwcTest(SWCBaseTest):
 
         # read arrays
         swc = PointsKey("SWC")
-        source = SwcFileSource(path, swc)
+        source = SwcFileSource(path, [swc])
 
         with build(source):
             batch = source.request_batch(
@@ -223,7 +223,7 @@ class SwcTest(SWCBaseTest):
 
         # read arrays
         swc = PointsKey("SWC")
-        source = SwcFileSource(path, swc)
+        source = SwcFileSource(path, [swc])
 
         with build(source):
             batch = source.request_batch(

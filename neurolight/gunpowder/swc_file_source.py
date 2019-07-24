@@ -74,7 +74,7 @@ class SwcFileSource(BatchProvider):
         self,
         filename: Path,
         points: List[PointsKey],
-        points_spec: PointsSpec = None,
+        points_spec: List[PointsSpec] = None,
         scale: Coordinate = Coordinate([1, 1, 1]),
         keep_ids: bool = False,
         transpose: Tuple[int] = (0, 1, 2),
@@ -141,7 +141,7 @@ class SwcFileSource(BatchProvider):
             sub_graph = crop_graph(sub_graph, request[points_key].roi)
 
             # Convert graph into Points format
-            points_data = graph_to_swc_points(sub_graph)
+            points_data = graph_to_swc_points(sub_graph, keep_ids=self.keep_ids)
 
             points_spec = PointsSpec(roi=request[points_key].roi.copy())
 
