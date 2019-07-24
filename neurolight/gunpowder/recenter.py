@@ -73,9 +73,9 @@ class Recenter(BatchFilter):
                 < np.linalg.norm(center - Coordinate(point.location))
                 else Coordinate(point.location)
             )
-        print(center)
+        logger.debug("center: {}".format(center))
         direction = closest - center
-        print(direction)
+        logger.debug("direction: {}".format(direction))
 
         # Shift and crop points and array
         points, array = self._shift_and_crop(

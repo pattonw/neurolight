@@ -114,7 +114,6 @@ def crop_graph(graph: nx.DiGraph, roi: Roi, keep_ids=False):
     # bbox on which points may lie
     bbox = copy.deepcopy(roi)
     bbox = bbox.grow(-one, -one)
-    print("roi: {}\nallowable_points: {}\nbbox: {}".format(roi, allowable_points, bbox))
 
     to_remove = set()
     predecessors = set()  # u if u is out
@@ -200,12 +199,6 @@ def line_box_intercept(
                 )
             return new_location
         else:
-            print(
-                "bb contains {}: {}".format(inside, allowable_points.contains(inside))
-            )
-            print(
-                "bb contains {}: {}".format(outside, allowable_points.contains(outside))
-            )
             raise ValueError(
                 (
                     "Could not create a node on the bounding box {} "

@@ -289,10 +289,6 @@ class GetNeuronPair(BatchFilter):
         new_offset = new_center - output_roi.get_shape() // 2
         new_roi = Roi(new_offset, output_roi.get_shape())
 
-        print("original roi: {}".format(points.spec.roi))
-        print("new roi: {}".format(new_roi))
-        print("output roi: {}".format(output_roi))
-
         g = points_to_graph(points.data)
         g = crop_graph(g, new_roi)
         g = shift_graph(g, -np.array(new_offset, dtype=float))

@@ -98,13 +98,12 @@ class SwcFileSource(BatchProvider):
             for point, point_spec in zip(self.points, self.points_spec):
                 self.provides(point, point_spec)
         else:
-            # If you don't provide a queryset, the roi will shrink to fit the
-            # points in the swc(s). This may cause problems if you expect empty point
-            # sets when querying the edges of your volume
             logger.debug("No point spec provided!")
-            min_bb = Coordinate(self.data.mins[0:3])
+            # min_bb = Coordinate(self.data.mins[0:3])
+            min_bb = Coordinate([None, None, None])
             # cKDTree max is inclusive
-            max_bb = Coordinate(self.data.maxes[0:3]) + Coordinate([1, 1, 1])
+            # max_bb = Coordinate(self.data.maxes[0:3]) + Coordinate([1, 1, 1])
+            max_bb = Coordinate([None, None, None])
 
             roi = Roi(min_bb, max_bb - min_bb)
 
@@ -122,12 +121,6 @@ class SwcFileSource(BatchProvider):
 
             if points_key not in request:
                 continue
-
-            logger.debug(
-                "Swc points source got request for {}: {}".format(
-                    points_key, request[points_key].roi
-                )
-            )
 
             # Retrieve all points in the requested region using a kdtree for speed
             points = self._query_kdtree(
@@ -203,8 +196,6 @@ class SwcFileSource(BatchProvider):
             # replace bound[sub_dim] with sub
             return np.array([bound[i] if i != sub_dim else sub for i in range(3)])
 
-        logging.debug("Querying bounds: {}".format(bb))
-
         if node is None:
             return []
 
@@ -224,7 +215,6 @@ class SwcFileSource(BatchProvider):
             # handle leaf node
             bbox = Roi(Coordinate(bb[0]), Coordinate(bb[1] - bb[0]))
             points = [point for point in node.data_points if bbox.contains(point)]
-            logging.debug("Found points: {} in roi: {}".format(points, bbox))
             return points
 
     def _parse_swc(self, filename: Path):

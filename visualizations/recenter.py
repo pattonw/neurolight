@@ -115,9 +115,6 @@ class EnsureCentered(SWCBaseTest):
 
         data = np.array((data_a, data_b, data_c))
 
-        print(batch[points_a].data)
-        print(batch[points_b].data)
-
         for _, point in batch[points_a].data.items():
             assert (
                 data[(0,) + tuple(int(x) + 1 for x in point.location)] == 1
