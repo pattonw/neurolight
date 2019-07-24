@@ -191,13 +191,12 @@ def line_box_intercept(
             # all values of bb_x between 0, 1 represent a crossing of a bounding plane
             # the minimum of which is the (normalized) distance to the closest bounding plane
             s = np.min(bb_x[np.logical_and((bb_x > 0), (bb_x <= 1))])
-            new_location = np.array(inside + s * offset, dtype=int)
+            new_location = np.round(inside + s * offset).astype(int)
             if not allowable_points.contains(new_location):
-                new_location -= 1
-                assert bb.contains(
-                    new_location
-                ), "New location {} between {}, {} still not contained in {}".format(
-                    new_location, inside, outside, bb
+                raise Exception(
+                    "New location {} between {}, {} not contained in {}".format(
+                        new_location, inside, outside, allowable_points
+                    )
                 )
             return new_location
         else:
