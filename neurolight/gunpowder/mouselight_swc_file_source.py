@@ -97,7 +97,7 @@ class MouselightSwcFileSource(SwcFileSource):
                             / spacing
                         ).take(self.transpose)
                         * self.scale,
-                        dtype=int,
+                        dtype=float,
                     ),
                     radius=float(row[5]),
                 )

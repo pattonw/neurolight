@@ -142,8 +142,8 @@ class SwcFileSourceTest(SWCBaseTest):
         path = []
         while current is not None:
             path.append(tuple(temp_g.nodes[current]["location"]))
-            predecessors = list(temp_g._pred[current].keys())
-            current = predecessors[0] if len(predecessors) == 1 else None
+            successors = list(temp_g._succ[current].keys())
+            current = successors[0] if len(successors) == 1 else None
 
         self.assertCountEqual(path, expected_path)
 
@@ -192,7 +192,7 @@ class SwcFileSourceTest(SWCBaseTest):
             self._write_swc(
                 path / "{}.swc".format(i),
                 self._toy_swc_points().graph,
-                {"offset": np.array([0, 0, 0])},
+                {"offset": np.array([0, i, 0])},
             )
 
         # read arrays
@@ -201,7 +201,7 @@ class SwcFileSourceTest(SWCBaseTest):
 
         with build(source):
             batch = source.request_batch(
-                BatchRequest({swc: PointsSpec(roi=Roi((0, 0, 5), (11, 11, 1)))})
+                BatchRequest({swc: PointsSpec(roi=Roi((0, 0, 5), (11, 13, 1)))})
             )
 
         temp_g = batch.points[swc].graph

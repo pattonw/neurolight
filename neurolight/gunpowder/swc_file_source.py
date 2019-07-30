@@ -12,14 +12,11 @@ from gunpowder import SpatialGraph
 
 import numpy as np
 from scipy.spatial.ckdtree import cKDTree, cKDTreeNode
-import networkx as nx
 
 from pathlib import Path
 from typing import List, Dict, Tuple
 import logging
 import copy
-
-from .swc_nx_graph import relabel_connected_components, crop_graph
 
 logger = logging.getLogger(__name__)
 
@@ -267,9 +264,9 @@ class SwcFileSource(BatchProvider):
                     raise ValueError("SWC has a malformed line: {}".format(line))
 
                 # extract data from row (point_id, type, x, y, z, radius, parent_id)
-                assert (
-                    int(row[0]) not in points
-                ), "Multiple points with id {} found!".format(int(row[0]))
+                assert int(row[0]) not in points, "Duplicate point {} found!".format(
+                    int(row[0])
+                )
                 points[int(row[0])] = GraphPoint(
                     point_type=int(row[1]),
                     location=np.array(
@@ -277,12 +274,12 @@ class SwcFileSource(BatchProvider):
                             (np.array([float(x) for x in row[2:5]]) + offset)
                             * resolution
                             * self.scale
-                        ).take(self.transpose),
-                        dtype=int,
+                        ).take(self.transpose)
                     ),
                     radius=float(row[5]),
                 )
                 v, u = int(row[0]), int(row[6])
+                assert (u, v) not in edges, "Duplicate edge {} found!".format((u, v))
                 if u != v and u is not None and v is not None and u >= 0 and v >= 0:
                     edges.add((u, v))
             self._add_points_to_source(points, edges)
