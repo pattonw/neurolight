@@ -11,20 +11,11 @@ from gunpowder import (
     Coordinate,
     PointsSpec,
     PointsKey,
+    GraphPoint as SwcPoint,
 )
-from neurolight.gunpowder.swc_file_source import SwcPoint
 from gunpowder.profiling import Timing
 from typing import Tuple
 import logging
-
-from .swc_nx_graph import (
-    points_to_graph,
-    crop_graph,
-    shift_graph,
-    graph_to_swc_points,
-    relabel_connected_components,
-    interpolate_points,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -285,19 +276,11 @@ class GetNeuronPair(BatchFilter):
         # Shift and crop the points
         output_roi = request[self.points[k]].roi
         center = points.spec.roi.get_offset() + points.spec.roi.get_shape() // 2
-
         new_center = center + direction
         new_offset = new_center - output_roi.get_shape() // 2
         new_roi = Roi(new_offset, output_roi.get_shape())
 
-        g = points_to_graph(points.data)
-        g = crop_graph(g, new_roi)
-        g = shift_graph(g, np.array(output_roi.get_begin() - new_offset, dtype=float))
-        g, _ = relabel_connected_components(g)
-
-        new_points_data = graph_to_swc_points(g)
-
-        points = Points(new_points_data, points.spec.copy())
+        points = points.crop(new_roi)
         points.spec.roi = output_roi
 
         return points, array, labels
@@ -329,10 +312,8 @@ class GetNeuronPair(BatchFilter):
         points_add = batch[self.points[1]].data
 
         # add interpolated points:
-        base_graph = points_to_graph(points_base)
-        base_graph = interpolate_points(base_graph)
-        add_graph = points_to_graph(points_add)
-        add_graph = interpolate_points(add_graph)
+        base_graph = points_base.graph
+        add_graph = points_add.graph
 
         min_dist = self.seperate_by + 2 * voxel_size.mean()
         for point_id_base, point_base in base_graph.nodes.items():

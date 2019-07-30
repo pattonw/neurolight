@@ -22,9 +22,9 @@ from gunpowder import (
 import numpy as np
 
 
-class EnsureCentered(SWCBaseTest):
+class GetNeuronPairTest(SWCBaseTest):
     def setUp(self):
-        super(EnsureCentered, self).setUp()
+        super(GetNeuronPairTest, self).setUp()
 
     def _toy_swc(self, file_path: Path):
         raise NotImplementedError
@@ -33,7 +33,7 @@ class EnsureCentered(SWCBaseTest):
         path = Path(self.path_to("test_swc_source.swc"))
 
         # write test swc
-        self._write_swc(path, self._toy_swc_points())
+        self._write_swc(path, self._toy_swc_points().graph)
 
         # read arrays
         swc_source = PointsKey("SWC_SOURCE")

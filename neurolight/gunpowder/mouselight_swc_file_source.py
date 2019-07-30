@@ -6,8 +6,9 @@ from gunpowder.roi import Roi
 from gunpowder.points_spec import PointsSpec
 from gunpowder.batch import Batch
 from gunpowder.profiling import Timing
+from gunpowder.graph_points import GraphPoint as SwcPoint
 
-from .swc_file_source import SwcFileSource, SwcPoint
+from .swc_file_source import SwcFileSource
 
 import numpy as np
 from scipy.spatial.ckdtree import cKDTree, cKDTreeNode

@@ -1,11 +1,9 @@
 import networkx as nx
 import numpy as np
-from gunpowder import Roi, Coordinate
+from gunpowder import Roi, Coordinate, GraphPoint as SwcPoint
 from typing import List, Tuple, Dict
 import copy
 import logging
-
-from .swc_point import SwcPoint
 
 logger = logging.getLogger(__name__)
 
@@ -32,28 +30,6 @@ def subgraph_from_points(graph, nodes: List[int], with_neighbors=False) -> nx.Di
         sub_g.add_node(n, **copy.deepcopy(graph.nodes[n]))
     sub_g.add_edges_from(subgraph_edges)
     return sub_g
-
-
-def points_to_graph(points: Dict[int, SwcPoint]) -> nx.DiGraph:
-    g = nx.DiGraph()
-    for point_id, point in points.items():
-        g.add_node(
-            point_id,
-            location=point.location,
-            point_type=point.point_type,
-            radius=point.radius,
-        )
-        if (
-            point.parent_id is not None
-            and point.parent_id != point_id
-            and point.parent_id != -1
-            and point.parent_id in points
-        ):
-            g.add_edge(point.parent_id, point_id)
-
-    # check if the temporary graph is tree like
-    assert nx.is_directed_acyclic_graph(g), "Malformed Graph!"
-    return g
 
 
 def relabel_connected_components(graph: nx.DiGraph, offset=0, keep_ids: bool = False):
@@ -179,9 +155,7 @@ def crop_graph(graph: nx.DiGraph, roi: Roi, keep_ids=False):
     return temp_g
 
 
-def line_box_intercept(
-    inside: np.ndarray, outside: np.ndarray, bb: Roi
-) -> np.ndarray:
+def line_box_intercept(inside: np.ndarray, outside: np.ndarray, bb: Roi) -> np.ndarray:
     offset = outside - inside
 
     bb_x = np.asarray(

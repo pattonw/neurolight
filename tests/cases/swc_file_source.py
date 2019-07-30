@@ -1,23 +1,31 @@
 from pathlib import Path
 
 from .swc_base_test import SWCBaseTest
-from neurolight.gunpowder.swc_file_source import SwcFileSource, SwcPoint
-from gunpowder import PointsKey, PointsSpec, BatchRequest, Roi, build, Coordinate
+from neurolight.gunpowder.swc_file_source import SwcFileSource
+from gunpowder import (
+    PointsKey,
+    PointsSpec,
+    BatchRequest,
+    Roi,
+    build,
+    Coordinate,
+    GraphPoint as SwcPoint,
+)
 import numpy as np
 import networkx as nx
 
 from typing import Dict, List
 
 
-class SwcTest(SWCBaseTest):
+class SwcFileSourceTest(SWCBaseTest):
     def setUp(self):
-        super(SwcTest, self).setUp()
+        super(SwcFileSourceTest, self).setUp()
 
     def test_read_single_swc(self):
         path = Path(self.path_to("test_swc_source.swc"))
 
         # write test swc
-        self._write_swc(path, self._toy_swc_points())
+        self._write_swc(path, self._toy_swc_points().graph)
 
         # read arrays
         swc = PointsKey("SWC")
@@ -28,16 +36,16 @@ class SwcTest(SWCBaseTest):
                 BatchRequest({swc: PointsSpec(roi=Roi((0, 0, 5), (11, 11, 1)))})
             )
 
-        for point in self._toy_swc_points():
+        for point_id, point in self._toy_swc_points().data.items():
             self.assertCountEqual(
-                point.location, batch.points[swc].data[point.point_id].location
+                point.location, batch.points[swc].data[point_id].location
             )
 
     def test_relabel_components(self):
         path = Path(self.path_to("test_swc_source.swc"))
 
         # write test swc
-        self._write_swc(path, self._toy_swc_points())
+        self._write_swc(path, self._toy_swc_points().graph)
 
         # read arrays
         swc = PointsKey("SWC")
@@ -48,15 +56,7 @@ class SwcTest(SWCBaseTest):
                 BatchRequest({swc: PointsSpec(roi=Roi((0, 1, 5), (11, 10, 1)))})
             )
 
-        temp_g = nx.DiGraph()
-        for point_id, point in batch.points[swc].data.items():
-            temp_g.add_node(point.point_id, label_id=point.label_id)
-            if (
-                point.parent_id != -1
-                and point.parent_id != point.point_id
-                and point.parent_id in batch.points[swc].data
-            ):
-                temp_g.add_edge(point.point_id, point.parent_id)
+        temp_g = batch.points[swc].graph
 
         previous_label = None
         ccs = list(nx.weakly_connected_components(temp_g))
@@ -66,9 +66,9 @@ class SwcTest(SWCBaseTest):
             label = None
             for point_id in cc:
                 if label is None:
-                    label = temp_g.nodes[point_id]["label_id"]
+                    label = temp_g.nodes[point_id]["component"]
                     self.assertNotEqual(label, previous_label)
-                self.assertEqual(temp_g.nodes[point_id]["label_id"], label)
+                self.assertEqual(temp_g.nodes[point_id]["component"], label)
             previous_label = label
 
     def test_create_boundary_nodes(self):
@@ -76,7 +76,7 @@ class SwcTest(SWCBaseTest):
 
         # write test swc
         self._write_swc(
-            path, self._toy_swc_points(), {"resolution": np.array([2, 2, 2])}
+            path, self._toy_swc_points().graph, {"resolution": np.array([2, 2, 2])}
         )
 
         # read arrays
@@ -88,34 +88,24 @@ class SwcTest(SWCBaseTest):
                 BatchRequest({swc: PointsSpec(roi=Roi((0, 5, 10), (1, 3, 1)))})
             )
 
-        temp_g = nx.DiGraph()
-        for point_id, point in batch.points[swc].data.items():
-            temp_g.add_node(
-                point.point_id, label_id=point.label_id, location=point.location
-            )
-            if (
-                point.parent_id != -1
-                and point.parent_id != point.point_id
-                and point.parent_id in batch.points[swc].data
-            ):
-                temp_g.add_edge(point.point_id, point.parent_id)
-            else:
-                root = point.point_id
+        temp_g = batch.points[swc].graph
 
-        current = root
+        # root is only node with in_degree 0
+        current = [n for n, d in temp_g.in_degree() if d == 0][0]
         expected_path = [
             tuple(np.array([0.0, 5.0, 10.0])),
             tuple(np.array([0.0, 6.0, 10.0])),
             tuple(np.array([0.0, 7.0, 10.0])),
         ]
+        # expect relabelled ids
         expected_node_ids = [0, 1, 2]
         path = []
         node_ids = []
         while current is not None:
             node_ids.append(current)
             path.append(tuple(temp_g.nodes[current]["location"]))
-            predecessors = list(temp_g._pred[current].keys())
-            current = predecessors[0] if len(predecessors) == 1 else None
+            successors = list(temp_g._succ[current].keys())
+            current = successors[0] if len(successors) == 1 else None
 
         self.assertCountEqual(path, expected_path)
         self.assertCountEqual(node_ids, expected_node_ids)
@@ -125,7 +115,7 @@ class SwcTest(SWCBaseTest):
 
         # write test swc
         self._write_swc(
-            path, self._toy_swc_points(), {"resolution": np.array([2, 2, 2])}
+            path, self._toy_swc_points().graph, {"resolution": np.array([2, 2, 2])}
         )
 
         # read arrays
@@ -137,21 +127,11 @@ class SwcTest(SWCBaseTest):
                 BatchRequest({swc: PointsSpec(roi=Roi((0, 5, 10), (1, 3, 1)))})
             )
 
-        temp_g = nx.DiGraph()
-        for point_id, point in batch.points[swc].data.items():
-            temp_g.add_node(
-                point.point_id, label_id=point.label_id, location=point.location
-            )
-            if (
-                point.parent_id != -1
-                and point.parent_id != point.point_id
-                and point.parent_id in batch.points[swc].data
-            ):
-                temp_g.add_edge(point.point_id, point.parent_id)
-            else:
-                root = point.point_id
+        temp_g = batch.points[swc].graph
 
-        current = root
+        # root is only node with in_degree 0
+        current = [n for n, d in temp_g.in_degree() if d == 0][0]
+
         # edge nodes can't keep the same id in case one node has multiple children
         # in the roi.
         expected_path = [
@@ -175,7 +155,7 @@ class SwcTest(SWCBaseTest):
         for i in range(3):
             self._write_swc(
                 path / "{}.swc".format(i),
-                self._toy_swc_points(),
+                self._toy_swc_points().graph,
                 {"offset": np.array([0, 0, i])},
             )
 
@@ -188,15 +168,7 @@ class SwcTest(SWCBaseTest):
                 BatchRequest({swc: PointsSpec(roi=Roi((0, 0, 5), (11, 11, 3)))})
             )
 
-        temp_g = nx.DiGraph()
-        for point_id, point in batch.points[swc].data.items():
-            temp_g.add_node(point.point_id, label_id=point.label_id)
-            if (
-                point.parent_id != -1
-                and point.parent_id != point.point_id
-                and point.parent_id in batch.points[swc].data
-            ):
-                temp_g.add_edge(point.point_id, point.parent_id)
+        temp_g = batch.points[swc].graph
 
         previous_label = None
         ccs = list(nx.weakly_connected_components(temp_g))
@@ -206,9 +178,9 @@ class SwcTest(SWCBaseTest):
             label = None
             for point_id in cc:
                 if label is None:
-                    label = temp_g.nodes[point_id]["label_id"]
+                    label = temp_g.nodes[point_id]["component"]
                     self.assertNotEqual(label, previous_label)
-                self.assertEqual(temp_g.nodes[point_id]["label_id"], label)
+                self.assertEqual(temp_g.nodes[point_id]["component"], label)
             previous_label = label
 
     def test_overlap(self):
@@ -219,7 +191,7 @@ class SwcTest(SWCBaseTest):
         for i in range(3):
             self._write_swc(
                 path / "{}.swc".format(i),
-                self._toy_swc_points(),
+                self._toy_swc_points().graph,
                 {"offset": np.array([0, 0, 0])},
             )
 
@@ -232,16 +204,7 @@ class SwcTest(SWCBaseTest):
                 BatchRequest({swc: PointsSpec(roi=Roi((0, 0, 5), (11, 11, 1)))})
             )
 
-        temp_g = nx.DiGraph()
-        for point_id, point in batch.points[swc].data.items():
-            self.assertEqual(point_id, point.point_id)
-            temp_g.add_node(point.point_id, label_id=point.label_id)
-            if (
-                point.parent_id != -1
-                and point.parent_id != point.point_id
-                and point.parent_id in batch.points[swc].data
-            ):
-                temp_g.add_edge(point.point_id, point.parent_id)
+        temp_g = batch.points[swc].graph
 
         previous_label = None
         ccs = list(nx.weakly_connected_components(temp_g))
@@ -251,7 +214,7 @@ class SwcTest(SWCBaseTest):
             label = None
             for point_id in cc:
                 if label is None:
-                    label = temp_g.nodes[point_id]["label_id"]
+                    label = temp_g.nodes[point_id]["component"]
                     self.assertNotEqual(label, previous_label)
-                self.assertEqual(temp_g.nodes[point_id]["label_id"], label)
+                self.assertEqual(temp_g.nodes[point_id]["component"], label)
             previous_label = label

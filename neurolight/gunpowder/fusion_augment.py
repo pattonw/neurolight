@@ -1,11 +1,10 @@
 import numpy as np
-from gunpowder import Array, Points, BatchFilter, PointsSpec
+from gunpowder import Array, Points, BatchFilter, PointsSpec, GraphPoint as SwcPoint
 from scipy import ndimage
 import networkx as nx
-from .swc_file_source import SwcPoint
 from typing import Dict
 
-from .swc_nx_graph import points_to_graph, graph_to_swc_points
+from gunpowder import GraphPoints
 
 import logging
 
@@ -187,14 +186,9 @@ class FusionAugment(BatchFilter):
             spec=labels_add_spec,
         ).crop(labels_fused_spec.roi)
 
-        # merge points:
-        g1, g2 = (
-            points_to_graph(batch[self.points_base].data),
-            points_to_graph(batch[self.points_add].data),
-        )
-        g = nx.disjoint_union(g1, g2)
-        batch.points[self.points_fused] = Points(
-            data=graph_to_swc_points(g), spec=points_base_spec
+        # fuse points:
+        batch.points[self.points_fused] = batch[self.points_base].merge(
+            batch[self.points_add]
         )
 
         return batch

@@ -1,5 +1,5 @@
 from .swc_base_test import SWCBaseTest
-from neurolight.gunpowder.swc_file_source import SwcFileSource, SwcPoint
+from neurolight.gunpowder.swc_file_source import SwcFileSource
 from neurolight.gunpowder.fusion_augment import FusionAugment
 from neurolight.gunpowder.rasterize_skeleton import RasterizeSkeleton
 from gunpowder import (
@@ -12,6 +12,7 @@ from gunpowder import (
     build,
     Coordinate,
     MergeProvider,
+    GraphPoint as SwcPoint,
 )
 
 import numpy as np
@@ -39,7 +40,7 @@ class FusionAugmentTest(SWCBaseTest):
         intercepts, slopes = self._get_line_pair(roi=bb, dist=3 * LABEL_RADIUS)
         for intercept, slope, swc_path in zip(intercepts, slopes, swc_paths):
             swc_points = self._get_points(intercept, slope, bb)
-            self._write_swc(swc_path, swc_points)
+            self._write_swc(swc_path, swc_points.graph)
 
         # create swc sources
         fused = ArrayKey("FUSED")
@@ -157,7 +158,7 @@ class FusionAugmentTest(SWCBaseTest):
         intercepts, slopes = self._get_line_pair(roi=bb, dist=3 * LABEL_RADIUS)
         for intercept, slope, swc_path in zip(intercepts, slopes, swc_paths):
             swc_points = self._get_points(intercept, slope, bb)
-            self._write_swc(swc_path, swc_points)
+            self._write_swc(swc_path, swc_points.graph)
 
         # create swc sources
         fused = ArrayKey("FUSED")

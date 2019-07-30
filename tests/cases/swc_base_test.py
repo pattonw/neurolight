@@ -1,8 +1,8 @@
 from .provider_test import TestWithTempFiles
-from neurolight.gunpowder.swc_file_source import SwcPoint
-from gunpowder import Roi, Coordinate
+from gunpowder import Roi, Coordinate, GraphPoint as SwcPoint, GraphPoints, PointsSpec
 
 import numpy as np
+import networkx as nx
 
 from typing import Dict, List, Tuple, Optional
 from pathlib import Path
@@ -13,20 +13,30 @@ class SWCBaseTest(TestWithTempFiles):
         super(SWCBaseTest, self).setUp()
 
     def _write_swc(
-        self,
-        file_path: Path,
-        points: List[SwcPoint],
-        constants: Dict[str, Coordinate] = {},
+        self, file_path: Path, graph: nx.DiGraph, constants: Dict[str, Coordinate] = {}
     ):
+        def get_parent(g, u):
+            preds = list(g.predecessors(u))
+            if len(preds) == 1:
+                return preds[0]
+            elif len(preds) == 0:
+                return u
+            else:
+                raise ValueError("Node cannot have 2 parents")
+
         swc = ""
         for key, shape in constants.items():
             swc += "# {} {}\n".format(key.upper(), " ".join([str(x) for x in shape]))
         swc += "\n".join(
             [
                 "{} {} {} {} {} {} {}".format(
-                    p.point_id, p.point_type, *p.location, p.radius, p.parent_id
+                    point_id,
+                    point_attrs["node_type"],
+                    *point_attrs["location"],
+                    point_attrs["radius"],
+                    get_parent(graph, point_id)
                 )
-                for p in points
+                for point_id, point_attrs in graph.nodes.items()
             ]
         )
         with file_path.open("w") as f:
@@ -44,58 +54,116 @@ class SWCBaseTest(TestWithTempFiles):
         |
         -----------
         """
-        points = [
+        points = {
             # backbone
-            SwcPoint(0, 0, Coordinate([0, 0, 5]), 0, 0),
-            SwcPoint(1, 0, Coordinate([1, 0, 5]), 0, 0),
-            SwcPoint(2, 0, Coordinate([2, 0, 5]), 0, 1),
-            SwcPoint(3, 0, Coordinate([3, 0, 5]), 0, 2),
-            SwcPoint(4, 0, Coordinate([4, 0, 5]), 0, 3),
-            SwcPoint(5, 0, Coordinate([5, 0, 5]), 0, 4),
-            SwcPoint(6, 0, Coordinate([6, 0, 5]), 0, 5),
-            SwcPoint(7, 0, Coordinate([7, 0, 5]), 0, 6),
-            SwcPoint(8, 0, Coordinate([8, 0, 5]), 0, 7),
-            SwcPoint(9, 0, Coordinate([9, 0, 5]), 0, 8),
-            SwcPoint(10, 0, Coordinate([10, 0, 5]), 0, 9),
+            0: SwcPoint(Coordinate([0, 0, 5]), radius=0, node_type=0),
+            1: SwcPoint(Coordinate([1, 0, 5]), radius=0, node_type=0),
+            2: SwcPoint(Coordinate([2, 0, 5]), radius=0, node_type=0),
+            3: SwcPoint(Coordinate([3, 0, 5]), radius=0, node_type=0),
+            4: SwcPoint(Coordinate([4, 0, 5]), radius=0, node_type=0),
+            5: SwcPoint(Coordinate([5, 0, 5]), radius=0, node_type=0),
+            6: SwcPoint(Coordinate([6, 0, 5]), radius=0, node_type=0),
+            7: SwcPoint(Coordinate([7, 0, 5]), radius=0, node_type=0),
+            8: SwcPoint(Coordinate([8, 0, 5]), radius=0, node_type=0),
+            9: SwcPoint(Coordinate([9, 0, 5]), radius=0, node_type=0),
+            10: SwcPoint(Coordinate([10, 0, 5]), radius=0, node_type=0),
             # bottom line
-            SwcPoint(11, 0, Coordinate([0, 1, 5]), 0, 0),
-            SwcPoint(12, 0, Coordinate([0, 2, 5]), 0, 11),
-            SwcPoint(13, 0, Coordinate([0, 3, 5]), 0, 12),
-            SwcPoint(14, 0, Coordinate([0, 4, 5]), 0, 13),
-            SwcPoint(15, 0, Coordinate([0, 5, 5]), 0, 14),
-            SwcPoint(16, 0, Coordinate([0, 6, 5]), 0, 15),
-            SwcPoint(17, 0, Coordinate([0, 7, 5]), 0, 16),
-            SwcPoint(18, 0, Coordinate([0, 8, 5]), 0, 17),
-            SwcPoint(19, 0, Coordinate([0, 9, 5]), 0, 18),
-            SwcPoint(20, 0, Coordinate([0, 10, 5]), 0, 19),
+            11: SwcPoint(Coordinate([0, 1, 5]), radius=0, node_type=0),
+            12: SwcPoint(Coordinate([0, 2, 5]), radius=0, node_type=0),
+            13: SwcPoint(Coordinate([0, 3, 5]), radius=0, node_type=0),
+            14: SwcPoint(Coordinate([0, 4, 5]), radius=0, node_type=0),
+            15: SwcPoint(Coordinate([0, 5, 5]), radius=0, node_type=0),
+            16: SwcPoint(Coordinate([0, 6, 5]), radius=0, node_type=0),
+            17: SwcPoint(Coordinate([0, 7, 5]), radius=0, node_type=0),
+            18: SwcPoint(Coordinate([0, 8, 5]), radius=0, node_type=0),
+            19: SwcPoint(Coordinate([0, 9, 5]), radius=0, node_type=0),
+            20: SwcPoint(Coordinate([0, 10, 5]), radius=0, node_type=0),
             # mid line
-            SwcPoint(21, 0, Coordinate([5, 1, 5]), 0, 5),
-            SwcPoint(22, 0, Coordinate([5, 2, 5]), 0, 21),
-            SwcPoint(23, 0, Coordinate([5, 3, 5]), 0, 22),
-            SwcPoint(24, 0, Coordinate([5, 4, 5]), 0, 23),
-            SwcPoint(25, 0, Coordinate([5, 5, 5]), 0, 24),
-            SwcPoint(26, 0, Coordinate([5, 6, 5]), 0, 25),
-            SwcPoint(27, 0, Coordinate([5, 7, 5]), 0, 26),
-            SwcPoint(28, 0, Coordinate([5, 8, 5]), 0, 27),
-            SwcPoint(29, 0, Coordinate([5, 9, 5]), 0, 28),
-            SwcPoint(30, 0, Coordinate([5, 10, 5]), 0, 29),
+            21: SwcPoint(Coordinate([5, 1, 5]), radius=0, node_type=0),
+            22: SwcPoint(Coordinate([5, 2, 5]), radius=0, node_type=0),
+            23: SwcPoint(Coordinate([5, 3, 5]), radius=0, node_type=0),
+            24: SwcPoint(Coordinate([5, 4, 5]), radius=0, node_type=0),
+            25: SwcPoint(Coordinate([5, 5, 5]), radius=0, node_type=0),
+            26: SwcPoint(Coordinate([5, 6, 5]), radius=0, node_type=0),
+            27: SwcPoint(Coordinate([5, 7, 5]), radius=0, node_type=0),
+            28: SwcPoint(Coordinate([5, 8, 5]), radius=0, node_type=0),
+            29: SwcPoint(Coordinate([5, 9, 5]), radius=0, node_type=0),
+            30: SwcPoint(Coordinate([5, 10, 5]), radius=0, node_type=0),
             # top line
-            SwcPoint(31, 0, Coordinate([10, 1, 5]), 0, 10),
-            SwcPoint(32, 0, Coordinate([10, 2, 5]), 0, 31),
-            SwcPoint(33, 0, Coordinate([10, 3, 5]), 0, 32),
-            SwcPoint(34, 0, Coordinate([10, 4, 5]), 0, 33),
-            SwcPoint(35, 0, Coordinate([10, 5, 5]), 0, 34),
-            SwcPoint(36, 0, Coordinate([10, 6, 5]), 0, 35),
-            SwcPoint(37, 0, Coordinate([10, 7, 5]), 0, 36),
-            SwcPoint(38, 0, Coordinate([10, 8, 5]), 0, 37),
-            SwcPoint(39, 0, Coordinate([10, 9, 5]), 0, 38),
-            SwcPoint(40, 0, Coordinate([10, 10, 5]), 0, 39),
+            31: SwcPoint(Coordinate([10, 1, 5]), radius=0, node_type=0),
+            32: SwcPoint(Coordinate([10, 2, 5]), radius=0, node_type=0),
+            33: SwcPoint(Coordinate([10, 3, 5]), radius=0, node_type=0),
+            34: SwcPoint(Coordinate([10, 4, 5]), radius=0, node_type=0),
+            35: SwcPoint(Coordinate([10, 5, 5]), radius=0, node_type=0),
+            36: SwcPoint(Coordinate([10, 6, 5]), radius=0, node_type=0),
+            37: SwcPoint(Coordinate([10, 7, 5]), radius=0, node_type=0),
+            38: SwcPoint(Coordinate([10, 8, 5]), radius=0, node_type=0),
+            39: SwcPoint(Coordinate([10, 9, 5]), radius=0, node_type=0),
+            40: SwcPoint(Coordinate([10, 10, 5]), radius=0, node_type=0),
+        }
+
+        edges = [
+            (0, 0),
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 4),
+            (4, 5),
+            (5, 6),
+            (6, 7),
+            (7, 8),
+            (8, 9),
+            (9, 10),
+            (0, 11),
+            (11, 12),
+            (12, 13),
+            (13, 14),
+            (14, 15),
+            (15, 16),
+            (16, 17),
+            (17, 18),
+            (18, 19),
+            (19, 20),
+            (5, 21),
+            (21, 22),
+            (22, 23),
+            (23, 24),
+            (24, 25),
+            (25, 26),
+            (26, 27),
+            (27, 28),
+            (28, 29),
+            (29, 30),
+            (10, 31),
+            (31, 32),
+            (32, 33),
+            (33, 34),
+            (34, 35),
+            (35, 36),
+            (36, 37),
+            (37, 38),
+            (38, 39),
+            (39, 40),
         ]
-        return points
+
+        return GraphPoints(
+            points,
+            PointsSpec(
+                roi=Roi(Coordinate((-100, -100, -100)), Coordinate((300, 300, 300)))
+            ),
+            edges=edges,
+        )
+
+    def _graph_points(self, points, edges, spec=None):
+        return GraphPoints(
+            points,
+            spec=PointsSpec(roi=Roi(*(Coordinate((None,) * 3),) * 2)),
+            edges=edges,
+        )
 
     def _get_points(
         self, inside: np.ndarray, slope: np.ndarray, bb: Roi
-    ) -> List[SwcPoint]:
+    ) -> Tuple[Dict[int, SwcPoint], List[Tuple[int, int]]]:
         slope = slope / max(slope)
         shape = np.array(bb.get_shape())
         outside_down = inside - shape * slope
@@ -103,12 +171,13 @@ class SWCBaseTest(TestWithTempFiles):
         down_intercept = self._resample_relative(inside, outside_down, bb)
         up_intercept = self._resample_relative(inside, outside_up, bb)
 
-        points = [
+        points = {
             # line
-            SwcPoint(0, 0, down_intercept, 0, 0),
-            SwcPoint(1, 0, up_intercept, 0, 0),
-        ]
-        return points
+            0: SwcPoint(down_intercept, point_type=0, radius=0),
+            1: SwcPoint(up_intercept, point_type=0, radius=0),
+        }
+        edges = set((0, 1))
+        return self._graph_points(points, edges)
 
     def _resample_relative(
         self, inside: np.ndarray, outside: np.ndarray, bb: Roi

@@ -22,7 +22,7 @@ from pathlib import Path
 
 class GrowLabelsTest(SWCBaseTest):
     def setUp(self):
-        super(SWCBaseTest, self).setUp()
+        super(GrowLabelsTest, self).setUp()
 
     @unittest.expectedFailure
     def test_grow_labels_speed(self):
