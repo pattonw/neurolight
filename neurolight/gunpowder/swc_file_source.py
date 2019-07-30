@@ -1,4 +1,5 @@
 from gunpowder.points import Points, PointsKey
+from gunpowder.graph_points import GraphPoint, GraphPoints
 from gunpowder.nodes.batch_provider import BatchProvider
 from gunpowder.batch_request import BatchRequest
 from gunpowder.coordinate import Coordinate
@@ -14,9 +15,9 @@ import networkx as nx
 from pathlib import Path
 from typing import List, Dict, Tuple
 import logging
+import copy
 
 from .swc_nx_graph import (
-    subgraph_from_points,
     points_to_graph,
     graph_to_swc_points,
     relabel_connected_components,
@@ -133,8 +134,8 @@ class SwcFileSource(BatchProvider):
 
             # Obtain subgraph that contains these points. Keep track of edges that
             # are present in the main graph, but not the subgraph
-            sub_graph = subgraph_from_points(
-                self.g, [point[3] for point in points], with_neighbors=True
+            sub_graph = self._subgraph_from_points(
+                [point[3] for point in points], with_neighbors=True
             )
 
             # Handle boundary cases
@@ -309,4 +310,29 @@ class SwcFileSource(BatchProvider):
         # merge with the main graph
         self.g = nx.disjoint_union(self.g, temp_graph)
         logger.debug("graph has {} nodes".format(len(self.g.nodes)))
+
+    def _subgraph_from_points(
+        self, nodes: List[int], with_neighbors=False
+    ) -> nx.DiGraph:
+        """
+        Creates a subgraph of `graph` that contains the points in `nodes`.
+        If `with_neighbors` is True, the subgraph contains all neighbors
+        of all points in `nodes` as well.
+        """
+        sub_g = nx.DiGraph()
+        subgraph_nodes = set(nodes)
+        subgraph_edges = set()
+        for n in nodes:
+            for successor in self.g.successors(n):
+                if with_neighbors or successor in nodes:
+                    subgraph_nodes.add(successor)
+                    subgraph_edges.add((n, successor))
+            for predecessor in self.g.predecessors(n):
+                if with_neighbors or predecessor in nodes:
+                    subgraph_nodes.add(predecessor)
+                    subgraph_edges.add((predecessor, n))
+        for n in subgraph_nodes:
+            sub_g.add_node(n, **copy.deepcopy(self.g.nodes[n]))
+        sub_g.add_edges_from(subgraph_edges)
+        return sub_g
 
