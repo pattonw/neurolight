@@ -354,8 +354,8 @@ class GetNeuronPair(BatchFilter):
                     "expected a minimum distance between the two neurons"
                     + "to be in the range ({}, {}), however saw a min distance of {}"
                 ).format(
-                    self.seperate_by - voxel_size.max() * 2,
-                    self.seperate_by + voxel_size.max() * 2,
+                    self.seperate_by - voxel_size.max(),
+                    self.seperate_by + voxel_size.max(),
                     min_dist,
                 )
             )
