@@ -105,6 +105,7 @@ class EnsureCentered(SWCBaseTest):
             arrays=(img_a, img_b),
             labels=(labels_a, labels_b),
             seperate_by=2,
+            shift_attempts=50,
         )
 
         request = BatchRequest()

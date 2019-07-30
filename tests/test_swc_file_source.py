@@ -152,14 +152,16 @@ class SwcTest(SWCBaseTest):
                 root = point.point_id
 
         current = root
+        # edge nodes can't keep the same id in case one node has multiple children
+        # in the roi.
         expected_path = [
-            (12, tuple(np.array([0.0, 5.0, 10.0]))),
-            (13, tuple(np.array([0.0, 6.0, 10.0]))),
-            (14, tuple(np.array([0.0, 7.0, 10.0]))),
+            tuple(np.array([0.0, 5.0, 10.0])),
+            tuple(np.array([0.0, 6.0, 10.0])),
+            tuple(np.array([0.0, 7.0, 10.0])),
         ]
         path = []
         while current is not None:
-            path.append((current, tuple(temp_g.nodes[current]["location"])))
+            path.append(tuple(temp_g.nodes[current]["location"]))
             predecessors = list(temp_g._pred[current].keys())
             current = predecessors[0] if len(predecessors) == 1 else None
 

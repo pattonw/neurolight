@@ -200,10 +200,18 @@ class SwcFileSource(BatchProvider):
             return []
 
         if node.split_dim != -1:
-            # recursive handling of child nodes
-            if node.split_dim < 3 and node.split > bb[1][node.split_dim]:
+            # if the split location is above the roi, no need to split (cannot be above None)
+            if (
+                node.split_dim < 3
+                and bb[1][node.split_dim] is not None
+                and node.split > bb[1][node.split_dim]
+            ):
                 return self._query_kdtree(node.lesser, bb)
-            elif node.split_dim < 3 and node.split < bb[0][node.split_dim]:
+            elif (
+                node.split_dim < 3
+                and bb[0][node.split_dim] is not None
+                and node.split < bb[0][node.split_dim]
+            ):
                 return self._query_kdtree(node.greater, bb)
             else:
                 greater_roi = (substitute_dim(bb[0], node.split_dim, node.split), bb[1])
@@ -213,7 +221,15 @@ class SwcFileSource(BatchProvider):
                 ) + self._query_kdtree(node.lesser, lesser_roi)
         else:
             # handle leaf node
-            bbox = Roi(Coordinate(bb[0]), Coordinate(bb[1] - bb[0]))
+            bbox = Roi(
+                Coordinate(bb[0]),
+                Coordinate(
+                    tuple(
+                        y - x if x is not None and y is not None else y
+                        for x, y in zip(*bb)
+                    )
+                ),
+            )
             points = [point for point in node.data_points if bbox.contains(point)]
             return points
 
