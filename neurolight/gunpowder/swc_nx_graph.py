@@ -3,8 +3,11 @@ import numpy as np
 from gunpowder import Roi, Coordinate
 from typing import List, Tuple, Dict
 import copy
+import logging
 
 from .swc_point import SwcPoint
+
+logger = logging.getLogger(__name__)
 
 
 def subgraph_from_points(graph, nodes: List[int], with_neighbors=False) -> nx.DiGraph:
@@ -83,7 +86,8 @@ def graph_to_swc_points(
 
 
 def interpolate_points(graph: nx.DiGraph) -> nx.DiGraph:
-    n = max([node for node in graph.nodes]) + 1
+    if len(graph.nodes) > 0:
+        n = max([node for node in graph.nodes]) + 1
     temp_g = copy.deepcopy(graph)
     for node in graph.nodes:
         for succ in graph.successors(node):
@@ -108,15 +112,12 @@ def shift_graph(graph: nx.DiGraph, direction: np.ndarray):
 
 def crop_graph(graph: nx.DiGraph, roi: Roi, keep_ids=False):
     temp_g = copy.deepcopy(graph)
+    if len(graph.nodes) > 0:
+        next_node_id = max([node_id for node_id in temp_g.nodes]) + 1
+    else:
+        next_node_id = 0
 
-    one = Coordinate((1, 1, 1))
-    zero = Coordinate((0, 0, 0))
-    # shrink bottom by 1, since roi already doesn't allow points at the top
-    allowable_points = copy.deepcopy(roi)
-    allowable_points = allowable_points.grow(zero, zero)
-    # bbox on which points may lie
     bbox = copy.deepcopy(roi)
-    bbox = bbox.grow(zero, -one)
 
     to_remove = set()
     predecessors = set()  # u if u is out
@@ -124,11 +125,11 @@ def crop_graph(graph: nx.DiGraph, roi: Roi, keep_ids=False):
     successors = set()  # v if v is out
     succ_edges = set()
     for u in temp_g.nodes:
-        u_in = allowable_points.contains(temp_g.nodes[u]["location"])
+        u_in = bbox.contains(temp_g.nodes[u]["location"])
         if not u_in:
             to_remove.add(u)
         for v in temp_g.successors(u):
-            v_in = allowable_points.contains(temp_g.nodes[v]["location"])
+            v_in = bbox.contains(temp_g.nodes[v]["location"])
             if not u_in and not v_in:
                 to_remove.add(v)
             elif not u_in:
@@ -138,30 +139,33 @@ def crop_graph(graph: nx.DiGraph, roi: Roi, keep_ids=False):
                 successors.add(v)
                 succ_edges.add((u, v))
 
-    for node in to_remove.difference(predecessors, successors):
-        temp_g.remove_node(node)
+    # problem: what if there are multiple edges that cross the bbox to one outnode?
+    # it would get deleted, then be inaccessable the next time. Thus we must create new nodes
     for out_node, in_neighbor in pred_edges:
         new_location = line_box_intercept(
             temp_g.nodes[in_neighbor]["location"],
             temp_g.nodes[out_node]["location"],
-            allowable_points,
             bbox,
         )
-        if all(np.isclose(new_location, temp_g.nodes[in_neighbor]["location"])):
-            temp_g.remove_node(out_node)
-        else:
-            temp_g.nodes[out_node]["location"] = new_location
+        if not all(np.isclose(new_location, temp_g.nodes[in_neighbor]["location"])):
+            temp_g.add_node(next_node_id, **temp_g.nodes[out_node])
+            temp_g.nodes[next_node_id]["location"] = new_location
+            temp_g.add_edge(next_node_id, in_neighbor)
+            next_node_id += 1
     for in_neighbor, out_node in succ_edges:
         new_location = line_box_intercept(
             temp_g.nodes[in_neighbor]["location"],
             temp_g.nodes[out_node]["location"],
-            allowable_points,
             bbox,
         )
-        if all(np.isclose(new_location, temp_g.nodes[in_neighbor]["location"])):
-            temp_g.remove_node(out_node)
-        else:
-            temp_g.nodes[out_node]["location"] = new_location
+        if not all(np.isclose(new_location, temp_g.nodes[in_neighbor]["location"])):
+            temp_g.add_node(next_node_id, **temp_g.nodes[out_node])
+            temp_g.nodes[next_node_id]["location"] = new_location
+            temp_g.add_edge(in_neighbor, next_node_id)
+            next_node_id += 1
+
+    for node in to_remove:
+        temp_g.remove_node(node)
 
     for node in temp_g.nodes:
         assert roi.contains(
@@ -176,36 +180,19 @@ def crop_graph(graph: nx.DiGraph, roi: Roi, keep_ids=False):
 
 
 def line_box_intercept(
-    inside: np.ndarray, outside: np.ndarray, allowable_points: Roi, bb: Roi
+    inside: np.ndarray, outside: np.ndarray, bb: Roi
 ) -> np.ndarray:
     offset = outside - inside
-    with np.errstate(divide="ignore", invalid="ignore"):
-        # bb_crossings will be 0 if inside is on the bb, 1 if outside is on the bb
-        bb_x = np.asarray(
-            [
-                (np.asarray(bb.get_begin()) - inside) / offset,
-                (np.asarray(bb.get_end()) - inside) / offset,
-            ],
-            dtype=float,
-        )
 
-        if np.sum(np.logical_and((bb_x >= 0), (bb_x <= 1))) > 0:
-            # all values of bb_x between 0, 1 represent a crossing of a bounding plane
-            # the minimum of which is the (normalized) distance to the closest bounding plane
-            s = np.min(bb_x[np.logical_and((bb_x >= 0), (bb_x <= 1))])
-            new_location = np.round(inside + s * offset).astype(int)
-            if not allowable_points.contains(new_location):
-                raise Exception(
-                    "New location {} between {}, {} not contained in {}".format(
-                        new_location, inside, outside, allowable_points
-                    )
-                )
-            return new_location
-        else:
-            raise ValueError(
-                (
-                    "Could not create a node on the bounding box {} "
-                    + "given points (inside:{}, ouside:{})"
-                ).format(bb, inside, outside)
-            )
+    bb_x = np.asarray(
+        [
+            (np.asarray(bb.get_begin()) - inside) / offset,
+            (np.asarray(bb.get_end()) - inside) / offset,
+        ],
+        dtype=float,
+    )
+
+    s = np.min(bb_x[np.logical_and((bb_x >= 0), (bb_x < 1))])
+    new_location = np.floor(inside + s * offset).astype(int)
+    return new_location
 
