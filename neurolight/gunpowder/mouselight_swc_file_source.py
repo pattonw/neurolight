@@ -1,21 +1,10 @@
-from gunpowder.points import Point, Points, PointsKey
-from gunpowder.nodes.batch_provider import BatchProvider
-from gunpowder.batch_request import BatchRequest
-from gunpowder.coordinate import Coordinate
-from gunpowder.roi import Roi
-from gunpowder.points_spec import PointsSpec
-from gunpowder.batch import Batch
-from gunpowder.profiling import Timing
-from gunpowder.graph_points import GraphPoint as SwcPoint
+from gunpowder.graph_points import GraphPoint
 
 from .swc_file_source import SwcFileSource
 
 import numpy as np
-from scipy.spatial.ckdtree import cKDTree, cKDTreeNode
-import networkx as nx
 
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -87,7 +76,7 @@ class MouselightSwcFileSource(SwcFileSource):
                     raise ValueError("SWC has a malformed line: {}".format(line))
 
                 # extract data from row (point_id, type, x, y, z, radius, parent_id)
-                points[int(row[0])] = SwcPoint(
+                points[int(row[0])] = GraphPoint(
                     point_id=int(row[0]),
                     parent_id=int(row[6]),
                     point_type=int(row[1]),

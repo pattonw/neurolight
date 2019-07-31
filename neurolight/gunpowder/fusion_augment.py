@@ -1,10 +1,6 @@
 import numpy as np
-from gunpowder import Array, Points, BatchFilter, PointsSpec, GraphPoint as SwcPoint
+from gunpowder import Array, BatchFilter, PointsSpec
 from scipy import ndimage
-import networkx as nx
-from typing import Dict
-
-from gunpowder import GraphPoints
 
 import logging
 

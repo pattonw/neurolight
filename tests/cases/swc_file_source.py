@@ -2,19 +2,9 @@ from pathlib import Path
 
 from .swc_base_test import SWCBaseTest
 from neurolight.gunpowder.swc_file_source import SwcFileSource
-from gunpowder import (
-    PointsKey,
-    PointsSpec,
-    BatchRequest,
-    Roi,
-    build,
-    Coordinate,
-    GraphPoint as SwcPoint,
-)
+from gunpowder import PointsKey, PointsSpec, BatchRequest, Roi, build
 import numpy as np
 import networkx as nx
-
-from typing import Dict, List
 
 
 class SwcFileSourceTest(SWCBaseTest):

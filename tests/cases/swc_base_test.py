@@ -1,5 +1,5 @@
 from .provider_test import TestWithTempFiles
-from gunpowder import Roi, Coordinate, GraphPoint as SwcPoint, GraphPoints, PointsSpec
+from gunpowder import Roi, Coordinate, GraphPoint, GraphPoints, PointsSpec
 
 import numpy as np
 import networkx as nx
@@ -56,50 +56,50 @@ class SWCBaseTest(TestWithTempFiles):
         """
         points = {
             # backbone
-            0: SwcPoint(Coordinate([0, 0, 5]), radius=0, node_type=0),
-            1: SwcPoint(Coordinate([1, 0, 5]), radius=0, node_type=0),
-            2: SwcPoint(Coordinate([2, 0, 5]), radius=0, node_type=0),
-            3: SwcPoint(Coordinate([3, 0, 5]), radius=0, node_type=0),
-            4: SwcPoint(Coordinate([4, 0, 5]), radius=0, node_type=0),
-            5: SwcPoint(Coordinate([5, 0, 5]), radius=0, node_type=0),
-            6: SwcPoint(Coordinate([6, 0, 5]), radius=0, node_type=0),
-            7: SwcPoint(Coordinate([7, 0, 5]), radius=0, node_type=0),
-            8: SwcPoint(Coordinate([8, 0, 5]), radius=0, node_type=0),
-            9: SwcPoint(Coordinate([9, 0, 5]), radius=0, node_type=0),
-            10: SwcPoint(Coordinate([10, 0, 5]), radius=0, node_type=0),
+            0: GraphPoint(Coordinate([0, 0, 5]), radius=0, node_type=0),
+            1: GraphPoint(Coordinate([1, 0, 5]), radius=0, node_type=0),
+            2: GraphPoint(Coordinate([2, 0, 5]), radius=0, node_type=0),
+            3: GraphPoint(Coordinate([3, 0, 5]), radius=0, node_type=0),
+            4: GraphPoint(Coordinate([4, 0, 5]), radius=0, node_type=0),
+            5: GraphPoint(Coordinate([5, 0, 5]), radius=0, node_type=0),
+            6: GraphPoint(Coordinate([6, 0, 5]), radius=0, node_type=0),
+            7: GraphPoint(Coordinate([7, 0, 5]), radius=0, node_type=0),
+            8: GraphPoint(Coordinate([8, 0, 5]), radius=0, node_type=0),
+            9: GraphPoint(Coordinate([9, 0, 5]), radius=0, node_type=0),
+            10: GraphPoint(Coordinate([10, 0, 5]), radius=0, node_type=0),
             # bottom line
-            11: SwcPoint(Coordinate([0, 1, 5]), radius=0, node_type=0),
-            12: SwcPoint(Coordinate([0, 2, 5]), radius=0, node_type=0),
-            13: SwcPoint(Coordinate([0, 3, 5]), radius=0, node_type=0),
-            14: SwcPoint(Coordinate([0, 4, 5]), radius=0, node_type=0),
-            15: SwcPoint(Coordinate([0, 5, 5]), radius=0, node_type=0),
-            16: SwcPoint(Coordinate([0, 6, 5]), radius=0, node_type=0),
-            17: SwcPoint(Coordinate([0, 7, 5]), radius=0, node_type=0),
-            18: SwcPoint(Coordinate([0, 8, 5]), radius=0, node_type=0),
-            19: SwcPoint(Coordinate([0, 9, 5]), radius=0, node_type=0),
-            20: SwcPoint(Coordinate([0, 10, 5]), radius=0, node_type=0),
+            11: GraphPoint(Coordinate([0, 1, 5]), radius=0, node_type=0),
+            12: GraphPoint(Coordinate([0, 2, 5]), radius=0, node_type=0),
+            13: GraphPoint(Coordinate([0, 3, 5]), radius=0, node_type=0),
+            14: GraphPoint(Coordinate([0, 4, 5]), radius=0, node_type=0),
+            15: GraphPoint(Coordinate([0, 5, 5]), radius=0, node_type=0),
+            16: GraphPoint(Coordinate([0, 6, 5]), radius=0, node_type=0),
+            17: GraphPoint(Coordinate([0, 7, 5]), radius=0, node_type=0),
+            18: GraphPoint(Coordinate([0, 8, 5]), radius=0, node_type=0),
+            19: GraphPoint(Coordinate([0, 9, 5]), radius=0, node_type=0),
+            20: GraphPoint(Coordinate([0, 10, 5]), radius=0, node_type=0),
             # mid line
-            21: SwcPoint(Coordinate([5, 1, 5]), radius=0, node_type=0),
-            22: SwcPoint(Coordinate([5, 2, 5]), radius=0, node_type=0),
-            23: SwcPoint(Coordinate([5, 3, 5]), radius=0, node_type=0),
-            24: SwcPoint(Coordinate([5, 4, 5]), radius=0, node_type=0),
-            25: SwcPoint(Coordinate([5, 5, 5]), radius=0, node_type=0),
-            26: SwcPoint(Coordinate([5, 6, 5]), radius=0, node_type=0),
-            27: SwcPoint(Coordinate([5, 7, 5]), radius=0, node_type=0),
-            28: SwcPoint(Coordinate([5, 8, 5]), radius=0, node_type=0),
-            29: SwcPoint(Coordinate([5, 9, 5]), radius=0, node_type=0),
-            30: SwcPoint(Coordinate([5, 10, 5]), radius=0, node_type=0),
+            21: GraphPoint(Coordinate([5, 1, 5]), radius=0, node_type=0),
+            22: GraphPoint(Coordinate([5, 2, 5]), radius=0, node_type=0),
+            23: GraphPoint(Coordinate([5, 3, 5]), radius=0, node_type=0),
+            24: GraphPoint(Coordinate([5, 4, 5]), radius=0, node_type=0),
+            25: GraphPoint(Coordinate([5, 5, 5]), radius=0, node_type=0),
+            26: GraphPoint(Coordinate([5, 6, 5]), radius=0, node_type=0),
+            27: GraphPoint(Coordinate([5, 7, 5]), radius=0, node_type=0),
+            28: GraphPoint(Coordinate([5, 8, 5]), radius=0, node_type=0),
+            29: GraphPoint(Coordinate([5, 9, 5]), radius=0, node_type=0),
+            30: GraphPoint(Coordinate([5, 10, 5]), radius=0, node_type=0),
             # top line
-            31: SwcPoint(Coordinate([10, 1, 5]), radius=0, node_type=0),
-            32: SwcPoint(Coordinate([10, 2, 5]), radius=0, node_type=0),
-            33: SwcPoint(Coordinate([10, 3, 5]), radius=0, node_type=0),
-            34: SwcPoint(Coordinate([10, 4, 5]), radius=0, node_type=0),
-            35: SwcPoint(Coordinate([10, 5, 5]), radius=0, node_type=0),
-            36: SwcPoint(Coordinate([10, 6, 5]), radius=0, node_type=0),
-            37: SwcPoint(Coordinate([10, 7, 5]), radius=0, node_type=0),
-            38: SwcPoint(Coordinate([10, 8, 5]), radius=0, node_type=0),
-            39: SwcPoint(Coordinate([10, 9, 5]), radius=0, node_type=0),
-            40: SwcPoint(Coordinate([10, 10, 5]), radius=0, node_type=0),
+            31: GraphPoint(Coordinate([10, 1, 5]), radius=0, node_type=0),
+            32: GraphPoint(Coordinate([10, 2, 5]), radius=0, node_type=0),
+            33: GraphPoint(Coordinate([10, 3, 5]), radius=0, node_type=0),
+            34: GraphPoint(Coordinate([10, 4, 5]), radius=0, node_type=0),
+            35: GraphPoint(Coordinate([10, 5, 5]), radius=0, node_type=0),
+            36: GraphPoint(Coordinate([10, 6, 5]), radius=0, node_type=0),
+            37: GraphPoint(Coordinate([10, 7, 5]), radius=0, node_type=0),
+            38: GraphPoint(Coordinate([10, 8, 5]), radius=0, node_type=0),
+            39: GraphPoint(Coordinate([10, 9, 5]), radius=0, node_type=0),
+            40: GraphPoint(Coordinate([10, 10, 5]), radius=0, node_type=0),
         }
 
         edges = [
@@ -163,7 +163,7 @@ class SWCBaseTest(TestWithTempFiles):
 
     def _get_points(
         self, inside: np.ndarray, slope: np.ndarray, bb: Roi
-    ) -> Tuple[Dict[int, SwcPoint], List[Tuple[int, int]]]:
+    ) -> Tuple[Dict[int, GraphPoint], List[Tuple[int, int]]]:
         slope = slope / max(slope)
         shape = np.array(bb.get_shape())
         outside_down = inside - shape * slope
@@ -173,8 +173,8 @@ class SWCBaseTest(TestWithTempFiles):
 
         points = {
             # line
-            0: SwcPoint(down_intercept, point_type=0, radius=0),
-            1: SwcPoint(up_intercept, point_type=0, radius=0),
+            0: GraphPoint(down_intercept, point_type=0, radius=0),
+            1: GraphPoint(up_intercept, point_type=0, radius=0),
         }
         edges = set((0, 1))
         return self._graph_points(points, edges)

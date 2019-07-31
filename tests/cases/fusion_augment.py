@@ -12,12 +12,10 @@ from gunpowder import (
     build,
     Coordinate,
     MergeProvider,
-    GraphPoint as SwcPoint,
 )
 
 import numpy as np
 
-from typing import Dict, List, Tuple, Optional
 from pathlib import Path
 
 

@@ -7,11 +7,8 @@ from gunpowder import (
     Points,
     Array,
     ArrayKey,
-    ArraySpec,
     Coordinate,
-    PointsSpec,
     PointsKey,
-    GraphPoint as SwcPoint,
 )
 from gunpowder.profiling import Timing
 from typing import Tuple
