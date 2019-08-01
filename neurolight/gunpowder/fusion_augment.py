@@ -1,11 +1,6 @@
 import numpy as np
-from gunpowder import Array, Points, BatchFilter, PointsSpec
+from gunpowder import Array, BatchFilter, BatchRequest, PointsSpec
 from scipy import ndimage
-import networkx as nx
-from .swc_file_source import SwcPoint
-from typing import Dict
-
-from .swc_nx_graph import points_to_graph, graph_to_swc_points
 
 import logging
 
@@ -110,16 +105,19 @@ class FusionAugment(BatchFilter):
 
     def prepare(self, request):
         # add "base" and "add" volume to request
-        request[self.raw_base] = request[self.raw_fused].copy()
-        request[self.raw_add] = request[self.raw_fused].copy()
+        deps = BatchRequest()
+        deps[self.raw_base] = request[self.raw_fused]
+        deps[self.raw_add] = request[self.raw_fused]
 
         # enlarge roi for labels to be the same size as the raw data for mask generation
-        request[self.labels_base] = request[self.raw_fused].copy()
-        request[self.labels_add] = request[self.raw_fused].copy()
+        deps[self.labels_base] = request[self.raw_fused]
+        deps[self.labels_add] = request[self.raw_fused]
 
         # enlarge roi for points to be the same as the raw data
-        request[self.points_base] = PointsSpec(roi=request[self.raw_fused].roi)
-        request[self.points_add] = PointsSpec(roi=request[self.raw_fused].roi)
+        deps[self.points_base] = PointsSpec(roi=request[self.raw_fused].roi)
+        deps[self.points_add] = PointsSpec(roi=request[self.raw_fused].roi)
+
+        return deps
 
     def process(self, batch, request):
 
@@ -177,7 +175,6 @@ class FusionAugment(BatchFilter):
         labels_add_spec = batch[self.labels_add].spec.copy()
         labels_fused_spec = request[self.labels_fused].copy()
         raw_base_spec = batch[self.raw_base].spec.copy()
-        points_base_spec = batch[self.points_base].spec.copy()
 
         # return raw and labels for "fused" volume
         # raw_fused_array.astype(raw_base_spec.dtype)
@@ -187,14 +184,9 @@ class FusionAugment(BatchFilter):
             spec=labels_add_spec,
         ).crop(labels_fused_spec.roi)
 
-        # merge points:
-        g1, g2 = (
-            points_to_graph(batch[self.points_base].data),
-            points_to_graph(batch[self.points_add].data),
-        )
-        g = nx.disjoint_union(g1, g2)
-        batch.points[self.points_fused] = Points(
-            data=graph_to_swc_points(g), spec=points_base_spec
+        # fuse points:
+        batch.points[self.points_fused] = batch[self.points_base].merge(
+            batch[self.points_add]
         )
 
         return batch

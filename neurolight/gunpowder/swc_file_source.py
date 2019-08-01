@@ -1,4 +1,5 @@
-from gunpowder.points import Points, PointsKey
+from gunpowder.points import PointsKey
+from gunpowder.graph_points import GraphPoint, GraphPoints
 from gunpowder.nodes.batch_provider import BatchProvider
 from gunpowder.batch_request import BatchRequest
 from gunpowder.coordinate import Coordinate
@@ -7,22 +8,15 @@ from gunpowder.points_spec import PointsSpec
 from gunpowder.batch import Batch
 from gunpowder.profiling import Timing
 
+from gunpowder import SpatialGraph
+
 import numpy as np
 from scipy.spatial.ckdtree import cKDTree, cKDTreeNode
-import networkx as nx
 
 from pathlib import Path
 from typing import List, Dict, Tuple
 import logging
-
-from .swc_nx_graph import (
-    subgraph_from_points,
-    points_to_graph,
-    graph_to_swc_points,
-    relabel_connected_components,
-    crop_graph,
-)
-from .swc_point import SwcPoint
+import copy
 
 logger = logging.getLogger(__name__)
 
@@ -85,8 +79,17 @@ class SwcFileSource(BatchProvider):
         self.scale = scale
         self.connected_component_label = 0
         self.keep_ids = keep_ids
-        self.g = nx.DiGraph()
+        self.points_set = GraphPoints(
+            data={},
+            spec=PointsSpec(
+                roi=Roi(Coordinate((None, None, None)), Coordinate((None, None, None)))
+            ),
+        )
         self.transpose = transpose
+
+    @property
+    def g(self):
+        return self.points_set.graph
 
     def setup(self):
 
@@ -133,24 +136,19 @@ class SwcFileSource(BatchProvider):
 
             # Obtain subgraph that contains these points. Keep track of edges that
             # are present in the main graph, but not the subgraph
-            sub_graph = subgraph_from_points(
-                self.g, [point[3] for point in points], with_neighbors=True
+            points_subset = self._subset_points(
+                [int(point[3]) for point in points], with_neighbors=True
             )
 
             # Handle boundary cases
-            sub_graph = crop_graph(sub_graph, request[points_key].roi)
-
-            # Convert graph into Points format
-            points_data = graph_to_swc_points(sub_graph, keep_ids=self.keep_ids)
-
-            points_spec = PointsSpec(roi=request[points_key].roi.copy())
+            points_subset = points_subset.crop(request[points_key].roi)
 
             batch = Batch()
-            batch.points[points_key] = Points(points_data, points_spec)
+            batch.points[points_key] = points_subset
 
             logger.debug(
                 "Swc points source provided {} points for roi: {}".format(
-                    len(points_data), request[points_key].roi
+                    len(points_subset.data), request[points_key].roi
                 )
             )
 
@@ -182,8 +180,8 @@ class SwcFileSource(BatchProvider):
     def _graph_to_kdtree(self) -> None:
         # add node_ids to coordinates to support overlapping nodes in cKDTree
         data = [
-            tuple(node["location"]) + (node_id,)
-            for node_id, node in self.g.nodes.items()
+            tuple(point_attrs["location"]) + (point_id,)
+            for point_id, point_attrs in self.g.nodes.items()
         ]
         logger.debug("placing {} nodes in the kdtree".format(len(data)))
         # place nodes in the kdtree
@@ -240,13 +238,14 @@ class SwcFileSource(BatchProvider):
         used.
         """
         # initialize file specific variables
-        points = {}
         header = True
         offset = np.array([0, 0, 0])
         resolution = np.array([1, 1, 1])
 
         # parse file
         with filename.open() as o_f:
+            points = {}
+            edges = set()
             for line in o_f.read().splitlines():
                 if header and line.startswith("#"):
                     # Search header comments for variables
@@ -265,21 +264,25 @@ class SwcFileSource(BatchProvider):
                     raise ValueError("SWC has a malformed line: {}".format(line))
 
                 # extract data from row (point_id, type, x, y, z, radius, parent_id)
-                points[int(row[0])] = SwcPoint(
-                    point_id=int(row[0]),
-                    parent_id=int(row[6]),
+                assert int(row[0]) not in points, "Duplicate point {} found!".format(
+                    int(row[0])
+                )
+                points[int(row[0])] = GraphPoint(
                     point_type=int(row[1]),
                     location=np.array(
                         (
                             (np.array([float(x) for x in row[2:5]]) + offset)
                             * resolution
                             * self.scale
-                        ).take(self.transpose),
-                        dtype=int,
+                        ).take(self.transpose)
                     ),
                     radius=float(row[5]),
                 )
-            self._add_points_to_source(points)
+                v, u = int(row[0]), int(row[6])
+                assert (u, v) not in edges, "Duplicate edge {} found!".format((u, v))
+                if u != v and u is not None and v is not None and u >= 0 and v >= 0:
+                    edges.add((u, v))
+            self._add_points_to_source(points, edges)
 
     def _search_swc_header(
         self, line: str, key: str, default: np.ndarray
@@ -295,18 +298,36 @@ class SwcFileSource(BatchProvider):
         else:
             return default
 
-    def _add_points_to_source(self, points: Dict[int, SwcPoint]):
+    def _add_points_to_source(
+        self, points: Dict[int, GraphPoint], edges: List[Tuple[int, int]]
+    ):
         # add points to a temporary graph
         logger.debug("adding {} nodes to graph".format(len(points)))
-        temp_graph = points_to_graph(points)
+        new_points = GraphPoints(points, self.points_set.spec.roi, edges)
 
-        # assign unique label id's to each connected component
-        temp_graph, num_components_added = relabel_connected_components(
-            temp_graph, self.connected_component_label
-        )
-        self.connected_component_label += num_components_added
+        self.points_set = self.points_set.disjoint_merge(new_points)
+        logger.debug("graph has {} nodes".format(len(self.points_set.data)))
 
-        # merge with the main graph
-        self.g = nx.disjoint_union(self.g, temp_graph)
-        logger.debug("graph has {} nodes".format(len(self.g.nodes)))
+    def _subset_points(self, nodes: List[int], with_neighbors=False) -> GraphPoints:
+        """
+        Creates a subgraph of `graph` that contains the points in `nodes`.
+        If `with_neighbors` is True, the subgraph contains all neighbors
+        of all points in `nodes` as well.
+        """
+        sub_g = SpatialGraph()
+        subgraph_nodes = set(nodes)
+        subgraph_edges = set()
+        for n in nodes:
+            for successor in self.g.successors(n):
+                if with_neighbors or successor in nodes:
+                    subgraph_nodes.add(successor)
+                    subgraph_edges.add((n, successor))
+            for predecessor in self.g.predecessors(n):
+                if with_neighbors or predecessor in nodes:
+                    subgraph_nodes.add(predecessor)
+                    subgraph_edges.add((predecessor, n))
+        for n in subgraph_nodes:
+            sub_g.add_node(n, **copy.deepcopy(self.g.nodes[n]))
+        sub_g.add_edges_from(subgraph_edges)
+        return GraphPoints._from_graph(sub_g)
 

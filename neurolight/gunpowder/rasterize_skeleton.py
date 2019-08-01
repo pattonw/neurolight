@@ -1,5 +1,15 @@
 import numpy as np
-from gunpowder import BatchFilter, Roi, Array, ArraySpec, Coordinate, PointsSpec
+import networkx as nx
+from gunpowder import (
+    BatchFilter,
+    BatchRequest,
+    Roi,
+    Array,
+    ArraySpec,
+    Coordinate,
+    PointsSpec,
+    GraphPoints,
+)
 
 
 class RasterizeSkeleton(BatchFilter):
@@ -44,13 +54,16 @@ class RasterizeSkeleton(BatchFilter):
         self.provides(self.array, self.array_spec)
 
     def prepare(self, request):
-        self.array_spec.roi = request[self.array].roi
-        request[self.points] = PointsSpec(roi=self.array_spec.roi)
+        deps = BatchRequest()
+        deps[self.points] = PointsSpec(roi=request[self.array].roi)
+
+        return deps
 
     def process(self, batch, request):
 
         points = batch.points[self.points]
         assert len(points.data.items()) > 0, "No Swc Points in enlarged Roi."
+        assert isinstance(points, GraphPoints), "Rasterize skeleton needs a Graph."
 
         voxel_size = self.array_spec.voxel_size
 
@@ -62,20 +75,19 @@ class RasterizeSkeleton(BatchFilter):
         array_roi = Roi(offset, shape)
         array_data = np.zeros(shape, dtype=self.array_spec.dtype)
 
-        # iterate through swc points
-        labels = np.unique([p.label_id for p in points.data.values()])
-        for label in labels:
-            binarized = np.zeros_like(array_data, dtype=np.bool)
-            for p in points.data.values():
-                if p.label_id == label:
-                    if p.parent_id in points.data.keys():
-                        p1 = (p.location / voxel_size - offset).astype(int)
-                        p2 = (points.data[p.parent_id].location / voxel_size).astype(
-                            int
-                        ) - offset
-                        binarized = self._rasterize_line_segment(p1, p2, binarized)
+        graph = points.graph
 
-            array_data[binarized] = label
+        for i, cc in enumerate(nx.weakly_connected_components(graph)):
+            cc = graph.subgraph(cc)
+            binarized = np.zeros_like(array_data, dtype=np.bool)
+            for u, v in cc.edges:
+                p1 = (cc.nodes[u]["location"] / voxel_size - offset).astype(int)
+                p2 = (cc.nodes[v]["location"] / voxel_size).astype(
+                    int
+                ) - offset
+                binarized = self._rasterize_line_segment(p1, p2, binarized)
+
+            array_data[binarized] = i + 1
 
         array = Array(
             data=array_data,
@@ -89,6 +101,8 @@ class RasterizeSkeleton(BatchFilter):
 
         array = array.crop(request[self.array].roi)
         batch.arrays[self.array] = array
+
+        return batch
 
     def _bresenhamline_nslope(self, slope):
 

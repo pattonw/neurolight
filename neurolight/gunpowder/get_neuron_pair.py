@@ -1,35 +1,25 @@
 import numpy as np
 import copy
 from gunpowder import (
-    BatchFilter,
+    ProviderSpec,
+    BatchProvider,
     BatchRequest,
     Roi,
     Points,
+    GraphPoints,
     Array,
     ArrayKey,
-    ArraySpec,
     Coordinate,
-    PointsSpec,
     PointsKey,
 )
-from neurolight.gunpowder.swc_file_source import SwcPoint
 from gunpowder.profiling import Timing
 from typing import Tuple
 import logging
 
-from .swc_nx_graph import (
-    points_to_graph,
-    crop_graph,
-    shift_graph,
-    graph_to_swc_points,
-    relabel_connected_components,
-    interpolate_points,
-)
-
 logger = logging.getLogger(__name__)
 
 
-class GetNeuronPair(BatchFilter):
+class GetNeuronPair(BatchProvider):
     """Retrieves a pair of neurons represented by both points in an swc style
         Point set and volumetric image data. 
 
@@ -71,6 +61,7 @@ class GetNeuronPair(BatchFilter):
         seperate_by: float = 1.0,
         shift_attempts: int = 3,
         request_attempts: int = 3,
+        spec: ProviderSpec = None,
     ):
         self.point_source = point_source
         self.array_source = array_source
@@ -82,6 +73,10 @@ class GetNeuronPair(BatchFilter):
 
         self.shift_attempts = shift_attempts
         self.request_attempts = request_attempts
+
+    @property
+    def spec(self):
+        return self.get_upstream_providers()[0].spec
 
     def setup(self):
         """
@@ -99,62 +94,33 @@ class GetNeuronPair(BatchFilter):
         The request from upstream not ask for the points or arrays provided
         by this node. Instead it should just add a request to the point_source
         and image_source which will then be retrieved twice in provide.
-
-
-        TODO:
-        How to handle strange cases:
-        Requesting one or two out of the 3 pieces (raw, labels, points)
-        Requesting varying sized rois
-        Requestiong multiple copies (points in output_size and input_size)
         """
         growth = self._get_growth()
 
-        upstream_request = BatchRequest()
+        deps = BatchRequest()
 
-        # prepare requests
-        # if point_key is not requested request it
-        points_roi = request[self.points[0]].roi
-        points_roi = points_roi.grow(growth, growth)
-        if self.point_source not in request:
-            upstream_request.add(self.point_source, points_roi.get_shape())
-        else:
-            upstream_request[self.point_source] = request[self.point_source]
-            upstream_request[self.point_source].roi = points_roi
+        if self.points[0] in request:
+            spec = request[self.points[0]]
+            spec.roi = spec.roi.grow(growth, growth)
+            deps[self.point_source] = spec
+        if self.arrays[0] in request:
+            spec = request[self.arrays[0]]
+            spec.roi = spec.roi.grow(growth, growth)
+            deps[self.array_source] = spec
+        if self.labels[0] in request:
+            spec = request[self.labels[0]]
+            spec.roi = spec.roi.grow(growth, growth)
+            deps[self.label_source] = spec
 
-        arrays_roi = request[self.arrays[0]].roi
-        arrays_roi = arrays_roi.grow(growth, growth)
-        if self.array_source not in request:
-            upstream_request.add(
-                self.array_source,
-                arrays_roi.get_shape(),
-                voxel_size=self.spec[self.array_source].voxel_size,
-            )
-        else:
-            upstream_request[self.array_source] = request[self.array_source]
-            upstream_request[self.array_source].roi = arrays_roi
-
-        labels_roi = request[self.labels[0]].roi
-        labels_roi = labels_roi.grow(growth, growth)
-        if self.label_source not in request:
-            upstream_request.add(
-                self.label_source,
-                labels_roi.get_shape(),
-                voxel_size=self.spec[self.label_source].voxel_size,
-            )
-        else:
-            upstream_request[self.label_source] = request[self.label_source]
-            upstream_request[self.label_source].roi = labels_roi
-
-        return upstream_request
+        return deps
 
     def provide(self, request):
         """
-        Instead of making multiple requests in the process phase,
-        this provide method should be overwritten to get two copies of
-        the required points and arrays. 
+        First request points with specific seeds, then request the rest if
+        valid points are found.
         """
 
-        upstream_request = copy.deepcopy(request)
+         = copy.deepcopy(request)
 
         # skip = super().__can_skip(request)
         skip = False
@@ -172,8 +138,10 @@ class GetNeuronPair(BatchFilter):
 
             timing_prepare.stop()
 
-            batch_base = self.get_upstream_provider().request_batch(upstream_request)
-            batch_add = self.get_upstream_provider().request_batch(upstream_request)
+            batch_base = self.get_upstream_providers()[0].request_batch(
+                upstream_request
+            )
+            batch_add = self.get_upstream_providers()[0].request_batch(upstream_request)
             request_attempts += 1
 
             timing_process = Timing(self, "process")
@@ -285,19 +253,14 @@ class GetNeuronPair(BatchFilter):
         # Shift and crop the points
         output_roi = request[self.points[k]].roi
         center = points.spec.roi.get_offset() + points.spec.roi.get_shape() // 2
-
         new_center = center + direction
         new_offset = new_center - output_roi.get_shape() // 2
         new_roi = Roi(new_offset, output_roi.get_shape())
 
-        g = points_to_graph(points.data)
-        g = crop_graph(g, new_roi)
-        g = shift_graph(g, np.array(output_roi.get_begin() - new_offset, dtype=float))
-        g, _ = relabel_connected_components(g)
-
-        new_points_data = graph_to_swc_points(g)
-
-        points = Points(new_points_data, points.spec.copy())
+        point_graph = points.graph
+        point_graph.crop(new_roi)
+        point_graph.shift(-new_offset)
+        points = GraphPoints._from_graph(point_graph)
         points.spec.roi = output_roi
 
         return points, array, labels
@@ -325,14 +288,12 @@ class GetNeuronPair(BatchFilter):
         greater than the desired seperation criterion.
         """
         voxel_size = np.array(self.spec[self.array_source].voxel_size)
-        points_base = batch[self.points[0]].data
-        points_add = batch[self.points[1]].data
+        points_base = batch[self.points[0]]
+        points_add = batch[self.points[1]]
 
         # add interpolated points:
-        base_graph = points_to_graph(points_base)
-        base_graph = interpolate_points(base_graph)
-        add_graph = points_to_graph(points_add)
-        add_graph = interpolate_points(add_graph)
+        base_graph = points_base.graph
+        add_graph = points_add.graph
 
         min_dist = self.seperate_by + 2 * voxel_size.mean()
         for point_id_base, point_base in base_graph.nodes.items():

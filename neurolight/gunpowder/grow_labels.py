@@ -30,7 +30,12 @@ class GrowLabels(BatchFilter):
         pass
 
     def prepare(self, request: BatchRequest):
-        pass
+        deps = BatchRequest()
+
+        if self.array in request:
+            deps[self.array] = request[self.array]
+        
+        return deps
 
     def process(self, batch, request: BatchRequest):
         """

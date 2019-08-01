@@ -1,5 +1,5 @@
 from .provider_test import TestWithTempFiles
-from neurolight.gunpowder.swc_file_source import SwcPoint
+from neurolight.gunpowder.swc_file_source import GraphPoint
 from gunpowder import Roi, Coordinate
 
 import numpy as np
@@ -15,7 +15,7 @@ class SWCBaseTest(TestWithTempFiles):
     def _write_swc(
         self,
         file_path: Path,
-        points: List[SwcPoint],
+        points: List[GraphPoint],
         constants: Dict[str, Coordinate] = {},
     ):
         swc = ""
@@ -46,56 +46,56 @@ class SWCBaseTest(TestWithTempFiles):
         """
         points = [
             # backbone
-            SwcPoint(0, 0, Coordinate([0, 0, 5]), 0, 0),
-            SwcPoint(1, 0, Coordinate([1, 0, 5]), 0, 0),
-            SwcPoint(2, 0, Coordinate([2, 0, 5]), 0, 1),
-            SwcPoint(3, 0, Coordinate([3, 0, 5]), 0, 2),
-            SwcPoint(4, 0, Coordinate([4, 0, 5]), 0, 3),
-            SwcPoint(5, 0, Coordinate([5, 0, 5]), 0, 4),
-            SwcPoint(6, 0, Coordinate([6, 0, 5]), 0, 5),
-            SwcPoint(7, 0, Coordinate([7, 0, 5]), 0, 6),
-            SwcPoint(8, 0, Coordinate([8, 0, 5]), 0, 7),
-            SwcPoint(9, 0, Coordinate([9, 0, 5]), 0, 8),
-            SwcPoint(10, 0, Coordinate([10, 0, 5]), 0, 9),
+            GraphPoint(0, 0, Coordinate([0, 0, 5]), 0, 0),
+            GraphPoint(1, 0, Coordinate([1, 0, 5]), 0, 0),
+            GraphPoint(2, 0, Coordinate([2, 0, 5]), 0, 1),
+            GraphPoint(3, 0, Coordinate([3, 0, 5]), 0, 2),
+            GraphPoint(4, 0, Coordinate([4, 0, 5]), 0, 3),
+            GraphPoint(5, 0, Coordinate([5, 0, 5]), 0, 4),
+            GraphPoint(6, 0, Coordinate([6, 0, 5]), 0, 5),
+            GraphPoint(7, 0, Coordinate([7, 0, 5]), 0, 6),
+            GraphPoint(8, 0, Coordinate([8, 0, 5]), 0, 7),
+            GraphPoint(9, 0, Coordinate([9, 0, 5]), 0, 8),
+            GraphPoint(10, 0, Coordinate([10, 0, 5]), 0, 9),
             # bottom line
-            SwcPoint(11, 0, Coordinate([0, 1, 5]), 0, 0),
-            SwcPoint(12, 0, Coordinate([0, 2, 5]), 0, 11),
-            SwcPoint(13, 0, Coordinate([0, 3, 5]), 0, 12),
-            SwcPoint(14, 0, Coordinate([0, 4, 5]), 0, 13),
-            SwcPoint(15, 0, Coordinate([0, 5, 5]), 0, 14),
-            SwcPoint(16, 0, Coordinate([0, 6, 5]), 0, 15),
-            SwcPoint(17, 0, Coordinate([0, 7, 5]), 0, 16),
-            SwcPoint(18, 0, Coordinate([0, 8, 5]), 0, 17),
-            SwcPoint(19, 0, Coordinate([0, 9, 5]), 0, 18),
-            SwcPoint(20, 0, Coordinate([0, 10, 5]), 0, 19),
+            GraphPoint(11, 0, Coordinate([0, 1, 5]), 0, 0),
+            GraphPoint(12, 0, Coordinate([0, 2, 5]), 0, 11),
+            GraphPoint(13, 0, Coordinate([0, 3, 5]), 0, 12),
+            GraphPoint(14, 0, Coordinate([0, 4, 5]), 0, 13),
+            GraphPoint(15, 0, Coordinate([0, 5, 5]), 0, 14),
+            GraphPoint(16, 0, Coordinate([0, 6, 5]), 0, 15),
+            GraphPoint(17, 0, Coordinate([0, 7, 5]), 0, 16),
+            GraphPoint(18, 0, Coordinate([0, 8, 5]), 0, 17),
+            GraphPoint(19, 0, Coordinate([0, 9, 5]), 0, 18),
+            GraphPoint(20, 0, Coordinate([0, 10, 5]), 0, 19),
             # mid line
-            SwcPoint(21, 0, Coordinate([5, 1, 5]), 0, 5),
-            SwcPoint(22, 0, Coordinate([5, 2, 5]), 0, 21),
-            SwcPoint(23, 0, Coordinate([5, 3, 5]), 0, 22),
-            SwcPoint(24, 0, Coordinate([5, 4, 5]), 0, 23),
-            SwcPoint(25, 0, Coordinate([5, 5, 5]), 0, 24),
-            SwcPoint(26, 0, Coordinate([5, 6, 5]), 0, 25),
-            SwcPoint(27, 0, Coordinate([5, 7, 5]), 0, 26),
-            SwcPoint(28, 0, Coordinate([5, 8, 5]), 0, 27),
-            SwcPoint(29, 0, Coordinate([5, 9, 5]), 0, 28),
-            SwcPoint(30, 0, Coordinate([5, 10, 5]), 0, 29),
+            GraphPoint(21, 0, Coordinate([5, 1, 5]), 0, 5),
+            GraphPoint(22, 0, Coordinate([5, 2, 5]), 0, 21),
+            GraphPoint(23, 0, Coordinate([5, 3, 5]), 0, 22),
+            GraphPoint(24, 0, Coordinate([5, 4, 5]), 0, 23),
+            GraphPoint(25, 0, Coordinate([5, 5, 5]), 0, 24),
+            GraphPoint(26, 0, Coordinate([5, 6, 5]), 0, 25),
+            GraphPoint(27, 0, Coordinate([5, 7, 5]), 0, 26),
+            GraphPoint(28, 0, Coordinate([5, 8, 5]), 0, 27),
+            GraphPoint(29, 0, Coordinate([5, 9, 5]), 0, 28),
+            GraphPoint(30, 0, Coordinate([5, 10, 5]), 0, 29),
             # top line
-            SwcPoint(31, 0, Coordinate([10, 1, 5]), 0, 10),
-            SwcPoint(32, 0, Coordinate([10, 2, 5]), 0, 31),
-            SwcPoint(33, 0, Coordinate([10, 3, 5]), 0, 32),
-            SwcPoint(34, 0, Coordinate([10, 4, 5]), 0, 33),
-            SwcPoint(35, 0, Coordinate([10, 5, 5]), 0, 34),
-            SwcPoint(36, 0, Coordinate([10, 6, 5]), 0, 35),
-            SwcPoint(37, 0, Coordinate([10, 7, 5]), 0, 36),
-            SwcPoint(38, 0, Coordinate([10, 8, 5]), 0, 37),
-            SwcPoint(39, 0, Coordinate([10, 9, 5]), 0, 38),
-            SwcPoint(40, 0, Coordinate([10, 10, 5]), 0, 39),
+            GraphPoint(31, 0, Coordinate([10, 1, 5]), 0, 10),
+            GraphPoint(32, 0, Coordinate([10, 2, 5]), 0, 31),
+            GraphPoint(33, 0, Coordinate([10, 3, 5]), 0, 32),
+            GraphPoint(34, 0, Coordinate([10, 4, 5]), 0, 33),
+            GraphPoint(35, 0, Coordinate([10, 5, 5]), 0, 34),
+            GraphPoint(36, 0, Coordinate([10, 6, 5]), 0, 35),
+            GraphPoint(37, 0, Coordinate([10, 7, 5]), 0, 36),
+            GraphPoint(38, 0, Coordinate([10, 8, 5]), 0, 37),
+            GraphPoint(39, 0, Coordinate([10, 9, 5]), 0, 38),
+            GraphPoint(40, 0, Coordinate([10, 10, 5]), 0, 39),
         ]
         return points
 
     def _get_points(
         self, inside: np.ndarray, slope: np.ndarray, bb: Roi
-    ) -> List[SwcPoint]:
+    ) -> List[GraphPoint]:
         slope = slope / max(slope)
         shape = np.array(bb.get_shape())
         outside_down = inside - shape * slope
@@ -105,8 +105,8 @@ class SWCBaseTest(TestWithTempFiles):
 
         points = [
             # line
-            SwcPoint(0, 0, down_intercept, 0, 0),
-            SwcPoint(1, 0, up_intercept, 0, 0),
+            GraphPoint(0, 0, down_intercept, 0, 0),
+            GraphPoint(1, 0, up_intercept, 0, 0),
         ]
         return points
 

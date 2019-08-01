@@ -78,9 +78,9 @@ class Crop(gp.BatchFilter):
         batch[self.output_array] = output_array
 
 
-class Pipeline(SWCBaseTest):
+class PipelineTest(SWCBaseTest):
     def setUp(self):
-        super(Pipeline, self).setUp()
+        super(PipelineTest, self).setUp()
 
     def _toy_swc(self, file_path: Path):
         raise NotImplementedError
@@ -253,4 +253,3 @@ class Pipeline(SWCBaseTest):
             assert t2 - t1 < 60, "way too slow: {} seconds for 5 requests".format(
                 t2 - t1
             )
-

@@ -20,7 +20,7 @@ import time
 
 class RasterizeSkeletonTest(SWCBaseTest):
     def setUp(self):
-        super(SWCBaseTest, self).setUp()
+        super(RasterizeSkeletonTest, self).setUp()
 
     def test_rasterize_speed(self):
 
@@ -30,7 +30,7 @@ class RasterizeSkeletonTest(SWCBaseTest):
         swc_path = Path(self.path_to(swc_file))
 
         swc_points = self._get_points(np.array([1, 1, 1]), np.array([1, 1, 1]), bb)
-        self._write_swc(swc_path, swc_points)
+        self._write_swc(swc_path, swc_points.graph)
 
         # create swc sources
         swc_key = PointsKey("SWC")
