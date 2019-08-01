@@ -1,9 +1,9 @@
 import numpy as np
-import copy
 from gunpowder import (
     ProviderSpec,
     BatchProvider,
     BatchRequest,
+    Batch,
     Roi,
     Points,
     GraphPoints,
@@ -13,8 +13,10 @@ from gunpowder import (
     PointsKey,
 )
 from gunpowder.profiling import Timing
-from typing import Tuple
+from typing import Tuple, Optional
 import logging
+import time
+import copy
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +77,18 @@ class GetNeuronPair(BatchProvider):
         self.request_attempts = request_attempts
 
     @property
-    def spec(self):
-        return self.get_upstream_providers()[0].spec
+    def seed(self) -> int:
+        return hash(
+            hash(self.points + self.arrays + self.labels) + hash(time.time() * 1e6)
+        )
+
+    @property
+    def upstream_provider(self):
+        return self.get_upstream_providers()[0]
+
+    @property
+    def spec(self) -> ProviderSpec:
+        return self.upstream_provider.spec
 
     def setup(self):
         """
@@ -89,102 +101,150 @@ class GetNeuronPair(BatchProvider):
             self.provides(array_key, self.spec[self.array_source])
             self.provides(label_key, self.spec[self.label_source])
 
-    def prepare(self, request):
+    def prepare_points(self, request: BatchRequest) -> Tuple[BatchRequest, int]:
         """
-        The request from upstream not ask for the points or arrays provided
-        by this node. Instead it should just add a request to the point_source
-        and image_source which will then be retrieved twice in provide.
+        Only request the points, keeping track of the seed
+        """
+
+        growth = self._get_growth()
+        seed = self.seed
+
+        seed_deps = BatchRequest(random_seed=seed)
+
+        spec = copy.deepcopy(request[self.points[0]])
+        spec.roi = spec.roi.grow(growth, growth)
+        seed_deps[self.point_source] = spec
+
+        return seed_deps, seed
+
+    def prepare(self, request: BatchRequest, seed: int) -> Tuple[BatchRequest, int]:
+        """
+        Only request everything with the given seed
         """
         growth = self._get_growth()
 
-        deps = BatchRequest()
+        deps = BatchRequest(random_seed=seed)
 
-        if self.points[0] in request:
-            spec = request[self.points[0]]
-            spec.roi = spec.roi.grow(growth, growth)
-            deps[self.point_source] = spec
-        if self.arrays[0] in request:
-            spec = request[self.arrays[0]]
-            spec.roi = spec.roi.grow(growth, growth)
-            deps[self.array_source] = spec
-        if self.labels[0] in request:
-            spec = request[self.labels[0]]
-            spec.roi = spec.roi.grow(growth, growth)
-            deps[self.label_source] = spec
+        deps[self.point_source] = copy.deepcopy(request[self.points[0]])
+        deps[self.point_source].roi = deps[self.point_source].roi.grow(growth, growth)
+        deps[self.array_source] = copy.deepcopy(request[self.arrays[0]])
+        deps[self.array_source].roi = deps[self.array_source].roi.grow(growth, growth)
+        deps[self.label_source] = copy.deepcopy(request[self.labels[0]])
+        deps[self.label_source].roi = deps[self.label_source].roi.grow(growth, growth)
 
         return deps
 
-    def provide(self, request):
+    def provide(self, request: BatchRequest) -> Batch:
         """
         First request points with specific seeds, then request the rest if
         valid points are found.
         """
 
-         = copy.deepcopy(request)
-
-        # skip = super().__can_skip(request)
-        skip = False
-        valid_pair = False
-
         timing_prepare = Timing(self, "prepare")
         timing_prepare.start()
 
-        if not skip:
-            upstream_request = self.prepare(upstream_request)
-            self.remove_provided(upstream_request)
+        base_seed, add_seed, direction = self.get_valid_seeds(request)
+        request_base = self.prepare(request, base_seed)
+        request_add = self.prepare(request, add_seed)
 
-        request_attempts = 0
-        while not valid_pair:
+        base = self.upstream_provider.request_batch(request_base)
+        add = self.upstream_provider.request_batch(request_add)
 
-            timing_prepare.stop()
+        timing_prepare.stop()
 
-            batch_base = self.get_upstream_providers()[0].request_batch(
-                upstream_request
-            )
-            batch_add = self.get_upstream_providers()[0].request_batch(upstream_request)
-            request_attempts += 1
+        timing_process = Timing(self, "process")
+        timing_process.start()
 
-            timing_process = Timing(self, "process")
-            timing_process.start()
+        base = self.process(base, direction, request=request, batch_index=0)
+        add = self.process(add, -direction, request=request, batch_index=1)
 
-            if not skip:
-                shift_attempts = 0
-                while not valid_pair:
-                    shift_attempts += 1
-                    batch_base = self.process(batch_base, batch_add, request)
-                    if self._valid_pair(batch_base):
-                        valid_pair = True
-                    if shift_attempts >= self.shift_attempts:
-                        break
-
-            if request_attempts >= self.request_attempts:
-                raise Exception(
-                    "COULD NOT OBTAIN A PAIR OF NEURONS SEPERATED BY {}!".format(
-                        self.seperate_by
-                    )
-                )
+        batch = self.merge_batches(base, add)
 
         timing_process.stop()
 
-        batch_base.profiling_stats.add(timing_prepare)
-        batch_base.profiling_stats.add(timing_process)
+        return batch
 
-        return batch_base
+    def merge_batches(self, base: Batch, add: Batch) -> Batch:
+        combined = Batch()
 
-    def process(self, batch_base, batch_add, request):
-        points_base = batch_base.points[self.point_source]
-        array_base = batch_base.arrays[self.array_source]
-        label_base = batch_base.arrays[self.label_source]
-        points_add = batch_add.points[self.point_source]
-        array_add = batch_add.arrays[self.array_source]
-        label_add = batch_add.arrays[self.label_source]
+        base_map = {
+            self.point_source: self.points[0],
+            self.array_source: self.arrays[0],
+            self.label_source: self.labels[0],
+        }
+        for key, value in base.items():
+            combined[base_map.get(key, key)] = value
 
+        add_map = {
+            self.point_source: self.points[1],
+            self.array_source: self.arrays[1],
+            self.label_source: self.labels[1],
+        }
+        for key, value in add.items():
+            combined[add_map.get(key, key)] = value
+
+        return combined
+
+    def get_valid_seeds(self, request: BatchRequest) -> Tuple[int, int, Coordinate]:
+        """
+        Request pairs of point sets, making sure that you can seperate the
+        two. If it is possible to seperate the two then keep those seeds, else
+        try again with new seeds.
+        """
+
+        for _ in range(self.request_attempts):
+            points_request_base, base_seed = self.prepare_points(request)
+            points_request_add, add_seed = self.prepare_points(request)
+            try:
+                direction = self.check_valid_requests(
+                    points_request_base, points_request_add, request
+                )
+                return base_seed, add_seed, direction  # successful return
+            except ValueError:
+                logging.debug("Request with seeds {} and {} failed!")
+        raise ValueError(
+            "Failed {} attempts to retrieve a pair of neurons!".format(
+                self.request_attempts
+            )
+        )
+
+    def check_valid_requests(
+        self,
+        points_request_base: BatchRequest,
+        points_request_add: BatchRequest,
+        request: BatchRequest,
+    ) -> Coordinate:
+        """
+        check if the points returned by these requests are seperable.
+        If they are return the direction vector used to seperate them.
+        """
+        points_base = self.upstream_provider.request_batch(points_request_base)
+
+        points_add = self.upstream_provider.request_batch(points_request_add)
+
+        for _ in range(self.shift_attempts):
+            direction = self.random_direction()
+            points_base = self.process(
+                points_base, direction, request=request, batch_index=0
+            )
+            points_add = self.process(
+                points_add, -direction, request=request, batch_index=0
+            )
+            if self._valid_pair(
+                points_base[self.point_source].graph,
+                points_add[self.point_source].graph,
+            ):
+                return direction
+
+        raise ValueError("Failed to seperate these points")
+
+    def random_direction(self) -> Coordinate:
         # there should be a better way of doing this. If distances are small,
         # the rounding may make a big difference. Rounding (1.3, 1.3, 1.3) would
         # give a euclidean distance of ~1.7 instead of ~2.25
         # A better solution might be to do a distance transform on an array with a centered
         # dot and then find all potential moves that have a distance equal to delta +- 0.5
-        voxel_size = np.array(self.spec[self.array_source].voxel_size)
+        voxel_size = np.array(self.spec[self.array_source].voxel_size)  # should be lcm
         random_direction = np.random.randn(3)
         random_direction /= np.linalg.norm(random_direction)  # unit vector
         random_direction *= self.seperate_by  # physical units
@@ -192,78 +252,84 @@ class GetNeuronPair(BatchProvider):
             (np.round(random_direction / voxel_size) + 1) // 2
         ) * voxel_size  # physical units rounded to nearest voxel size
         random_direction = Coordinate(random_direction)
+        return random_direction
+
+    def process(
+        self,
+        batch: Batch,
+        direction: Coordinate,
+        request: BatchRequest,
+        batch_index: int,
+    ) -> Batch:
+        points = batch.points[self.point_source]
+        array = batch.arrays.get(self.array_source, None)
+        label = batch.arrays.get(self.label_source, None)
 
         # Shift and crop points and array
-        points_base, array_base, label_base = self._shift_and_crop(
-            points_base,
-            array_base,
-            label_base,
-            direction=random_direction,
+        points, array, label = self._shift_and_crop(
+            points,
+            array,
+            label,
+            direction=direction,
             request=request,
-            k=0,
+            batch_index=batch_index,
         )
-        points_add, array_add, label_add = self._shift_and_crop(
-            points_add,
-            array_add,
-            label_add,
-            direction=-random_direction,
-            request=request,
-            k=1,
-        )
+        batch.points[self.point_source] = points
+        if array is not None:
+            batch.arrays[self.array_source] = array
+        if label is not None:
+            batch.arrays[self.label_source] = label
 
-        batch_base.points[self.points[0]] = points_base
-        batch_base.arrays[self.arrays[0]] = array_base
-        batch_base.arrays[self.labels[0]] = label_base
-        batch_base.points[self.points[1]] = points_add
-        batch_base.arrays[self.arrays[1]] = array_add
-        batch_base.arrays[self.labels[1]] = label_add
-
-        return batch_base
+        return batch
 
     def _shift_and_crop(
         self,
         points: Points,
-        array: Array,
-        labels: Array,
+        array: Optional[Array],
+        labels: Optional[Array],
         direction: Coordinate,
         request: BatchRequest,
-        k: int,
-    ):
+        batch_index: int,
+    ) -> Tuple[Points, Optional[Array], Optional[Array]]:
 
-        # Shift and crop the array
-        output_roi = request[self.arrays[k]].roi
-        center = array.spec.roi.get_offset() + array.spec.roi.get_shape() // 2
-        new_center = center + direction
-        new_offset = new_center - output_roi.get_shape() // 2
-        new_roi = Roi(new_offset, output_roi.get_shape())
-
-        array = array.crop(new_roi)
-        array.spec.roi = output_roi
-
-        # Shift and crop the labels
-        output_roi = request[self.labels[k]].roi
-        center = labels.spec.roi.get_offset() + labels.spec.roi.get_shape() // 2
-        new_center = center + direction
-        new_offset = new_center - output_roi.get_shape() // 2
-        new_roi = Roi(new_offset, output_roi.get_shape())
-
-        labels = labels.crop(new_roi)
-        labels.spec.roi = output_roi
-
-        # Shift and crop the points
-        output_roi = request[self.points[k]].roi
-        center = points.spec.roi.get_offset() + points.spec.roi.get_shape() // 2
-        new_center = center + direction
-        new_offset = new_center - output_roi.get_shape() // 2
-        new_roi = Roi(new_offset, output_roi.get_shape())
-
-        point_graph = points.graph
-        point_graph.crop(new_roi)
-        point_graph.shift(-new_offset)
-        points = GraphPoints._from_graph(point_graph)
-        points.spec.roi = output_roi
+        points = self._shift_and_crop_points(
+            points, direction, request[self.points[batch_index]].roi
+        )
+        if array is not None:
+            array = self._shift_and_crop_array(
+                array, direction, request[self.arrays[batch_index]].roi
+            )
+        if labels is not None:
+            labels = self._shift_and_crop_array(
+                labels, direction, request[self.labels[batch_index]].roi
+            )
 
         return points, array, labels
+
+    def _extract_roi(self, larger, smaller, direction):
+        center = larger.get_offset() + larger.get_shape() // 2
+        centered_offset = center - smaller.get_shape() // 2
+        centered_smaller_roi = Roi(centered_offset, smaller.get_shape())
+        return centered_smaller_roi.shift(direction)
+
+    def _shift_and_crop_array(self, array, direction, output_roi):
+        # Shift and crop the array
+        shifted_smaller_roi = self._extract_roi(array.spec.roi, output_roi, direction)
+
+        array = array.crop(shifted_smaller_roi)
+        array.spec.roi = output_roi
+        return array
+
+    def _shift_and_crop_points(self, points, direction, output_roi):
+        # Shift and crop the array
+        shifted_smaller_roi = self._extract_roi(points.spec.roi, output_roi, direction)
+
+        point_graph = points.graph
+        point_graph.crop(shifted_smaller_roi)
+        point_graph.shift(-shifted_smaller_roi.get_offset())
+        points = GraphPoints._from_graph(point_graph)
+        points.spec.roi = output_roi
+        return points
 
     def _get_growth(self):
         """
@@ -282,18 +348,12 @@ class GetNeuronPair(BatchProvider):
         half_shift = (voxel_shift + 1) // 2
         return Coordinate(half_shift * 2 * voxel_size)
 
-    def _valid_pair(self, batch):
+    def _valid_pair(self, base_graph, add_graph):
         """
         Simply checks for every pair of points, is the distance between them
         greater than the desired seperation criterion.
         """
         voxel_size = np.array(self.spec[self.array_source].voxel_size)
-        points_base = batch[self.points[0]]
-        points_add = batch[self.points[1]]
-
-        # add interpolated points:
-        base_graph = points_base.graph
-        add_graph = points_add.graph
 
         min_dist = self.seperate_by + 2 * voxel_size.mean()
         for point_id_base, point_base in base_graph.nodes.items():

@@ -88,17 +88,13 @@ class SwcFileSourceTest(SWCBaseTest):
             tuple(np.array([0.0, 7.0, 10.0])),
         ]
         # expect relabelled ids
-        expected_node_ids = [0, 1, 2]
         path = []
-        node_ids = []
         while current is not None:
-            node_ids.append(current)
             path.append(tuple(temp_g.nodes[current]["location"]))
             successors = list(temp_g._succ[current].keys())
             current = successors[0] if len(successors) == 1 else None
 
         self.assertCountEqual(path, expected_path)
-        self.assertCountEqual(node_ids, expected_node_ids)
 
     def test_keep_node_ids(self):
         path = Path(self.path_to("test_swc_source.swc"))
