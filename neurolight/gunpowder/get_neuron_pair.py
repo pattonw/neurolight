@@ -203,7 +203,7 @@ class GetNeuronPair(BatchProvider):
                 direction = self.check_valid_requests(
                     points_request_base, points_request_add, request
                 )
-                return base_seed, add_seed, direction  # successful return
+                return base_seed, add_seed, direction
             except ValueError:
                 logging.debug("Request with seeds {} and {} failed!")
         raise ValueError(
@@ -223,20 +223,19 @@ class GetNeuronPair(BatchProvider):
         If they are return the direction vector used to seperate them.
         """
         points_base = self.upstream_provider.request_batch(points_request_base)
-
         points_add = self.upstream_provider.request_batch(points_request_add)
 
         for _ in range(self.shift_attempts):
             direction = self.random_direction()
-            points_base = self.process(
-                points_base, direction, request=request, batch_index=0
+            points_base_shifted = self.process(
+                points_base, direction, request=request, batch_index=0, inplace=False
             )
-            points_add = self.process(
-                points_add, -direction, request=request, batch_index=0
+            points_add_shifted = self.process(
+                points_add, -direction, request=request, batch_index=1, inplace=False
             )
             if self._valid_pair(
-                points_base[self.point_source].graph,
-                points_add[self.point_source].graph,
+                points_base_shifted[self.point_source].graph,
+                points_add_shifted[self.point_source].graph,
             ):
                 return direction
 
@@ -264,7 +263,10 @@ class GetNeuronPair(BatchProvider):
         direction: Coordinate,
         request: BatchRequest,
         batch_index: int,
+        inplace=True,
     ) -> Batch:
+        if not inplace:
+            batch = copy.deepcopy(batch)
         points = batch.points[self.point_source]
         array = batch.arrays.get(self.array_source, None)
         label = batch.arrays.get(self.label_source, None)

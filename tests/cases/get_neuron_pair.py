@@ -124,10 +124,11 @@ class GetNeuronPairTest(SWCBaseTest):
         request.add(labels_b, Coordinate((data_shape, data_shape, data_shape)))
 
         with build(pipeline):
-            batch = pipeline.request_batch(request)
-            assert all(
-                [
-                    x in batch
-                    for x in [points_a, points_b, img_a, img_b, labels_a, labels_b]
-                ]
-            )
+            for i in range(10):
+                batch = pipeline.request_batch(request)
+                assert all(
+                    [
+                        x in batch
+                        for x in [points_a, points_b, img_a, img_b, labels_a, labels_b]
+                    ]
+                )
