@@ -23,12 +23,12 @@ logger = logging.getLogger(__name__)
 
 class GetNeuronPair(BatchProvider):
     """Retrieves a pair of neurons represented by both points in an swc style
-        Point set and volumetric image data. 
+        Point set and volumetric image data.
 
         Args:
 
             point_keys (:class:``Tuple[PointsKey]``):
-                
+
                 A pair of PointsKeys from which two sets of points will be taken.
                 If a single PointsKey is provided, both sets of points will be
                 taken from the same dataset
@@ -157,6 +157,10 @@ class GetNeuronPair(BatchProvider):
 
         base = self.process(base, direction, request=request, batch_index=0)
         add = self.process(add, -direction, request=request, batch_index=1)
+
+        assert self._valid_pair(
+            base[self.point_source].graph, add[self.point_source].graph
+        ), "Seeded request produced an invalid pair!"
 
         batch = self.merge_batches(base, add)
 
@@ -381,4 +385,3 @@ class GetNeuronPair(BatchProvider):
                 )
             )
             return False
-
