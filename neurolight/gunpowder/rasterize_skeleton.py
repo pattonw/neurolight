@@ -37,6 +37,7 @@ class RasterizeSkeleton(BatchFilter):
         self.radius = radius
 
     def setup(self):
+        self.enable_autoskip()
 
         # todo: ensure that both rois are the same
         points_roi = self.spec[self.points].roi
@@ -56,7 +57,6 @@ class RasterizeSkeleton(BatchFilter):
     def prepare(self, request):
         deps = BatchRequest()
         deps[self.points] = PointsSpec(roi=request[self.array].roi)
-
         return deps
 
     def process(self, batch, request):
