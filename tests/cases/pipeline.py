@@ -160,7 +160,7 @@ class PipelineTest(SWCBaseTest):
                     filename=str(
                         (
                             filename
-                            / "consensus-neurons-with-machine-centerpoints-labelled-as-swcs/G-002.swc"
+                            / "consensus-neurons-with-machine-centerpoints-labelled-as-swcs"
                         ).absolute()
                     ),
                     points=(swcs,),
@@ -170,7 +170,7 @@ class PipelineTest(SWCBaseTest):
                 ),
             )
             + gp.MergeProvider()
-            + gp.RandomLocation(ensure_nonempty=swcs, ensure_centered=True)
+            + gp.RandomLocation(ensure_nonempty=swcs, ensure_centered=True, voxel_size=voxel_size)
             + RasterizeSkeleton(
                 points=swcs,
                 array=labels,
@@ -181,7 +181,11 @@ class PipelineTest(SWCBaseTest):
             + GrowLabels(labels, radius=10)
             # augment
             + gp.ElasticAugment(
-                [40, 10, 10], [0.25, 1, 1], [0, math.pi / 2.0], subsample=4
+                [40, 10, 10],
+                [0.25, 1, 1],
+                [0, math.pi / 2.0],
+                subsample=4,
+                voxel_size=voxel_size,
             )
             + gp.SimpleAugment(mirror_only=[1, 2], transpose_only=[1, 2])
             + gp.Normalize(raw)
@@ -221,6 +225,7 @@ class PipelineTest(SWCBaseTest):
             + Crop(labels_fused, labels_fg)
             + BinarizeGt(labels_fg, labels_fg_bin)
             + gp.BalanceLabels(labels_fg_bin, loss_weights)
+            + gp.PrintProfilingStats(every=5)
         )
 
         request = BatchRequest()
