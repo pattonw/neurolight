@@ -1,5 +1,5 @@
 from gunpowder.points import PointsKey
-from gunpowder.graph_points import GraphPoint, GraphPoints
+from gunpowder.graph_points import GraphPoint, GraphPoints, SpatialGraph
 from gunpowder.nodes.batch_provider import BatchProvider
 from gunpowder.batch_request import BatchRequest
 from gunpowder.coordinate import Coordinate
@@ -8,8 +8,6 @@ from gunpowder.points_spec import PointsSpec
 from gunpowder.batch import Batch
 from gunpowder.profiling import Timing
 
-from gunpowder import SpatialGraph
-
 import numpy as np
 from scipy.spatial.ckdtree import cKDTree, cKDTreeNode
 
@@ -17,6 +15,7 @@ from pathlib import Path
 from typing import List, Dict, Tuple
 import logging
 import copy
+import networkx as nx
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +71,7 @@ class SwcFileSource(BatchProvider):
         scale: Coordinate = Coordinate([1, 1, 1]),
         keep_ids: bool = False,
         transpose: Tuple[int] = (0, 1, 2),
+        radius: Coordinate = Coordinate((1000, 1000, 1000)),
     ):
         self.filename = filename
         self.points = points
@@ -79,20 +79,15 @@ class SwcFileSource(BatchProvider):
         self.scale = scale
         self.connected_component_label = 0
         self.keep_ids = keep_ids
-        self.points_set = GraphPoints(
-            data={},
-            spec=PointsSpec(
-                roi=Roi(Coordinate((None, None, None)), Coordinate((None, None, None)))
-            ),
-        )
+        self._graph = SpatialGraph()
         self.transpose = transpose
+        self.radius = radius
 
     @property
     def g(self):
-        return self.points_set.graph
+        return self._graph
 
     def setup(self):
-
         self._read_points()
 
         if self.points_spec is not None:
@@ -102,11 +97,9 @@ class SwcFileSource(BatchProvider):
                 self.provides(point, point_spec)
         else:
             logger.debug("No point spec provided!")
-            # min_bb = Coordinate(self.data.mins[0:3])
-            min_bb = Coordinate([None, None, None])
+            min_bb = Coordinate(self.data.mins[0:3]) - self.radius
             # cKDTree max is inclusive
-            # max_bb = Coordinate(self.data.maxes[0:3]) + Coordinate([1, 1, 1])
-            max_bb = Coordinate([None, None, None])
+            max_bb = Coordinate(self.data.maxes[0:3]) + self.radius
 
             roi = Roi(min_bb, max_bb - min_bb)
 
@@ -115,7 +108,7 @@ class SwcFileSource(BatchProvider):
 
     def provide(self, request: BatchRequest) -> Batch:
 
-        timing = Timing(self)
+        timing = Timing(self, "provide")
         timing.start()
 
         batch = Batch()
@@ -134,21 +127,24 @@ class SwcFileSource(BatchProvider):
                 ),
             )
 
-            # Obtain subgraph that contains these points. Keep track of edges that
-            # are present in the main graph, but not the subgraph
-            points_subset = self._subset_points(
-                [int(point[3]) for point in points], with_neighbors=True
+            point_locations = {int(point[3]): np.array(point[0:3]) for point in points}
+
+            # To account for boundary crossings we must retrieve neighbors of all points
+            # in the graph. This is too slow for large queries and less important
+            points_subgraph = self._subgraph_points(
+                list(point_locations.keys()), with_neighbors=len(point_locations) < 1000
             )
 
             # Handle boundary cases
-            points_subset = points_subset.crop(request[points_key].roi)
+            points_subgraph = points_subgraph.crop(request[points_key].roi)
 
             batch = Batch()
-            batch.points[points_key] = points_subset
+            batch.points[points_key] = GraphPoints._from_graph(points_subgraph)
+            batch.points[points_key].spec = request[points_key]
 
             logger.debug(
                 "Swc points source provided {} points for roi: {}".format(
-                    len(points_subset.data), request[points_key].roi
+                    len(batch.points[points_key].data), request[points_key].roi
                 )
             )
 
@@ -303,31 +299,36 @@ class SwcFileSource(BatchProvider):
     ):
         # add points to a temporary graph
         logger.debug("adding {} nodes to graph".format(len(points)))
-        new_points = GraphPoints(points, self.points_set.spec.roi, edges)
+        temp = SpatialGraph()
+        for point_id, graph_point in points.items():
+            temp.add_node(point_id, **graph_point.attrs)
+        for u, v in edges:
+            if u in temp.nodes and v in temp.nodes:
+                temp.add_edge(u, v)
 
-        self.points_set = self.points_set.disjoint_merge(new_points)
-        logger.debug("graph has {} nodes".format(len(self.points_set.data)))
+        self._graph = nx.disjoint_union(self.g, temp)
+        logger.debug("graph has {} nodes".format(len(self.g.nodes)))
 
-    def _subset_points(self, nodes: List[int], with_neighbors=False) -> GraphPoints:
+    def _subgraph_points(self, nodes: List[int], with_neighbors=False) -> SpatialGraph:
         """
         Creates a subgraph of `graph` that contains the points in `nodes`.
         If `with_neighbors` is True, the subgraph contains all neighbors
         of all points in `nodes` as well.
         """
+        # TODO use nx subgraph function
         sub_g = SpatialGraph()
         subgraph_nodes = set(nodes)
         subgraph_edges = set()
-        for n in nodes:
-            for successor in self.g.successors(n):
-                if with_neighbors or successor in nodes:
+        if with_neighbors:
+            for n in nodes:
+                for successor in self.g.successors(n):
                     subgraph_nodes.add(successor)
                     subgraph_edges.add((n, successor))
-            for predecessor in self.g.predecessors(n):
-                if with_neighbors or predecessor in nodes:
+                for predecessor in self.g.predecessors(n):
                     subgraph_nodes.add(predecessor)
                     subgraph_edges.add((predecessor, n))
         for n in subgraph_nodes:
-            sub_g.add_node(n, **copy.deepcopy(self.g.nodes[n]))
+            sub_g.add_node(n, **self.g.nodes[n])
         sub_g.add_edges_from(subgraph_edges)
-        return GraphPoints._from_graph(sub_g)
+        return sub_g
 
