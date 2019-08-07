@@ -78,6 +78,7 @@ class FusionAugment(BatchFilter):
         blend_mode="labels_mask",
         blend_smoothness=3,
         num_blended_objects=0,
+        scale_add_volume=True,
     ):
 
         self.raw_base = raw_base
@@ -128,6 +129,10 @@ class FusionAugment(BatchFilter):
         # Get add arrays
         raw_add_array = batch[self.raw_add].data
         labels_add_array = batch[self.labels_add].data
+
+        raw_base_median = np.median(raw_base_array)
+        raw_add_median = np.median(raw_add_array)
+        raw_add_array = raw_add_array + raw_base_median - raw_add_median
 
         # fuse labels
         fused_labels_array = self._relabel(labels_base_array.astype(np.int32))
