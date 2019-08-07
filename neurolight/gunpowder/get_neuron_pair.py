@@ -12,7 +12,7 @@ from gunpowder import (
     Coordinate,
     PointsKey,
 )
-from gunpowder.profiling import Timing
+from gunpowder.profiling import Timing, ProfilingStats
 from typing import Tuple, Optional
 import logging
 import time
@@ -78,9 +78,9 @@ class GetNeuronPair(BatchProvider):
 
     @property
     def seed(self) -> int:
-        return hash(
+        return (
             hash(self.points + self.arrays + self.labels) + hash(time.time() * 1e6)
-        )
+        ) % (2 ** 32)
 
     @property
     def upstream_provider(self):
@@ -140,17 +140,20 @@ class GetNeuronPair(BatchProvider):
         valid points are found.
         """
 
+        base_seed, add_seed, direction, prepare_profiling_stats = self.get_valid_seeds(
+            request
+        )
+
         timing_prepare = Timing(self, "prepare")
         timing_prepare.start()
-
-        base_seed, add_seed, direction = self.get_valid_seeds(request)
+        
         request_base = self.prepare(request, base_seed)
         request_add = self.prepare(request, add_seed)
 
+        timing_prepare.stop()
+
         base = self.upstream_provider.request_batch(request_base)
         add = self.upstream_provider.request_batch(request_add)
-
-        timing_prepare.stop()
 
         timing_process = Timing(self, "process")
         timing_process.start()
@@ -165,11 +168,16 @@ class GetNeuronPair(BatchProvider):
         batch = self.merge_batches(base, add)
 
         timing_process.stop()
+        batch.profiling_stats.merge_with(prepare_profiling_stats)
+        batch.profiling_stats.add(timing_prepare)
+        batch.profiling_stats.add(timing_process)
 
         return batch
 
     def merge_batches(self, base: Batch, add: Batch) -> Batch:
         combined = Batch()
+        combined.profiling_stats.merge_with(base.profiling_stats)
+        combined.profiling_stats.merge_with(add.profiling_stats)
 
         base_map = {
             self.point_source: self.points[0],
@@ -189,23 +197,27 @@ class GetNeuronPair(BatchProvider):
 
         return combined
 
-    def get_valid_seeds(self, request: BatchRequest) -> Tuple[int, int, Coordinate]:
+    def get_valid_seeds(
+        self, request: BatchRequest
+    ) -> Tuple[int, int, Coordinate]:
         """
         Request pairs of point sets, making sure that you can seperate the
         two. If it is possible to seperate the two then keep those seeds, else
         try again with new seeds.
         """
 
+        profiling_stats = ProfilingStats()
+
         for _ in range(self.request_attempts):
             points_request_base, base_seed = self.prepare_points(request)
             points_request_add, add_seed = self.prepare_points(request)
-            try:
-                direction = self.check_valid_requests(
-                    points_request_base, points_request_add, request
-                )
-                return base_seed, add_seed, direction
-            except ValueError:
-                logging.debug("Request with seeds {} and {} failed!")
+            direction = self.check_valid_requests(
+                points_request_base, points_request_add, request, profiling_stats
+            )
+            if direction is not None:
+                return base_seed, add_seed, direction, profiling_stats
+            else:
+                continue
         raise ValueError(
             "Failed {} attempts to retrieve a pair of neurons!".format(
                 self.request_attempts
@@ -217,7 +229,8 @@ class GetNeuronPair(BatchProvider):
         points_request_base: BatchRequest,
         points_request_add: BatchRequest,
         request: BatchRequest,
-    ) -> Coordinate:
+        profiling_stats: ProfilingStats,
+    ) -> Optional[Coordinate]:
         """
         check if the points returned by these requests are seperable.
         If they are return the direction vector used to seperate them.
@@ -225,7 +238,13 @@ class GetNeuronPair(BatchProvider):
         points_base = self.upstream_provider.request_batch(points_request_base)
         points_add = self.upstream_provider.request_batch(points_request_add)
 
-        for _ in range(self.shift_attempts):
+        profiling_stats.merge_with(points_base.profiling_stats)
+        profiling_stats.merge_with(points_add.profiling_stats)
+
+        timing_process_points = Timing("process points")
+        timing_process_points.start()
+        for i in range(self.shift_attempts):
+            logging.debug("attempting shift {} of {}".format(i, self.shift_attempts))
             direction = self.random_direction()
             points_base_shifted = self.process(
                 points_base, direction, request=request, batch_index=0, inplace=False
@@ -237,9 +256,17 @@ class GetNeuronPair(BatchProvider):
                 points_base_shifted[self.point_source].graph,
                 points_add_shifted[self.point_source].graph,
             ):
-                return direction
+                logging.debug("Valid shift found: {}".format(direction))
 
-        raise ValueError("Failed to seperate these points")
+                timing_process_points.stop()
+                profiling_stats.add(timing_process_points)
+                return direction
+            else:
+                logging.debug("{} was invalid!".format(direction))
+
+        timing_process_points.stop()
+        profiling_stats.add(timing_process_points)
+        return None
 
     def random_direction(self) -> Coordinate:
         # there should be a better way of doing this. If distances are small,
@@ -378,7 +405,7 @@ class GetNeuronPair(BatchProvider):
         else:
             logger.debug(
                 (
-                    "expected a minimum distance between the two neurons"
+                    "expected a minimum distance between the two neurons "
                     + "to be in the range ({}, {}), however saw a min distance of {}"
                 ).format(
                     self.seperate_by - voxel_size.max(),
