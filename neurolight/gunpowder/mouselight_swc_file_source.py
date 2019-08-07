@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 def load_transform(transform_path: Path):
-    text = transform_path.open("r").read()
+    with transform_path.open("r") as tf_file:
+        text = tf_file.read()
     lines = text.split("\n")
     constants = {}
     for line in lines:
@@ -38,7 +39,10 @@ class MouselightSwcFileSource(SwcFileSource):
 
     def __init__(self, *args, **kwargs):
         transform_file = kwargs.pop("transform_file")
+        ignore_human_nodes = kwargs.pop("ignore_human_nodes", True)
+
         super().__init__(*args, **kwargs)
+        self.ignore_human_nodes = ignore_human_nodes
         self.transform_file = Path(transform_file)
 
     def _parse_swc(self, filename: Path):
@@ -48,7 +52,6 @@ class MouselightSwcFileSource(SwcFileSource):
         used.
         """
         # initialize file specific variables
-        points = {}
         header = True
         offset = np.array([0, 0, 0])
 
@@ -59,6 +62,8 @@ class MouselightSwcFileSource(SwcFileSource):
 
         # parse file
         with filename.open() as o_f:
+            points = {}
+            edges = set()
             for line in o_f.read().splitlines():
                 if header and line.startswith("#"):
                     # Search header comments for variables
@@ -76,18 +81,37 @@ class MouselightSwcFileSource(SwcFileSource):
                     raise ValueError("SWC has a malformed line: {}".format(line))
 
                 # extract data from row (point_id, type, x, y, z, radius, parent_id)
-                points[int(row[0])] = GraphPoint(
-                    point_id=int(row[0]),
-                    parent_id=int(row[6]),
-                    point_type=int(row[1]),
-                    location=np.array(
-                        (
-                            (np.array([float(x) for x in row[2:5]]) + offset - origin)
-                            / spacing
-                        ).take(self.transpose)
-                        * self.scale,
-                        dtype=float,
-                    ),
-                    radius=float(row[5]),
+                assert int(row[0]) not in points, "Duplicate point {} found!".format(
+                    int(row[0])
                 )
-            self._add_points_to_source(points)
+                if int(row[1]) != 43:
+                    points[int(row[0])] = GraphPoint(
+                        point_type=int(row[1]),
+                        location=np.array(
+                            (
+                                (
+                                    np.array([float(x) for x in row[2:5]])
+                                    + offset
+                                    - origin
+                                )
+                                / spacing
+                            ).take(self.transpose)
+                            * self.scale,
+                            dtype=float,
+                        ),
+                        radius=float(row[5]),
+                    )
+                    v, u = int(row[0]), int(row[6])
+                    assert (u, v) not in edges, "Duplicate edge {} found!".format(
+                        (u, v)
+                    )
+                    if u != v and u is not None and v is not None and u >= 0 and v >= 0:
+                        edges.add((u, v))
+            
+            non_human_edges = set()
+            if self.ignore_human_nodes:
+                for u, v in edges:
+                    if u not in points or v not in points:
+                        non_human_edges.add((u, v))
+            self._add_points_to_source(points, edges - non_human_edges)
+            
