@@ -27,14 +27,15 @@ class GrowLabels(BatchFilter):
         self.radius = radius
 
     def setup(self):
-        pass
+        self.enable_autoskip()
+
+        self.updates(self.array, self.spec[self.array])
 
     def prepare(self, request: BatchRequest):
         deps = BatchRequest()
 
-        if self.array in request:
-            deps[self.array] = request[self.array]
-        
+        deps[self.array] = request[self.array]
+
         return deps
 
     def process(self, batch, request: BatchRequest):
