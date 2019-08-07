@@ -50,8 +50,8 @@ class EnsureCenteredTest(SWCBaseTest):
         request = BatchRequest()
         request.add(img, Coordinate((5, 5, 5)))
 
-        for i in range(100):
-            with build(pipeline):
+        with build(pipeline):
+            for i in range(100):
                 batch = pipeline.request_batch(request)
 
             data = batch[img].data
