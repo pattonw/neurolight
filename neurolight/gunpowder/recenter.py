@@ -16,7 +16,7 @@ class Recenter(BatchFilter):
                 The Points from which to ensure a node is centered
 
             array_source (:class:``Tuple[ArraySpec]``):
-                The Array to crops
+                The Arrays to crop
 
             max_offset (:class:``float``, optional):
                 Maximum distance the center point could have moved due to upstream processing
