@@ -60,7 +60,7 @@ class GetNeuronPair(BatchProvider):
         points: Tuple[PointsKey, PointsKey],
         arrays: Tuple[ArrayKey, ArrayKey],
         labels: Tuple[ArrayKey, ArrayKey],
-        seperate_by: float = 1.0,
+        seperate_by: Tuple[float, float] = (0.0, 1.0),
         shift_attempts: int = 3,
         request_attempts: int = 3,
         spec: ProviderSpec = None,
@@ -109,13 +109,20 @@ class GetNeuronPair(BatchProvider):
         growth = self._get_growth()
         seed = self.seed
 
-        seed_deps = BatchRequest(random_seed=seed)
+        dps = BatchRequest(random_seed=seed)
 
-        spec = copy.deepcopy(request[self.points[0]])
-        spec.roi = spec.roi.grow(growth, growth)
-        seed_deps[self.point_source] = spec
+        dps[self.point_source] = copy.deepcopy(request[self.points[0]])
+        dps[self.point_source].roi = dps[self.point_source].roi.grow(growth, growth)
+        dps.place_holders[self.array_source] = copy.deepcopy(request[self.arrays[0]])
+        dps.place_holders[self.array_source].roi = dps.place_holders[
+            self.array_source
+        ].roi.grow(growth, growth)
+        dps.place_holders[self.label_source] = copy.deepcopy(request[self.labels[0]])
+        dps.place_holders[self.label_source].roi = dps.place_holders[
+            self.label_source
+        ].roi.grow(growth, growth)
 
-        return seed_deps, seed
+        return dps, seed
 
     def prepare(self, request: BatchRequest, seed: int) -> Tuple[BatchRequest, int]:
         """
@@ -123,16 +130,16 @@ class GetNeuronPair(BatchProvider):
         """
         growth = self._get_growth()
 
-        deps = BatchRequest(random_seed=seed)
+        dps = BatchRequest(random_seed=seed)
 
-        deps[self.point_source] = copy.deepcopy(request[self.points[0]])
-        deps[self.point_source].roi = deps[self.point_source].roi.grow(growth, growth)
-        deps[self.array_source] = copy.deepcopy(request[self.arrays[0]])
-        deps[self.array_source].roi = deps[self.array_source].roi.grow(growth, growth)
-        deps[self.label_source] = copy.deepcopy(request[self.labels[0]])
-        deps[self.label_source].roi = deps[self.label_source].roi.grow(growth, growth)
+        dps[self.point_source] = copy.deepcopy(request[self.points[0]])
+        dps[self.point_source].roi = dps[self.point_source].roi.grow(growth, growth)
+        dps[self.array_source] = copy.deepcopy(request[self.arrays[0]])
+        dps[self.array_source].roi = dps[self.array_source].roi.grow(growth, growth)
+        dps[self.label_source] = copy.deepcopy(request[self.labels[0]])
+        dps[self.label_source].roi = dps[self.label_source].roi.grow(growth, growth)
 
-        return deps
+        return dps
 
     def provide(self, request: BatchRequest) -> Batch:
         """
@@ -146,7 +153,7 @@ class GetNeuronPair(BatchProvider):
 
         timing_prepare = Timing(self, "prepare")
         timing_prepare.start()
-        
+
         request_base = self.prepare(request, base_seed)
         request_add = self.prepare(request, add_seed)
 
@@ -197,9 +204,7 @@ class GetNeuronPair(BatchProvider):
 
         return combined
 
-    def get_valid_seeds(
-        self, request: BatchRequest
-    ) -> Tuple[int, int, Coordinate]:
+    def get_valid_seeds(self, request: BatchRequest) -> Tuple[int, int, Coordinate]:
         """
         Request pairs of point sets, making sure that you can seperate the
         two. If it is possible to seperate the two then keep those seeds, else
@@ -277,7 +282,7 @@ class GetNeuronPair(BatchProvider):
         voxel_size = np.array(self.spec[self.array_source].voxel_size)  # should be lcm
         random_direction = np.random.randn(3)
         random_direction /= np.linalg.norm(random_direction)  # unit vector
-        random_direction *= self.seperate_by  # physical units
+        random_direction *= np.mean(self.seperate_by)  # physical units
         random_direction = (
             (np.round(random_direction / voxel_size) + 1) // 2
         ) * voxel_size  # physical units rounded to nearest voxel size
@@ -374,7 +379,7 @@ class GetNeuronPair(BatchProvider):
         by 4.
         """
         voxel_size = np.array(self.spec[self.array_source].voxel_size)
-        distance = np.array((self.seperate_by,) * 3)
+        distance = np.array((np.mean(self.seperate_by),) * 3)
         # voxel shift is rounded up to the nearest voxel in each axis
         voxel_shift = (distance + voxel_size - 1) // voxel_size
         # expand positive and negative sides enough to contain any desired shift
@@ -386,20 +391,14 @@ class GetNeuronPair(BatchProvider):
         Simply checks for every pair of points, is the distance between them
         greater than the desired seperation criterion.
         """
-        voxel_size = np.array(self.spec[self.array_source].voxel_size)
-
-        min_dist = self.seperate_by + 2 * voxel_size.mean()
+        min_dist = float("inf")
         for point_id_base, point_base in base_graph.nodes.items():
             for point_id_add, point_add in add_graph.nodes.items():
                 min_dist = min(
                     np.linalg.norm(point_base["location"] - point_add["location"]),
                     min_dist,
                 )
-        if (
-            self.seperate_by - voxel_size.max()
-            <= min_dist
-            <= self.seperate_by + voxel_size.max()
-        ):
+        if self.seperate_by[0] <= min_dist <= self.seperate_by[1]:
             logger.debug(("Got a min distance of {}").format(min_dist))
             return True
         else:
@@ -407,10 +406,6 @@ class GetNeuronPair(BatchProvider):
                 (
                     "expected a minimum distance between the two neurons "
                     + "to be in the range ({}, {}), however saw a min distance of {}"
-                ).format(
-                    self.seperate_by - voxel_size.max(),
-                    self.seperate_by + voxel_size.max(),
-                    min_dist,
-                )
+                ).format(self.seperate_by[0], self.seperate_by[1], min_dist)
             )
             return False

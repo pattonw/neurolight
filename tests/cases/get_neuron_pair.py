@@ -107,9 +107,9 @@ class GetNeuronPairTest(SWCBaseTest):
             points=(points_a, points_b),
             arrays=(img_a, img_b),
             labels=(labels_a, labels_b),
-            seperate_by=2,
+            seperate_by=(1, 3),
             shift_attempts=100,
-            request_attempts=10
+            request_attempts=10,
         )
 
         request = BatchRequest()
