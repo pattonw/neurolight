@@ -11,7 +11,7 @@ __all__ = [
     "FusionAugmentTest",
     "GetNeuronPairTest",
     "GrowLabelsTest",
-    # "PipelineTest",
+    "PipelineTest",
     "RasterizeSkeletonTest",
     "SwcFileSourceTest"
 ]

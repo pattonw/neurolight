@@ -6,6 +6,7 @@ from gunpowder import (
     Batch,
     Roi,
     Points,
+    PointsSpec,
     GraphPoints,
     Array,
     ArrayKey,
@@ -17,6 +18,7 @@ from typing import Tuple, Optional
 import logging
 import time
 import copy
+import itertools
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +96,7 @@ class GetNeuronPair(BatchProvider):
         """
         Provide the two copies of the upstream points and images
         """
+
         for point_key, array_key, label_key in zip(
             self.points, self.arrays, self.labels
         ):
@@ -111,7 +114,25 @@ class GetNeuronPair(BatchProvider):
 
         dps = BatchRequest(random_seed=seed)
 
-        dps[self.point_source] = copy.deepcopy(request[self.points[0]])
+        if any([points in request for points in self.points]):
+            dps[self.point_source] = request.points.get(
+                self.points[0], request.self.points[1]
+            )
+        elif any([array in request for array in self.arrays]):
+            dps[self.point_source] = PointsSpec(
+                roi=request.array_specs.get(self.arrays[0], request[self.arrays[1]]).roi
+            )
+        elif any([labels in request for labels in self.labels]):
+            dps[self.points_source] = PointsSpec(
+                roi=request.array_specs.get(self.labels[0], request[self.labels[1]]).roi
+            )
+        else:
+            raise ValueError(
+                "One of the following must be requested: {}, {}, {}".format(
+                    self.points, self.arrays, self.labels
+                )
+            )
+
         dps[self.point_source].roi = dps[self.point_source].roi.grow(growth, growth)
         dps.place_holders[self.array_source] = copy.deepcopy(request[self.arrays[0]])
         dps.place_holders[self.array_source].roi = dps.place_holders[
@@ -132,12 +153,15 @@ class GetNeuronPair(BatchProvider):
 
         dps = BatchRequest(random_seed=seed)
 
-        dps[self.point_source] = copy.deepcopy(request[self.points[0]])
-        dps[self.point_source].roi = dps[self.point_source].roi.grow(growth, growth)
-        dps[self.array_source] = copy.deepcopy(request[self.arrays[0]])
-        dps[self.array_source].roi = dps[self.array_source].roi.grow(growth, growth)
-        dps[self.label_source] = copy.deepcopy(request[self.labels[0]])
-        dps[self.label_source].roi = dps[self.label_source].roi.grow(growth, growth)
+        if any([points in request for points in self.points]):
+            dps[self.point_source] = copy.deepcopy(request[self.points[0]])
+            dps[self.point_source].roi = dps[self.point_source].roi.grow(growth, growth)
+        if any([array in request for array in self.arrays]):
+            dps[self.array_source] = copy.deepcopy(request[self.arrays[0]])
+            dps[self.array_source].roi = dps[self.array_source].roi.grow(growth, growth)
+        if any([labels in request for labels in self.labels]):
+            dps[self.label_source] = copy.deepcopy(request[self.labels[0]])
+            dps[self.label_source].roi = dps[self.label_source].roi.grow(growth, growth)
 
         return dps
 
@@ -299,7 +323,7 @@ class GetNeuronPair(BatchProvider):
     ) -> Batch:
         if not inplace:
             batch = copy.deepcopy(batch)
-        points = batch.points[self.point_source]
+        points = batch.points.get(self.point_source, None)
         array = batch.arrays.get(self.array_source, None)
         label = batch.arrays.get(self.label_source, None)
 
@@ -312,7 +336,8 @@ class GetNeuronPair(BatchProvider):
             request=request,
             batch_index=batch_index,
         )
-        batch.points[self.point_source] = points
+        if points is not None:
+            batch.points[self.point_source] = points
         if array is not None:
             batch.arrays[self.array_source] = array
         if label is not None:
@@ -322,7 +347,7 @@ class GetNeuronPair(BatchProvider):
 
     def _shift_and_crop(
         self,
-        points: Points,
+        points: Optional[Points],
         array: Optional[Array],
         labels: Optional[Array],
         direction: Coordinate,
@@ -330,19 +355,30 @@ class GetNeuronPair(BatchProvider):
         batch_index: int,
     ) -> Tuple[Points, Optional[Array], Optional[Array]]:
 
-        points = self._shift_and_crop_points(
-            points, direction, request[self.points[batch_index]].roi
-        )
+        roi = self._return_roi(request)
+        if points is not None:
+            points = self._shift_and_crop_points(points, direction, roi)
         if array is not None:
-            array = self._shift_and_crop_array(
-                array, direction, request[self.arrays[batch_index]].roi
-            )
+            array = self._shift_and_crop_array(array, direction, roi)
         if labels is not None:
-            labels = self._shift_and_crop_array(
-                labels, direction, request[self.labels[batch_index]].roi
-            )
+            labels = self._shift_and_crop_array(labels, direction, roi)
 
         return points, array, labels
+
+    def _return_roi(self, request):
+        potential_requests = list(
+            itertools.chain(self.points, self.arrays, self.labels)
+        )
+        print(potential_requests)
+        contained = [request[p] for p in potential_requests if p in request]
+        rois = [request[r].roi for r in contained]
+        for i, roi_a in enumerate(rois):
+            for j, roi_b in enumerate(rois[i + 1 :]):
+                assert roi_a == roi_b, (
+                    "points, arrays, and labels should all have "
+                    + "the same roi, but we see {} and {}"
+                ).format(roi_a, roi_b)
+        return rois[0]
 
     def _extract_roi(self, larger, smaller, direction):
         center = larger.get_offset() + larger.get_shape() // 2
@@ -355,7 +391,11 @@ class GetNeuronPair(BatchProvider):
         shifted_smaller_roi = self._extract_roi(array.spec.roi, output_roi, direction)
 
         array = array.crop(shifted_smaller_roi)
-        array.spec.roi = output_roi
+        array.spec.roi = (
+            output_roi
+            if output_roi is not None
+            else Roi((0,) * len * array.data.shape, array.data.shape)
+        )
         return array
 
     def _shift_and_crop_points(self, points, direction, output_roi):
@@ -366,7 +406,9 @@ class GetNeuronPair(BatchProvider):
         point_graph.crop(shifted_smaller_roi)
         point_graph.shift(-shifted_smaller_roi.get_offset())
         points = GraphPoints._from_graph(point_graph)
-        points.spec.roi = output_roi
+        points.spec.roi = (
+            output_roi if output_roi is not None else Roi((None,) * 3, (None,) * 3)
+        )
         return points
 
     def _get_growth(self):

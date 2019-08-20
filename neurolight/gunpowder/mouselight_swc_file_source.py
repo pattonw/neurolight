@@ -84,7 +84,7 @@ class MouselightSwcFileSource(SwcFileSource):
                 assert int(row[0]) not in points, "Duplicate point {} found!".format(
                     int(row[0])
                 )
-                if int(row[1]) != 43:
+                if not self.ignore_human_nodes or int(row[1]) != 43:
                     points[int(row[0])] = GraphPoint(
                         point_type=int(row[1]),
                         location=np.array(
@@ -108,10 +108,10 @@ class MouselightSwcFileSource(SwcFileSource):
                     if u != v and u is not None and v is not None and u >= 0 and v >= 0:
                         edges.add((u, v))
             
-            non_human_edges = set()
+            human_edges = set()
             if self.ignore_human_nodes:
                 for u, v in edges:
                     if u not in points or v not in points:
-                        non_human_edges.add((u, v))
-            self._add_points_to_source(points, edges - non_human_edges)
+                        human_edges.add((u, v))
+            self._add_points_to_source(points, edges - human_edges)
             

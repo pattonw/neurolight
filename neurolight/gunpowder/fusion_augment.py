@@ -79,6 +79,10 @@ class FusionAugment(BatchFilter):
         blend_smoothness=3,
         num_blended_objects=0,
         scale_add_volume=True,
+        soft_mask=None,
+        masked_base=None,
+        masked_add=None,
+        mask_maxed=None,
     ):
 
         self.raw_base = raw_base
@@ -93,6 +97,11 @@ class FusionAugment(BatchFilter):
         self.blend_mode = blend_mode
         self.blend_smoothness = blend_smoothness
         self.num_blended_objects = num_blended_objects
+        self.scale_add_volume = scale_add_volume
+        self.soft_mask = soft_mask
+        self.masked_base = masked_base
+        self.masked_add = masked_add
+        self.mask_maxed = mask_maxed
 
         assert self.blend_mode in ["intensity", "labels_mask"], (
             "Unknown blend mode %s." % self.blend_mode
@@ -103,6 +112,10 @@ class FusionAugment(BatchFilter):
         self.provides(self.raw_fused, self.spec[self.raw_base].copy())
         self.provides(self.labels_fused, self.spec[self.labels_base].copy())
         self.provides(self.points_fused, self.spec[self.points_base].copy())
+        self.provides(self.soft_mask, self.spec[self.raw_base].copy())
+        self.provides(self.masked_base, self.spec[self.raw_base].copy())
+        self.provides(self.masked_add, self.spec[self.raw_base].copy())
+        self.provides(self.mask_maxed, self.spec[self.raw_base].copy())
 
     def prepare(self, request):
         # add "base" and "add" volume to request
@@ -114,13 +127,15 @@ class FusionAugment(BatchFilter):
         deps[self.labels_base] = request[self.raw_fused]
         deps[self.labels_add] = request[self.raw_fused]
 
-        # enlarge roi for points to be the same as the raw data
-        deps[self.points_base] = PointsSpec(roi=request[self.raw_fused].roi)
-        deps[self.points_add] = PointsSpec(roi=request[self.raw_fused].roi)
+        # make points optional
+        if self.points_fused in request:
+            deps[self.points_base] = PointsSpec(roi=request[self.raw_fused].roi)
+            deps[self.points_add] = PointsSpec(roi=request[self.raw_fused].roi)
 
         return deps
 
     def process(self, batch, request):
+        raw_base_spec = batch[self.raw_base].spec.copy()
 
         # Get base arrays
         raw_base_array = batch[self.raw_base].data
@@ -130,9 +145,10 @@ class FusionAugment(BatchFilter):
         raw_add_array = batch[self.raw_add].data
         labels_add_array = batch[self.labels_add].data
 
-        raw_base_median = np.median(raw_base_array)
-        raw_add_median = np.median(raw_add_array)
-        raw_add_array = raw_add_array + raw_base_median - raw_add_median
+        if self.scale_add_volume:
+            raw_base_median = np.median(raw_base_array)
+            raw_add_median = np.median(raw_add_array)
+            raw_add_array = raw_add_array - raw_add_median + raw_base_median
 
         # fuse labels
         fused_labels_array = self._relabel(labels_base_array.astype(np.int32))
@@ -164,12 +180,23 @@ class FusionAugment(BatchFilter):
             soft_mask = np.zeros_like(add_mask, dtype="float32")
             ndimage.gaussian_filter(
                 add_mask.astype("float32"),
-                sigma=self.blend_smoothness,
+                sigma=self.blend_smoothness / np.array(raw_base_spec.voxel_size),
                 output=soft_mask,
                 mode="nearest",
             )
             soft_mask /= np.max(soft_mask)
             soft_mask = np.clip((soft_mask * 2), 0, 1)
+            batch.arrays[self.soft_mask] = Array(soft_mask, spec=raw_base_spec)
+            batch.arrays[self.masked_base] = Array(
+                raw_base_array * (soft_mask > 0.25), spec=raw_base_spec
+            )
+            batch.arrays[self.masked_add] = Array(
+                raw_add_array * soft_mask, spec=raw_base_spec
+            )
+            batch.arrays[self.mask_maxed] = Array(
+                np.maximum(raw_base_array * (soft_mask > 0.25), raw_add_array * soft_mask),
+                spec=raw_base_spec,
+            )
 
             raw_fused_array = np.maximum(soft_mask * raw_add_array, raw_base_array)
 
@@ -190,9 +217,10 @@ class FusionAugment(BatchFilter):
         ).crop(labels_fused_spec.roi)
 
         # fuse points:
-        batch.points[self.points_fused] = batch[self.points_base].merge(
-            batch[self.points_add]
-        )
+        if self.points_fused in request:
+            batch.points[self.points_fused] = batch[self.points_base].merge(
+                batch[self.points_add]
+            )
 
         return batch
 
