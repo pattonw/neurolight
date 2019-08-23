@@ -2,3 +2,4 @@ __pycache__
 .idea
 *.hdf
 .vscode
+*.egg-info

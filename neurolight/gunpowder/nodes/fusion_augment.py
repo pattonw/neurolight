@@ -112,10 +112,14 @@ class FusionAugment(BatchFilter):
         self.provides(self.raw_fused, self.spec[self.raw_base].copy())
         self.provides(self.labels_fused, self.spec[self.labels_base].copy())
         self.provides(self.points_fused, self.spec[self.points_base].copy())
-        self.provides(self.soft_mask, self.spec[self.raw_base].copy())
-        self.provides(self.masked_base, self.spec[self.raw_base].copy())
-        self.provides(self.masked_add, self.spec[self.raw_base].copy())
-        self.provides(self.mask_maxed, self.spec[self.raw_base].copy())
+        if self.soft_mask is not None:
+            self.provides(self.soft_mask, self.spec[self.raw_base].copy())
+        if self.masked_base is not None:
+            self.provides(self.masked_base, self.spec[self.raw_base].copy())
+        if self.masked_add is not None:
+            self.provides(self.masked_add, self.spec[self.raw_base].copy())
+        if self.mask_maxed is not None:
+            self.provides(self.mask_maxed, self.spec[self.raw_base].copy())
 
     def prepare(self, request):
         # add "base" and "add" volume to request
@@ -151,7 +155,7 @@ class FusionAugment(BatchFilter):
             raw_add_array = raw_add_array - raw_add_median + raw_base_median
 
         # fuse labels
-        fused_labels_array = self._relabel(labels_base_array.astype(np.int32))
+        fused_labels_array = self._relabel(labels_base_array)
         next_label_id = np.max(fused_labels_array) + 1
 
         add_mask = np.zeros_like(fused_labels_array, dtype=bool)
@@ -186,17 +190,23 @@ class FusionAugment(BatchFilter):
             )
             soft_mask /= np.max(soft_mask)
             soft_mask = np.clip((soft_mask * 2), 0, 1)
-            batch.arrays[self.soft_mask] = Array(soft_mask, spec=raw_base_spec)
-            batch.arrays[self.masked_base] = Array(
-                raw_base_array * (soft_mask > 0.25), spec=raw_base_spec
-            )
-            batch.arrays[self.masked_add] = Array(
-                raw_add_array * soft_mask, spec=raw_base_spec
-            )
-            batch.arrays[self.mask_maxed] = Array(
-                np.maximum(raw_base_array * (soft_mask > 0.25), raw_add_array * soft_mask),
-                spec=raw_base_spec,
-            )
+            if self.soft_mask is not None:
+                batch.arrays[self.soft_mask] = Array(soft_mask, spec=raw_base_spec)
+            if self.masked_base is not None:
+                batch.arrays[self.masked_base] = Array(
+                    raw_base_array * (soft_mask > 0.25), spec=raw_base_spec
+                )
+            if self.masked_add is not None:
+                batch.arrays[self.masked_add] = Array(
+                    raw_add_array * soft_mask, spec=raw_base_spec
+                )
+            if self.mask_maxed is not None:
+                batch.arrays[self.mask_maxed] = Array(
+                    np.maximum(
+                        raw_base_array * (soft_mask > 0.25), raw_add_array * soft_mask
+                    ),
+                    spec=raw_base_spec,
+                )
 
             raw_fused_array = np.maximum(soft_mask * raw_add_array, raw_base_array)
 
@@ -212,9 +222,8 @@ class FusionAugment(BatchFilter):
         # raw_fused_array.astype(raw_base_spec.dtype)
         batch.arrays[self.raw_fused] = Array(data=raw_fused_array, spec=raw_base_spec)
         batch.arrays[self.labels_fused] = Array(
-            data=fused_labels_array.astype(labels_fused_spec.dtype),
-            spec=labels_add_spec,
-        ).crop(labels_fused_spec.roi)
+            data=fused_labels_array, spec=labels_add_spec
+        )
 
         # fuse points:
         if self.points_fused in request:
@@ -230,8 +239,8 @@ class FusionAugment(BatchFilter):
         if 0 in labels:
             labels.remove(0)
 
-        old_values = np.asarray(labels, dtype=np.int32)
-        new_values = np.arange(1, len(labels) + 1, dtype=np.int32)
+        old_values = np.asarray(labels)
+        new_values = np.arange(1, len(labels) + 1, dtype=old_values.dtype)
 
         values_map = np.arange(int(a.max() + 1), dtype=new_values.dtype)
         values_map[old_values] = new_values

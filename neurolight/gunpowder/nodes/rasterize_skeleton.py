@@ -10,6 +10,9 @@ from gunpowder import (
     PointsSpec,
     GraphPoints,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class RasterizeSkeleton(BatchFilter):
@@ -46,7 +49,7 @@ class RasterizeSkeleton(BatchFilter):
                 roi=points_roi.copy(),
                 voxel_size=Coordinate((1,) * points_roi.dims()),
                 interpolatable=False,
-                dtype=np.int32,
+                dtype=np.uint64,
             )
 
         if self.array_spec.roi is None:
@@ -82,12 +85,14 @@ class RasterizeSkeleton(BatchFilter):
             binarized = np.zeros_like(array_data, dtype=np.bool)
             for u, v in cc.edges:
                 p1 = (cc.nodes[u]["location"] / voxel_size - offset).astype(int)
-                p2 = (cc.nodes[v]["location"] / voxel_size).astype(
-                    int
-                ) - offset
+                p2 = (cc.nodes[v]["location"] / voxel_size - offset).astype(int)
                 binarized = self._rasterize_line_segment(p1, p2, binarized)
 
+            overlap = np.logical_and(
+                np.logical_and(array_data > 0, array_data != i + 1), binarized
+            )
             array_data[binarized] = i + 1
+            array_data[overlap] = -1
 
         array = Array(
             data=array_data,
@@ -136,13 +141,15 @@ class RasterizeSkeleton(BatchFilter):
 
         if line_segment_points.shape[0] > 0:
             idx = np.transpose(line_segment_points.astype(int))
-            if (
-                np.max(idx[0]) >= skeletonized.shape[0]
-                or np.max(idx[1]) >= skeletonized.shape[1]
-                or np.max(idx[2]) >= skeletonized.shape[2]
+            if any(
+                [np.max(idx) >= shape for idx, shape in zip(idx, skeletonized.shape)]
             ):
-                print(np.max(idx, axis=0), skeletonized.shape)
-            skeletonized[idx[0], idx[1], idx[2]] = True
-        skeletonized[point[0], point[1], point[2]] = True
+                logger.warning(
+                    "Got max index: {}, but shape is only: {}".format(
+                        np.max(idx, axis=0), skeletonized.shape
+                    )
+                )
+            skeletonized[tuple(idx)] = True
+        skeletonized[tuple(point)] = True
 
         return skeletonized

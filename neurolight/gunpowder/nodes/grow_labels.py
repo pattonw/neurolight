@@ -2,6 +2,8 @@ import numpy as np
 from gunpowder import BatchFilter, ArrayKey, BatchRequest, Array
 from scipy.ndimage.morphology import distance_transform_edt
 
+from typing import List
+
 
 class GrowLabels(BatchFilter):
     """Expand labels by a given radius.
@@ -15,16 +17,18 @@ class GrowLabels(BatchFilter):
 
                 The spec of the labels array.
 
-            radius (``float``, optional):
+            radii (``list``->``float``, optional):
 
                 The radius to expand labels in world units.
         """
 
-    def __init__(self, array: ArrayKey, overlap_value: int = -1, radius: float = 1.0):
+    def __init__(
+        self, array: ArrayKey, overlap_value: int = -1, radii: List[float] = [1.0]
+    ):
 
         self.array = array
         self.overlap_value = overlap_value
-        self.radius = radius
+        self.radii = radii
 
     def setup(self):
         self.enable_autoskip()
@@ -39,23 +43,19 @@ class GrowLabels(BatchFilter):
         return deps
 
     def process(self, batch, request: BatchRequest):
-        """
-        currently doesnt handle multiple different labels, simply works with a mask.
-        It would probably be more efficient if we could grow multiple labels at the
-        same time, keeping track of which one is closest, and labelling overlap
-        """
         labels = batch[self.array].data
         spec = batch[self.array].spec.copy()
 
         expanded = np.zeros_like(labels)
-        for label in np.unique(labels):
+        unique_labels = np.unique(labels)
+        for i, label in enumerate(unique_labels):
             if label == 0:
                 continue
             label_mask = labels == label
             dt = distance_transform_edt(
                 np.logical_not(label_mask), sampling=spec.voxel_size
             )
-            binarized = dt <= self.radius
+            binarized = dt <= self.radii[i % len(self.radii)]
             overlap = np.logical_and(expanded, binarized)
             expanded[binarized] = label
             expanded[overlap] = self.overlap_value

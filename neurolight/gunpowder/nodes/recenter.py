@@ -1,6 +1,5 @@
 import numpy as np
-from gunpowder import BatchFilter, Roi, Points, Array, ArrayKey, Coordinate, PointsKey
-from neurolight.gunpowder.swc_file_source import GraphPoint
+from gunpowder import BatchFilter, Roi, Points, Array, ArrayKey, Coordinate, PointsKey, GraphPoint
 import networkx as nx
 import logging
 
@@ -123,9 +122,9 @@ class Recenter(BatchFilter):
         # store new graph data in points
         new_points_data = {
             point_id: GraphPoint(
+                point["location"],
                 point_id=point["point_id"],
                 point_type=point["point_type"],
-                location=point["location"],
                 radius=point["radius"],
                 parent_id=point["parent_id"],
                 label_id=point["label_id"],

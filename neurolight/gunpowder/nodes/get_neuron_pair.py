@@ -63,7 +63,7 @@ class GetNeuronPair(BatchProvider):
         arrays: Tuple[ArrayKey, ArrayKey],
         labels: Tuple[ArrayKey, ArrayKey],
         seperate_by: Tuple[float, float] = (0.0, 1.0),
-        shift_attempts: int = 3,
+        shift_attempts: int = 50,
         request_attempts: int = 3,
         spec: ProviderSpec = None,
     ):
@@ -115,8 +115,8 @@ class GetNeuronPair(BatchProvider):
         dps = BatchRequest(random_seed=seed)
 
         if any([points in request for points in self.points]):
-            dps[self.point_source] = request.points.get(
-                self.points[0], request.self.points[1]
+            dps[self.point_source] = request.points_specs.get(
+                self.points[0], request[self.points[1]]
             )
         elif any([array in request for array in self.arrays]):
             dps[self.point_source] = PointsSpec(
@@ -192,11 +192,9 @@ class GetNeuronPair(BatchProvider):
         base = self.process(base, direction, request=request, batch_index=0)
         add = self.process(add, -direction, request=request, batch_index=1)
 
-        assert self._valid_pair(
-            base[self.point_source].graph, add[self.point_source].graph
-        ), "Seeded request produced an invalid pair!"
-
         batch = self.merge_batches(base, add)
+
+        logger.debug("get neuron pair got {}".format(batch))
 
         timing_process.stop()
         batch.profiling_stats.merge_with(prepare_profiling_stats)
@@ -272,6 +270,9 @@ class GetNeuronPair(BatchProvider):
 
         timing_process_points = Timing("process points")
         timing_process_points.start()
+        logger.debug("Points base has {} points".format(len(points_base[self.point_source].data)))
+        logger.debug("Points add has {} points".format(len(points_add[self.point_source].data)))
+        
         for i in range(self.shift_attempts):
             logging.debug("attempting shift {} of {}".format(i, self.shift_attempts))
             direction = self.random_direction()
@@ -304,9 +305,9 @@ class GetNeuronPair(BatchProvider):
         # A better solution might be to do a distance transform on an array with a centered
         # dot and then find all potential moves that have a distance equal to delta +- 0.5
         voxel_size = np.array(self.spec[self.array_source].voxel_size)  # should be lcm
-        random_direction = np.random.randn(3)
+        random_direction = np.random.randn(len(voxel_size))
         random_direction /= np.linalg.norm(random_direction)  # unit vector
-        random_direction *= np.mean(self.seperate_by)  # physical units
+        random_direction *= np.min(self.seperate_by)  # physical units
         random_direction = (
             (np.round(random_direction / voxel_size) + 1) // 2
         ) * voxel_size  # physical units rounded to nearest voxel size
@@ -323,6 +324,8 @@ class GetNeuronPair(BatchProvider):
     ) -> Batch:
         if not inplace:
             batch = copy.deepcopy(batch)
+        
+        logging.debug("processing")
         points = batch.points.get(self.point_source, None)
         array = batch.arrays.get(self.array_source, None)
         label = batch.arrays.get(self.label_source, None)
@@ -369,8 +372,7 @@ class GetNeuronPair(BatchProvider):
         potential_requests = list(
             itertools.chain(self.points, self.arrays, self.labels)
         )
-        print(potential_requests)
-        contained = [request[p] for p in potential_requests if p in request]
+        contained = [p for p in potential_requests if p in request]
         rois = [request[r].roi for r in contained]
         for i, roi_a in enumerate(rois):
             for j, roi_b in enumerate(rois[i + 1 :]):
@@ -421,7 +423,7 @@ class GetNeuronPair(BatchProvider):
         by 4.
         """
         voxel_size = np.array(self.spec[self.array_source].voxel_size)
-        distance = np.array((np.mean(self.seperate_by),) * 3)
+        distance = np.array((np.min(self.seperate_by),) * len(voxel_size))
         # voxel shift is rounded up to the nearest voxel in each axis
         voxel_shift = (distance + voxel_size - 1) // voxel_size
         # expand positive and negative sides enough to contain any desired shift
