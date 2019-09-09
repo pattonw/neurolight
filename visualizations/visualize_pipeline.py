@@ -1,22 +1,29 @@
 from pathlib import Path
 
-from neurolight.gunpowder.mouselight_swc_file_source import MouselightSwcFileSource
-from neurolight.gunpowder.grow_labels import GrowLabels
-from neurolight.gunpowder.rasterize_skeleton import RasterizeSkeleton
-from neurolight.gunpowder.get_neuron_pair import GetNeuronPair
-from neurolight.gunpowder.fusion_augment import FusionAugment
+from neurolight.gunpowder.nodes.mouselight_swc_file_source import (
+    MouselightSwcFileSource,
+)
+from neurolight.gunpowder.nodes.grow_labels import GrowLabels
+from neurolight.gunpowder.nodes.rasterize_skeleton import RasterizeSkeleton
+from neurolight.gunpowder.nodes.get_neuron_pair import GetNeuronPair
+from neurolight.gunpowder.nodes.fusion_augment import FusionAugment
 import gunpowder as gp
 from gunpowder import BatchRequest, build, Coordinate
 import math
 import copy
 import time
+import logging
 
 import numpy as np
 
 import sys
 
+logging.basicConfig(level=logging.DEBUG)
+logging.getLogger(gp.nodes.random_location.__name__).setLevel(logging.INFO)
+
 
 SEPERATE_DISTANCE = int(sys.argv[1])
+SEPERATE_DISTANCE = [SEPERATE_DISTANCE * 0.7, SEPERATE_DISTANCE * 1.3]
 
 
 class BinarizeGt(gp.BatchFilter):
@@ -154,9 +161,8 @@ data_sources = tuple(
         ),
         MouselightSwcFileSource(
             filename=str(
-                (
-                    filename
-                    / "consensus-neurons-with-machine-centerpoints-labelled-as-swcs/G-002.swc"
+                Path(
+                    "/groups/mousebrainmicro/mousebrainmicro/scripts/carver/2018-07-02-v03/augmented-with-skeleton-nodes-as-swcs/G-002.swc"
                 ).absolute()
             ),
             points=(swcs,),
@@ -166,7 +172,9 @@ data_sources = tuple(
         ),
     )
     + gp.MergeProvider()
-    + gp.RandomLocation(ensure_nonempty=swcs, ensure_centered=True, voxel_size=voxel_size)
+    + gp.RandomLocation(
+        ensure_nonempty=swcs, ensure_centered=True, balance_points=False
+    )
     + RasterizeSkeleton(
         points=swcs,
         array=labels,
@@ -174,20 +182,21 @@ data_sources = tuple(
             interpolatable=False, voxel_size=voxel_size, dtype=np.uint32
         ),
     )
-    + GrowLabels(labels, radius=10)
+    + GrowLabels(labels, radii=[10])
     # augment
     + gp.ElasticAugment(
         [40, 10, 10],
         [0.25, 1, 1],
         [0, math.pi / 2.0],
         subsample=4,
-        voxel_size=voxel_size,
+        use_fast_points_transform=True,
+        recompute_missing_points=False,
     )
     + gp.SimpleAugment(mirror_only=[1, 2], transpose_only=[1, 2])
     + gp.Normalize(raw)
     + gp.IntensityAugment(raw, 0.9, 1.1, -0.001, 0.001)
     for filename in path_to_data.iterdir()
-    if "2018-08-01" in filename.name
+    if "2018-07-02" in filename.name
 )
 
 pipeline = (
@@ -221,6 +230,7 @@ pipeline = (
     + Crop(labels_fused, labels_fg)
     + BinarizeGt(labels_fg, labels_fg_bin)
     + gp.BalanceLabels(labels_fg_bin, loss_weights)
+    + gp.PrintProfilingStats()
     + gp.Snapshot(
         output_filename="snapshot_{}_{}.hdf".format(SEPERATE_DISTANCE, "{iteration}"),
         dataset_names={
