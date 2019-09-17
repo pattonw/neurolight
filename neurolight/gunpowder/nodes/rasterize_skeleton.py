@@ -11,6 +11,7 @@ from gunpowder import (
     GraphPoints,
 )
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,8 @@ class RasterizeSkeleton(BatchFilter):
         assert len(points.data.items()) > 0, "No Swc Points in enlarged Roi."
         assert isinstance(points, GraphPoints), "Rasterize skeleton needs a Graph."
 
+        t1 = time.time()
+
         voxel_size = self.array_spec.voxel_size
 
         # get roi used for creating the new array (points_roi does not
@@ -106,6 +109,20 @@ class RasterizeSkeleton(BatchFilter):
 
         array = array.crop(request[self.array].roi)
         batch.arrays[self.array] = array
+
+        t2 = time.time()
+        logger.debug(
+            (
+                "Processing {} nodes in {} connected components took {} seconds, "
+                + "{} per node and {} per connected component"
+            ).format(
+                len(points.data),
+                len(list(nx.weakly_connected_components(graph))),
+                t2 - t1,
+                (t2 - t1) / len(points.data),
+                (t2 - t1) / len(list(nx.weakly_connected_components(graph))),
+            )
+        )
 
         return batch
 

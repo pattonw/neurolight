@@ -1,4 +1,6 @@
 import numpy as np
+from scipy.ndimage.morphology import distance_transform_edt
+from scipy.ndimage.filters import gaussian_filter
 from gunpowder import (
     ProviderSpec,
     BatchProvider,
@@ -235,25 +237,62 @@ class GetNeuronPair(BatchProvider):
 
         profiling_stats = ProfilingStats()
 
-        for _ in range(self.request_attempts):
+        k = 0
+        while True:
+            k += 1
+            if k > 10:
+                raise ValueError("Failed to retrieve a pair of neurons!")
+
             points_request_base, base_seed = self.prepare_points(request)
-            points_request_add, add_seed = self.prepare_points(request)
-            direction = self.check_valid_requests(
-                points_request_base, points_request_add, request, profiling_stats
+
+            base_batch = self.upstream_provider.request_batch(points_request_base)
+            profiling_stats.merge_with(base_batch.profiling_stats)
+
+            timing_prepare_base = Timing("prepare base")
+            timing_prepare_base.start()
+
+            distance_transform, gradients = self.prepare_base(
+                base_batch[self.point_source]
             )
-            if direction is not None:
-                return base_seed, add_seed, direction, profiling_stats
-            else:
-                continue
-        raise ValueError(
-            "Failed {} attempts to retrieve a pair of neurons!".format(
-                self.request_attempts
-            )
-        )
+
+            for _ in range(self.request_attempts):
+                points_request_add, add_seed = self.prepare_points(request)
+                direction = self.check_valid_requests(
+                    distance_transform,
+                    gradients,
+                    points_request_add,
+                    request,
+                    profiling_stats,
+                )
+                if direction is not None:
+                    return base_seed, add_seed, direction, profiling_stats
+                else:
+                    continue
+
+    def prepare_base(self, points_base):
+        logger.debug("preparing base dist and gradients")
+        base_roi = points_base.spec.roi
+        voxel_size = self.spec.get_lcm_voxel_size()
+        distances = np.ones(base_roi.get_shape() / voxel_size)
+        for point_id, point in points_base.data.items():
+            distances[
+                (Coordinate(point.location) - base_roi.get_begin()) / voxel_size
+            ] = 0
+        distances = distance_transform_edt(distances, sampling=voxel_size)
+        gradients = np.gradient(distances, *voxel_size)
+        gradients = [
+            gaussian_filter(gradient, sigma=10 / np.array(voxel_size))
+            for gradient in gradients
+        ]
+        gradients = np.stack(gradients, axis=-1)
+        logger.debug("finished preparing base dist and gradients")
+
+        return distances, gradients
 
     def check_valid_requests(
         self,
-        points_request_base: BatchRequest,
+        distances: np.ndarray,
+        gradients: np.ndarray,
         points_request_add: BatchRequest,
         request: BatchRequest,
         profiling_stats: ProfilingStats,
@@ -262,29 +301,47 @@ class GetNeuronPair(BatchProvider):
         check if the points returned by these requests are seperable.
         If they are return the direction vector used to seperate them.
         """
-        points_base = self.upstream_provider.request_batch(points_request_base)
         points_add = self.upstream_provider.request_batch(points_request_add)
+        voxel_size = self.spec.get_lcm_voxel_size()
 
-        profiling_stats.merge_with(points_base.profiling_stats)
         profiling_stats.merge_with(points_add.profiling_stats)
 
         timing_process_points = Timing("process points")
         timing_process_points.start()
-        logger.debug("Points base has {} points".format(len(points_base[self.point_source].data)))
-        logger.debug("Points add has {} points".format(len(points_add[self.point_source].data)))
-        
-        for i in range(self.shift_attempts):
-            logging.debug("attempting shift {} of {}".format(i, self.shift_attempts))
-            direction = self.random_direction()
-            points_base_shifted = self.process(
-                points_base, direction, request=request, batch_index=0, inplace=False
+        logger.debug(
+            "Points add has {} points".format(len(points_add[self.point_source].data))
+        )
+        logger.debug(
+            "gradients shape: {}, accessing: {}".format(
+                gradients.shape, (np.array(gradients.shape[0:3]) // 2)
             )
+        )
+        gradient = gradients[tuple(np.array(gradients.shape[0:3]) // 2)]
+        gradient = gradient / np.linalg.norm(gradient)
+        logger.debug("moving along gradient: {}".format(gradient))
+
+        for i in range(self.shift_attempts):
+            start = self.seperate_by[0] / self.seperate_by[1]
+            slider = i / (self.shift_attempts - 1)
+            fraction = start + slider * (1 - start)
+
+            logger.debug("attempting shift {} of {}".format(i, self.shift_attempts))
+            direction = Coordinate(np.array(self._get_growth()) * gradient * fraction)
             points_add_shifted = self.process(
                 points_add, -direction, request=request, batch_index=1, inplace=False
             )
+            return_roi = self._return_roi(request)
+            center = (Coordinate(gradients.shape[0:3]) * voxel_size) // 2
+            slices = tuple(
+                map(
+                    slice,
+                    (center - return_roi.get_shape() // 2 + direction) // voxel_size,
+                    (center + return_roi.get_shape() // 2 + direction) // voxel_size,
+                )
+            )
+            logger.debug("slices: {}".format(slices))
             if self._valid_pair(
-                points_base_shifted[self.point_source].graph,
-                points_add_shifted[self.point_source].graph,
+                points_add_shifted[self.point_source].graph, distances[slices]
             ):
                 logging.debug("Valid shift found: {}".format(direction))
 
@@ -307,7 +364,7 @@ class GetNeuronPair(BatchProvider):
         voxel_size = np.array(self.spec[self.array_source].voxel_size)  # should be lcm
         random_direction = np.random.randn(len(voxel_size))
         random_direction /= np.linalg.norm(random_direction)  # unit vector
-        random_direction *= np.min(self.seperate_by)  # physical units
+        random_direction *= np.max(self.seperate_by)  # physical units
         random_direction = (
             (np.round(random_direction / voxel_size) + 1) // 2
         ) * voxel_size  # physical units rounded to nearest voxel size
@@ -324,7 +381,7 @@ class GetNeuronPair(BatchProvider):
     ) -> Batch:
         if not inplace:
             batch = copy.deepcopy(batch)
-        
+
         logging.debug("processing")
         points = batch.points.get(self.point_source, None)
         array = batch.arrays.get(self.array_source, None)
@@ -407,10 +464,10 @@ class GetNeuronPair(BatchProvider):
         point_graph = points.graph
         point_graph.crop(shifted_smaller_roi)
         point_graph.shift(-shifted_smaller_roi.get_offset())
-        points = GraphPoints._from_graph(point_graph)
-        points.spec.roi = (
+        output_roi = (
             output_roi if output_roi is not None else Roi((None,) * 3, (None,) * 3)
         )
+        points = GraphPoints._from_graph(point_graph, PointsSpec(roi=output_roi))
         return points
 
     def _get_growth(self):
@@ -418,38 +475,32 @@ class GetNeuronPair(BatchProvider):
         The amount by which the volumes need to be expanded to accomodate
         cropping the two volumes such that the center voxels of each volume
         are a certain distance apart.
-
-        Assuming you want a distance of 3 voxels, each volume must be expanded
-        by 4.
         """
         voxel_size = np.array(self.spec[self.array_source].voxel_size)
-        distance = np.array((np.min(self.seperate_by),) * len(voxel_size))
+        distance = np.array((np.max(self.seperate_by),) * len(voxel_size))
         # voxel shift is rounded up to the nearest voxel in each axis
         voxel_shift = (distance + voxel_size - 1) // voxel_size
         # expand positive and negative sides enough to contain any desired shift
         half_shift = (voxel_shift + 1) // 2
         return Coordinate(half_shift * 2 * voxel_size)
 
-    def _valid_pair(self, base_graph, add_graph):
+    def _valid_pair(self, add_graph, distances):
         """
         Simply checks for every pair of points, is the distance between them
         greater than the desired seperation criterion.
         """
         min_dist = float("inf")
-        for point_id_base, point_base in base_graph.nodes.items():
-            for point_id_add, point_add in add_graph.nodes.items():
-                min_dist = min(
-                    np.linalg.norm(point_base["location"] - point_add["location"]),
-                    min_dist,
-                )
-        if self.seperate_by[0] <= min_dist <= self.seperate_by[1]:
-            logger.debug(("Got a min distance of {}").format(min_dist))
-            return True
-        else:
+        voxel_size = self.spec.get_lcm_voxel_size()
+        for point_id, point_attrs in add_graph.nodes.items():
+            if distances[Coordinate(point_attrs["location"] // voxel_size)] < min_dist:
+                min_dist = distances[Coordinate(point_attrs["location"] // voxel_size)]
+        if min_dist < self.seperate_by[0]:
             logger.debug(
                 (
                     "expected a minimum distance between the two neurons "
-                    + "to be in the range ({}, {}), however saw a min distance of {}"
+                    + "to be in the range ({}, {}), however saw a distance of {}"
                 ).format(self.seperate_by[0], self.seperate_by[1], min_dist)
             )
             return False
+        else:
+            return True

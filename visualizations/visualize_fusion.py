@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import neurolight
 from neurolight.gunpowder.nodes.mouselight_swc_file_source import (
     MouselightSwcFileSource,
 )
@@ -18,12 +19,13 @@ import numpy as np
 
 import sys
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logging.getLogger(gp.nodes.random_location.__name__).setLevel(logging.INFO)
+logging.getLogger(neurolight.gunpowder.nodes.rasterize_skeleton.__name__).setLevel(logging.DEBUG)
 
 
-SEPERATE_DISTANCE = int(sys.argv[1])
-SEPERATE_DISTANCE = [SEPERATE_DISTANCE * 0.7, SEPERATE_DISTANCE * 1.3]
+SEP_DIST = int(sys.argv[1])
+SEPERATE_DISTANCE = [SEP_DIST * 0.7, SEP_DIST * 1.3]
 
 
 class BinarizeGt(gp.BatchFilter):
@@ -173,7 +175,7 @@ data_sources = tuple(
     )
     + gp.MergeProvider()
     + gp.RandomLocation(
-        ensure_nonempty=swcs, ensure_centered=True, balance_points=False
+        ensure_nonempty=swcs, ensure_centered=True, point_balance_radius=700
     )
     + RasterizeSkeleton(
         points=swcs,
@@ -230,9 +232,9 @@ pipeline = (
     + Crop(labels_fused, labels_fg)
     + BinarizeGt(labels_fg, labels_fg_bin)
     + gp.BalanceLabels(labels_fg_bin, loss_weights)
-    + gp.PrintProfilingStats()
+    + gp.PrintProfilingStats(every=10)
     + gp.Snapshot(
-        output_filename="snapshot_{}_{}.hdf".format(SEPERATE_DISTANCE, "{iteration}"),
+        output_filename="snapshot_{}_{}.hdf".format(SEP_DIST, "{id}"),
         dataset_names={
             raw_fused: "volumes/raw_fused",
             raw_base: "volumes/raw_base",
@@ -270,5 +272,5 @@ request.add(swc_add, input_size)
 
 with build(pipeline):
     t1 = time.time()
-    for _ in range(1):
+    for _ in range(10):
         pipeline.request_batch(request)

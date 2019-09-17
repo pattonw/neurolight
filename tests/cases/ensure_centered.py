@@ -1,8 +1,8 @@
 from pathlib import Path
 
 from .swc_base_test import SWCBaseTest
-from neurolight.gunpowder.swc_file_source import SwcFileSource
-from neurolight.gunpowder.rasterize_skeleton import RasterizeSkeleton
+from neurolight import SwcFileSource
+from neurolight.gunpowder.nodes.rasterize_skeleton import RasterizeSkeleton
 from gunpowder import (
     ArrayKey,
     ArraySpec,

@@ -1,11 +1,11 @@
 from pathlib import Path
 
 from .swc_base_test import SWCBaseTest
-from neurolight.gunpowder.mouselight_swc_file_source import MouselightSwcFileSource
-from neurolight.gunpowder.grow_labels import GrowLabels
-from neurolight.gunpowder.rasterize_skeleton import RasterizeSkeleton
-from neurolight.gunpowder.get_neuron_pair import GetNeuronPair
-from neurolight.gunpowder.fusion_augment import FusionAugment
+from neurolight.gunpowder.nodes.mouselight_swc_file_source import MouselightSwcFileSource
+from neurolight.gunpowder.nodes.grow_labels import GrowLabels
+from neurolight.gunpowder.nodes.rasterize_skeleton import RasterizeSkeleton
+from neurolight.gunpowder.nodes.get_neuron_pair import GetNeuronPair
+from neurolight.gunpowder.nodes.fusion_augment import FusionAugment
 import gunpowder as gp
 from gunpowder import BatchRequest, build, Coordinate
 import math
@@ -13,6 +13,9 @@ import copy
 import time
 
 import numpy as np
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
 
 
 class BinarizeGt(gp.BatchFilter):
@@ -185,6 +188,8 @@ class PipelineTest(SWCBaseTest):
                 [0.25, 1, 1],
                 [0, math.pi / 2.0],
                 subsample=4,
+                use_fast_points_transform=True,
+                recompute_missing_points=False,
             )
             + gp.SimpleAugment(mirror_only=[1, 2], transpose_only=[1, 2])
             + gp.Normalize(raw)

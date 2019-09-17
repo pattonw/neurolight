@@ -220,7 +220,9 @@ class FusionAugment(BatchFilter):
 
         # return raw and labels for "fused" volume
         # raw_fused_array.astype(raw_base_spec.dtype)
-        batch.arrays[self.raw_fused] = Array(data=raw_fused_array, spec=raw_base_spec)
+        batch.arrays[self.raw_fused] = Array(
+            data=raw_fused_array.astype(raw_base_spec.dtype), spec=raw_base_spec
+        )
         batch.arrays[self.labels_fused] = Array(
             data=fused_labels_array, spec=labels_add_spec
         )
@@ -239,6 +241,8 @@ class FusionAugment(BatchFilter):
         if 0 in labels:
             labels.remove(0)
 
+        if len(labels) == 0:
+            return a.copy()
         old_values = np.asarray(labels)
         new_values = np.arange(1, len(labels) + 1, dtype=old_values.dtype)
 

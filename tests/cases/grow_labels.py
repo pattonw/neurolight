@@ -1,7 +1,7 @@
 from .swc_base_test import SWCBaseTest
-from neurolight.gunpowder.swc_file_source import SwcFileSource
-from neurolight.gunpowder.rasterize_skeleton import RasterizeSkeleton
-from neurolight.gunpowder.grow_labels import GrowLabels
+from neurolight.gunpowder.nodes.swc_file_source import SwcFileSource
+from neurolight.gunpowder.nodes.rasterize_skeleton import RasterizeSkeleton
+from neurolight.gunpowder.nodes.grow_labels import GrowLabels
 from gunpowder import (
     PointsSpec,
     ArraySpec,

@@ -3,6 +3,9 @@ from gunpowder import BatchFilter, ArrayKey, BatchRequest, Array
 from scipy.ndimage.morphology import distance_transform_edt
 
 from typing import List
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class GrowLabels(BatchFilter):
@@ -23,12 +26,25 @@ class GrowLabels(BatchFilter):
         """
 
     def __init__(
-        self, array: ArrayKey, overlap_value: int = -1, radii: List[float] = [1.0]
+        self,
+        array: ArrayKey,
+        overlap_value: int = -1,
+        radii: List[float] = None,
+        radius=None,
     ):
 
         self.array = array
         self.overlap_value = overlap_value
-        self.radii = radii
+        if radii is not None:
+            self.radii = radii
+            if radius is not None:
+                logger.debug(
+                    "Since both radius and radii are defined, default behavior is to use radii"
+                )
+        elif radius is not None:
+            self.radii = [radius]
+        else:
+            self.radii = [1]
 
     def setup(self):
         self.enable_autoskip()

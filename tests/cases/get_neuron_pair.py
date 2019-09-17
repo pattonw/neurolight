@@ -1,11 +1,11 @@
 from pathlib import Path
 
 from .swc_base_test import SWCBaseTest
-from neurolight.gunpowder.swc_file_source import SwcFileSource
-from neurolight.gunpowder.grow_labels import GrowLabels
-from neurolight.gunpowder.rasterize_skeleton import RasterizeSkeleton
-from neurolight.gunpowder.get_neuron_pair import GetNeuronPair
-from neurolight.gunpowder.binarize_labels import BinarizeLabels
+from neurolight.gunpowder.nodes.swc_file_source import SwcFileSource
+from neurolight.gunpowder.nodes.grow_labels import GrowLabels
+from neurolight.gunpowder.nodes.rasterize_skeleton import RasterizeSkeleton
+from neurolight.gunpowder.nodes.get_neuron_pair import GetNeuronPair
+from neurolight.gunpowder.nodes.binarize_labels import BinarizeLabels
 from gunpowder import (
     ArrayKey,
     ArraySpec,
@@ -49,10 +49,6 @@ class GetNeuronPairTest(SWCBaseTest):
         img_b = ArrayKey("VOLUME_B")
         labels_a = ArrayKey("LABELS_A")
         labels_b = ArrayKey("LABELS_B")
-
-        fused_points = PointsKey("SKELETON_FUSED")
-        fused_image = ArrayKey("VOLUME_FUSED")
-        fused_labels = ArrayKey("LABELS_FUSED")
 
         # Get points from test swc
         swc_file_source = SwcFileSource(

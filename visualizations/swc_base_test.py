@@ -1,5 +1,5 @@
 from .provider_test import TestWithTempFiles
-from neurolight.gunpowder.swc_file_source import GraphPoint
+from neurolight.gunpowder.nodes.swc_file_source import GraphPoint
 from gunpowder import Roi, Coordinate
 
 import numpy as np

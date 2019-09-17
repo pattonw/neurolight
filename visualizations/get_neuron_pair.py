@@ -1,11 +1,11 @@
 from pathlib import Path
 
 from .swc_base_test import SWCBaseTest
-from neurolight.gunpowder.swc_file_source import SwcFileSource
-from neurolight.gunpowder.grow_labels import GrowLabels
-from neurolight.gunpowder.rasterize_skeleton import RasterizeSkeleton
-from neurolight.gunpowder.get_neuron_pair import GetNeuronPair
-from neurolight.gunpowder.binarize_labels import BinarizeLabels
+from neurolight.gunpowder.nodes.swc_file_source import SwcFileSource
+from neurolight.gunpowder.nodes.grow_labels import GrowLabels
+from neurolight.gunpowder.nodes.rasterize_skeleton import RasterizeSkeleton
+from neurolight.gunpowder.nodes.get_neuron_pair import GetNeuronPair
+from neurolight.gunpowder.nodes.binarize_labels import BinarizeLabels
 from gunpowder import (
     ArrayKey,
     ArraySpec,

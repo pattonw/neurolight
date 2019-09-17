@@ -1,7 +1,7 @@
 from .swc_base_test import SWCBaseTest
-from neurolight.gunpowder.swc_file_source import SwcFileSource
-from neurolight.gunpowder.fusion_augment import FusionAugment
-from neurolight.gunpowder.rasterize_skeleton import RasterizeSkeleton
+from neurolight.gunpowder.nodes.swc_file_source import SwcFileSource
+from neurolight.gunpowder.nodes.fusion_augment import FusionAugment
+from neurolight.gunpowder.nodes.rasterize_skeleton import RasterizeSkeleton
 from gunpowder import (
     PointsKey,
     PointsSpec,
@@ -12,6 +12,7 @@ from gunpowder import (
     build,
     Coordinate,
     MergeProvider,
+    Normalize,
 )
 
 import numpy as np
@@ -73,7 +74,7 @@ class FusionAugmentTest(SWCBaseTest):
                 points=swc_keys[0],
                 array=labels_keys[0],
                 array_spec=ArraySpec(
-                    interpolatable=False, dtype=np.uint32, voxel_size=voxel_size
+                    interpolatable=False, dtype=np.uint16, voxel_size=voxel_size
                 ),
                 radius=LABEL_RADIUS,
             )
@@ -81,10 +82,11 @@ class FusionAugmentTest(SWCBaseTest):
                 points=swc_keys[0],
                 array=raw_keys[0],
                 array_spec=ArraySpec(
-                    interpolatable=False, dtype=np.uint32, voxel_size=voxel_size
+                    interpolatable=False, dtype=np.uint16, voxel_size=voxel_size
                 ),
                 radius=RAW_RADIUS,
             )
+            + Normalize(raw_keys[0])
         )
 
         # data source for swc b
@@ -96,7 +98,7 @@ class FusionAugmentTest(SWCBaseTest):
                 points=swc_keys[1],
                 array=labels_keys[1],
                 array_spec=ArraySpec(
-                    interpolatable=False, dtype=np.uint32, voxel_size=voxel_size
+                    interpolatable=False, dtype=np.uint16, voxel_size=voxel_size
                 ),
                 radius=LABEL_RADIUS,
             )
@@ -104,10 +106,11 @@ class FusionAugmentTest(SWCBaseTest):
                 points=swc_keys[1],
                 array=raw_keys[1],
                 array_spec=ArraySpec(
-                    interpolatable=False, dtype=np.uint32, voxel_size=voxel_size
+                    interpolatable=False, dtype=np.uint16, voxel_size=voxel_size
                 ),
                 radius=RAW_RADIUS,
             )
+            + Normalize(raw_keys[1])
         )
         data_sources = tuple([data_sources_a, data_sources_b]) + MergeProvider()
 
@@ -191,7 +194,7 @@ class FusionAugmentTest(SWCBaseTest):
                 points=swc_keys[0],
                 array=labels_keys[0],
                 array_spec=ArraySpec(
-                    interpolatable=False, dtype=np.uint32, voxel_size=voxel_size
+                    interpolatable=False, dtype=np.uint16, voxel_size=voxel_size
                 ),
                 radius=LABEL_RADIUS,
             )
@@ -199,10 +202,11 @@ class FusionAugmentTest(SWCBaseTest):
                 points=swc_keys[0],
                 array=raw_keys[0],
                 array_spec=ArraySpec(
-                    interpolatable=False, dtype=np.uint32, voxel_size=voxel_size
+                    interpolatable=False, dtype=np.uint16, voxel_size=voxel_size
                 ),
                 radius=RAW_RADIUS,
             )
+            + Normalize(raw_keys[0])
         )
 
         # data source for swc b
@@ -214,7 +218,7 @@ class FusionAugmentTest(SWCBaseTest):
                 points=swc_keys[1],
                 array=labels_keys[1],
                 array_spec=ArraySpec(
-                    interpolatable=False, dtype=np.uint32, voxel_size=voxel_size
+                    interpolatable=False, dtype=np.uint16, voxel_size=voxel_size
                 ),
                 radius=LABEL_RADIUS,
             )
@@ -222,10 +226,11 @@ class FusionAugmentTest(SWCBaseTest):
                 points=swc_keys[1],
                 array=raw_keys[1],
                 array_spec=ArraySpec(
-                    interpolatable=False, dtype=np.uint32, voxel_size=voxel_size
+                    interpolatable=False, dtype=np.uint16, voxel_size=voxel_size
                 ),
                 radius=RAW_RADIUS,
             )
+            + Normalize(raw_keys[1])
         )
         data_sources = tuple([data_sources_a, data_sources_b]) + MergeProvider()
 

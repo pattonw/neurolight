@@ -139,8 +139,9 @@ class SwcFileSource(BatchProvider):
             points_subgraph = points_subgraph.crop(request[points_key].roi)
 
             batch = Batch()
-            batch.points[points_key] = GraphPoints._from_graph(points_subgraph)
-            batch.points[points_key].spec = request[points_key]
+            batch.points[points_key] = GraphPoints._from_graph(
+                points_subgraph, request[points_key]
+            )
 
             logger.debug(
                 "Swc points source provided {} points for roi: {}".format(
@@ -162,6 +163,7 @@ class SwcFileSource(BatchProvider):
                     filepath.name, filepath.absolute()
                 )
             )
+
         if filepath.is_file():
             # read from single file
             self._parse_swc(filepath)
@@ -182,6 +184,7 @@ class SwcFileSource(BatchProvider):
         logger.debug("placing {} nodes in the kdtree".format(len(data)))
         # place nodes in the kdtree
         self.data = cKDTree(np.array(list(data)))
+        logger.debug("kdtree initialized".format(len(data)))
 
     def _query_kdtree(
         self, node: cKDTreeNode, bb: Tuple[np.ndarray, np.ndarray]
@@ -297,6 +300,7 @@ class SwcFileSource(BatchProvider):
     def _add_points_to_source(
         self, points: Dict[int, GraphPoint], edges: List[Tuple[int, int]]
     ):
+
         # add points to a temporary graph
         logger.debug("adding {} nodes to graph".format(len(points)))
         temp = SpatialGraph()
@@ -306,8 +310,10 @@ class SwcFileSource(BatchProvider):
             if u in temp.nodes and v in temp.nodes:
                 temp.add_edge(u, v)
 
-        self._graph = nx.disjoint_union(self.g, temp)
-        logger.debug("graph has {} nodes".format(len(self.g.nodes)))
+        nx.convert_node_labels_to_integers(temp, first_label=len(self._graph.nodes))
+
+        self._graph = nx.union(self._graph, temp)
+        logger.debug("graph has {} nodes".format(len(self._graph.nodes)))
 
     def _subgraph_points(self, nodes: List[int], with_neighbors=False) -> SpatialGraph:
         """
