@@ -81,6 +81,11 @@ class GraphToTreeMatcher:
         min_dist = np.linalg.norm(frac * slope + edge_0_loc - point_loc)
         return min_dist
 
+    def __create_objective(self):
+        # TODO
+
+        pass
+
     def __create_inidicators(self):
 
         # one binary indicator per edge in graph and possible match edge in
