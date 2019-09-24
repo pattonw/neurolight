@@ -28,12 +28,18 @@ class GraphToTreeMatcher:
 
         # TODO: return matches as lists
 
-
     def __preprocess_tree(self):
-        # TODO: replace more than ternary nodes with fully connected graphs in
-        # self.tree
-        # TODO: remember backwards mapping of edges to original tree
-        pass
+        for node, degree in list(self.tree.degree()):
+            if degree > 3:
+                neighbors = list(self.tree.neighbors(node))
+                for i, neighbor in enumerate(neighbors):
+                    self.tree.add_node(
+                        (node, neighbor), location=self.tree.nodes[node]["location"]
+                    )
+                    self.tree.add_edge(neighbor, (node, neighbor))
+                    self.tree.remove_edge(node, neighbor)
+                    for j in range(i):
+                        self.tree.add_edge((node, neighbor), (node, neighbors[j]))
 
     def __find_possible_matches(self):
 
