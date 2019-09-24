@@ -43,7 +43,7 @@ class GraphToTreeMatcher:
 
         for g_u, g_v, graph_e_data in self.graph.edges(data=True):
 
-            graph_e_data['__possible_matches'] = []
+            graph_e_data["__possible_matches"] = [(None, self.NO_MATCH_COST)]
 
             for t_u, t_v, tree_e_data in self.tree.edges(data=True):
 
@@ -85,21 +85,19 @@ class GraphToTreeMatcher:
         self.match_indicators = {}
         self.match_indicator_costs = []
 
-        for g_u, g_v, graph_e_data in self.graph.edges(data=True):
+        for graph_e, graph_e_data in self.graph.edges.items():
 
-            self.match_indicators[(g_u, g_v)] = {}
+            self.match_indicators[graph_e] = {}
 
-            for t_u, t_v, distance in graph_e_data['__possible_matches']:
+            for tree_e, distance in graph_e_data["__possible_matches"]:
 
-                self.match_indicators[(g_u, g_v)][(t_u, t_v)] = num_variables
+                self.match_indicators[graph_e][tree_e] = num_variables
                 self.match_indicator_costs.append(distance)
 
                 num_variables += 1
 
-            # no-match
-            self.match_indicators[(g_u, g_v)][None] = num_variables
-            self.match_indicator_costs.append(NO_MATCH_COST)
-            num_variables += 1
+        # one binary indicator for each possible pair of edges adjacent
+        # to every node
 
         # one binary indicator for each possible match configuration around a
         # node in graph
@@ -114,11 +112,6 @@ class GraphToTreeMatcher:
             for configuration in itertools.product(match_combinations):
                 # TODO: continue
 
-
-def match_graph_to_tree(
-        graph,
-        tree,
-        match_attribute):
 
 def match_graph_to_tree(graph, tree, match_attribute):
     MATCH_DISTANCE_THRESHOLD = 100
