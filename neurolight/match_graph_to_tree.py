@@ -47,13 +47,33 @@ class GraphToTreeMatcher:
 
             for t_u, t_v, tree_e_data in self.tree.edges(data=True):
 
-                distance = np.linalg.norm(
-                    self.graph.nodes[g_u]['location'] -
-                    self.tree.nodes[t_u]['location'])
+                distance = self.__edge_distance((g_u, g_v), (t_u, t_v))
 
                 if distance <= self.match_distance_threshold:
-                    graph_e_data['__possible_matches'].append(
-                        (t_u, t_v, distance))
+                    graph_e_data["__possible_matches"].append(((t_u, t_v), distance))
+
+    def __edge_distance(self, graph_edge, tree_edge):
+        # average the distance of the endpoints of the graph edge to the tree edge
+        g_u, g_v = graph_edge
+        dist = (
+            self.__point_to_edge_dist(g_u, tree_edge)
+            + self.__point_to_edge_dist(g_v, tree_edge)
+        ) / 2
+        return dist
+
+    def __point_to_edge_dist(self, point, edge):
+        point_loc = self.graph.nodes[point]["location"]
+        edge_0_loc = self.tree.nodes[edge[0]]["location"]
+        edge_1_loc = self.tree.nodes[edge[1]]["location"]
+        slope = edge_1_loc - edge_0_loc
+        edge_mag = np.linalg.norm(slope)
+        if np.isclose(edge_mag, 0):
+            return np.linalg.norm(edge_0_loc - point_loc)
+        frac = np.clip(
+            np.dot(point_loc - edge_0_loc, slope) / np.dot(slope, slope), 0, 1
+        )
+        min_dist = np.linalg.norm(frac * slope + edge_0_loc - point_loc)
+        return min_dist
 
     def __create_inidicators(self):
 
