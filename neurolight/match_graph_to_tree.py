@@ -109,14 +109,10 @@ class GraphToTreeMatcher:
         self.node_indicators_costs = []
 
         for g_n in self.graph.nodes():
-
-            match_combinations = [
-                self.graph.edges[(n, g_n)]["__possible_matches"]
-                for n in self.graph.neighbors(g_n)
-            ]
-
-            for configuration in itertools.product(*match_combinations):
-                self.node_indicators[(g_n, *configuration)] = num_variables
+            adjacent_edges = self.graph.adj(g_n)
+            for edge_pair in itertools.combinations(adjacent_edges, 2):
+                self.node_indicators[edge_pair] = num_variables
+                self.node_indicators_costs.append(0)  # used for constraints, no cost?
                 num_variables += 1
 
 
