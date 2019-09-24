@@ -1,4 +1,7 @@
 import pylp
+import numpy as np
+
+import itertools
 
 
 class GraphToTreeMatcher:
@@ -17,9 +20,9 @@ class GraphToTreeMatcher:
         self.__create_objective()
 
     def match(self):
-        '''Return a list of tuples from ``graph`` edges to ``tree`` edges (or
+        """Return a list of tuples from ``graph`` edges to ``tree`` edges (or
         ``None``, if no match was found).
-        '''
+        """
 
         self.__solve()
 
@@ -97,7 +100,9 @@ def match_graph_to_tree(
         tree,
         match_attribute):
 
-    matcher = GraphToTreeMatcher(graph, tree)
+def match_graph_to_tree(graph, tree, match_attribute):
+    MATCH_DISTANCE_THRESHOLD = 100
+    matcher = GraphToTreeMatcher(graph, tree, MATCH_DISTANCE_THRESHOLD)
     matches = matcher.match()
 
     for e1, e2 in matches:
