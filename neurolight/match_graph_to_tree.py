@@ -99,18 +99,19 @@ class GraphToTreeMatcher:
         # one binary indicator for each possible pair of edges adjacent
         # to every node
 
-        # one binary indicator for each possible match configuration around a
-        # node in graph
+        self.node_indicators = {}
+        self.node_indicators_costs = []
 
         for g_n in self.graph.nodes():
 
             match_combinations = [
-                self.graph.edges[(n, g_n)]['__possible_matches']
+                self.graph.edges[(n, g_n)]["__possible_matches"]
                 for n in self.graph.neighbors(g_n)
             ]
 
-            for configuration in itertools.product(match_combinations):
-                # TODO: continue
+            for configuration in itertools.product(*match_combinations):
+                self.node_indicators[(g_n, *configuration)] = num_variables
+                num_variables += 1
 
 
 def match_graph_to_tree(graph, tree, match_attribute):
