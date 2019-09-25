@@ -76,6 +76,19 @@ class GraphToTreeMatcher:
                     for j in range(i):
                         self.tree.add_edge((node, neighbor), (node, neighbors[j]))
 
+        # For each edge, keep track of all edges that share a node with it
+        # including itself and the "no match" edge None.
+        # The graph cannot contain adjacent edge assignments that are not adjacent
+        # in the tree.
+        self.adjacent_edges = {}
+        for edge in self.tree.edges():
+            self.adjacent_edges[edge] = set([None])
+            u, v = edge
+            for neighboring_edge in itertools.chain(
+                self.tree.edges(u), self.tree.edges(v)
+            ):
+                self.adjacent_edges[edge].add(neighboring_edge)
+
     def __find_possible_matches(self):
 
         self.possible_matches = {}
