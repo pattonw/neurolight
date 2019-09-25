@@ -61,7 +61,37 @@ class GraphToTreeMatcher:
         # TODO: check if solution is consistent
         # if not, add additional constraints and return False
 
-        return True
+        output_graph = self.__solution_to_tree(solution)
+
+        consistent = True
+
+        for edge, edge_attrs in output_graph.edges().items():
+            for neighbor_edge, neighbor_edge_attrs in itertools.chain(
+                output_graph.edges(edge[0]), output_graph.edges(edge[1])
+            ):
+                if (
+                    neighbor_edge_attrs["assigned_edge"]
+                    not in self.adjacent_edges[edge_attrs["assigned_edge"]]
+                ):
+                    consistent = False
+
+                    constraint = pylp.LinearConstraint()
+                    coefficient_a = self.match_indicators[edge][
+                        edge_attrs["assigned_edge"]
+                    ]
+                    coefficient_b = self.match_indicators[neighbor_edge][
+                        neighbor_edge_attrs["assigned_edge"]
+                    ]
+
+                    constraint.set_coefficient(coefficient_a, 1)
+                    constraint.set_coefficient(coefficient_b, 1)
+
+                    constraint.set_relation(pylp.Relation.LessEqual)
+                    constraint.set_value(1)
+
+                    self.constraints.add(constraint)
+
+        return consistent
 
     def __preprocess_tree(self):
         for node, degree in list(self.tree.degree()):
