@@ -93,6 +93,17 @@ class GraphToTreeMatcher:
 
         return consistent
 
+    def __solution_to_tree(self, solution):
+        for edge, edge_attrs in self.graph.edges().items():
+            seen = 0
+            for possible_assignment in edge_attrs["possible_matches"]:
+                coefficient_ind = self.match_indicators[edge][possible_assignment]
+                coefficient = solution[coefficient_ind]
+                if coefficient == 1:
+                    edge_attrs["assigned_edge"] = possible_assignment
+                    seen += 1
+            assert seen == 1, f"edge {edge} did not get an assignment!"
+
     def __preprocess_tree(self):
         for node, degree in list(self.tree.degree()):
             if degree > 3:
