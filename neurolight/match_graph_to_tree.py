@@ -199,7 +199,7 @@ class GraphToTreeMatcher:
 
             constraint = pylp.LinearConstraint()
             for match_indicator in self.match_indicators[graph_e].values():
-                constraint.set_coefficient(match_indicators, 1)
+                constraint.set_coefficient(match_indicator, 1)
             constraint.set_relation(pylp.Relation.Equal)
             constraint.set_value(1)
 
@@ -219,10 +219,10 @@ class GraphToTreeMatcher:
             if k <= 2:
                 continue
 
-            edges = self.graph.adj(n)
+            edges = self.graph.edges(n)
             possible_matches = []
             for e in edges:
-                possible_matches += self.graph.edges[e]['__possible_matches']
+                possible_matches += self.graph.edges[e]["__possible_matches"]
             possible_matches = set(possible_matches)
 
             for l in possible_matches:
@@ -237,19 +237,23 @@ class GraphToTreeMatcher:
                 # (k - 2)*y
                 if l is not None:
                     for e in edges:
-                        i_el = self.match_indicators[e].get(l, None)
+                        i_el = self.match_indicators.get(
+                            e, self.match_indicators.get(tuple(e[::-1]))
+                        ).get(l, None)
                         if i_el is None:
                             continue
                         constraint.set_coefficient(i_el, k - 2)
 
                 # + x
                 for e in edges:
-                    i_e0 = self.match_indicators[e][None]
+                    i_e0 = self.match_indicators.get(
+                        e, self.match_indicators.get(tuple(e[::-1]))
+                    )[None]
                     constraint.set_coefficient(i_e0, 1)
 
                 # <= 2k - 2
                 constraint.set_relation(pylp.Relation.LessEqual)
-                constraint.set_value(2*k - 2)
+                constraint.set_value(2 * k - 2)
 
                 self.constraints.add(constraint)
 
@@ -260,9 +264,10 @@ class GraphToTreeMatcher:
         for i, c in enumerate(self.match_indicator_costs):
             self.objective.set_coefficient(i, c)
 
-def match_graph_to_tree(graph, tree, match_attribute, match_distance_treshold):
 
-    matcher = GraphToTreeMatcher(graph, tree, match_distance_treshold)
+def match_graph_to_tree(graph, tree, match_attribute, match_distance_threshold):
+
+    matcher = GraphToTreeMatcher(graph, tree, match_distance_threshold)
     matches = matcher.match()
 
     for e1, e2 in matches:
