@@ -39,7 +39,9 @@ class ConsensusMatchTest(unittest.TestCase):
         nl.match_graph_to_tree(
             skeleton,
             consensus,
-            match_attribute='matched_edge')
+            match_distance_threshold=100,
+            match_attribute="matched_edge",
+        )
 
         self.assertEqual(skeleton.edges[(1, 2)]["matched_edge"] == (1, 2))
         self.assertEqual(skeleton.edges[(2, 3)]["matched_edge"] == (1, 2))
@@ -129,7 +131,9 @@ class ConsensusMatchTest(unittest.TestCase):
         nl.match_graph_to_tree(
             skeleton,
             consensus,
-            match_attribute='matched_edge')
+            match_distance_threshold=100,
+            match_attribute="matched_edge",
+        )
 
         self.assertEqual(
             skeleton.edges[("a", "b")]["matched_edge"] == ("A", ("X", "A"))
@@ -211,6 +215,10 @@ class ConsensusMatchTest(unittest.TestCase):
         nl.match_graph_to_tree(
             skeleton,
             consensus,
+            match_distance_threshold=100,
+            match_attribute="matched_edge",
+        )
+
         self.assertEqual(skeleton.edges[("a", "b")]["matched_edge"], ("A", "B"))
         self.assertEqual(skeleton.edges[("b", "c")]["matched_edge"], ("A", "B"))
         self.assertEqual(skeleton.edges[("c", "d")]["matched_edge"], ("B", "C"))
