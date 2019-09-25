@@ -17,16 +17,51 @@ class GraphToTreeMatcher:
         self.__preprocess_tree()
         self.__find_possible_matches()
         self.__create_inidicators()
+        self.__create_constraints()
         self.__create_objective()
+
+        self.objective = None
+        self.constraints = None
 
     def match(self):
         """Return a list of tuples from ``graph`` edges to ``tree`` edges (or
         ``None``, if no match was found).
         """
 
-        self.__solve()
+        solution = self.__solve()
 
-        # TODO: return matches as lists
+        matches = []
+        for e in self.graph.edges():
+            for l, i in self.match_indicators[e].items():
+                if solution[i] > 0.5:
+                    matches.append(e, l)
+
+        return matches
+
+    def __solve(self):
+
+        solver = pylp.create_linear_solver(pylp.Preference.Gurobi)
+        solver.initialize(self.num_variables, pylp.VariableType.Binary)
+        solver.set_num_threads(1)
+        solver.set_timeout(120)
+
+        solver.set_objective(self.objective)
+
+        consistent = False
+        while not consistent:
+
+            solver.set_constraints(self.constraints)
+            solution, message = solver.solve()
+            consistent = self.__check_consistency(solution)
+
+        return solution
+
+    def __check_consistency(self, solution):
+
+        # TODO: check if solution is consistent
+        # if not, add additional constraints and return False
+
+        return True
 
     def __preprocess_tree(self):
         for node, degree in list(self.tree.degree()):
@@ -42,8 +77,6 @@ class GraphToTreeMatcher:
                         self.tree.add_edge((node, neighbor), (node, neighbors[j]))
 
     def __find_possible_matches(self):
-
-        # TODO: replace with proper distance between edges
 
         self.possible_matches = {}
 
@@ -81,17 +114,12 @@ class GraphToTreeMatcher:
         min_dist = np.linalg.norm(frac * slope + edge_0_loc - point_loc)
         return min_dist
 
-    def __create_objective(self):
-        # TODO
-
-        pass
-
     def __create_inidicators(self):
 
         # one binary indicator per edge in graph and possible match edge in
         # tree
 
-        num_variables = 0
+        self.num_variables = 0
 
         self.match_indicators = {}
         self.match_indicator_costs = []
@@ -102,28 +130,85 @@ class GraphToTreeMatcher:
 
             for tree_e, distance in graph_e_data["__possible_matches"]:
 
-                self.match_indicators[graph_e][tree_e] = num_variables
+                self.match_indicators[graph_e][tree_e] = self.num_variables
                 self.match_indicator_costs.append(distance)
 
-                num_variables += 1
+                self.num_variables += 1
 
-        # one binary indicator for each possible pair of edges adjacent
-        # to every node
+    def __create_constraints(self):
 
-        self.node_indicators = {}
-        self.node_indicators_costs = []
+        self.constraints = pylp.LinearConstraints()
 
-        for g_n in self.graph.nodes():
-            adjacent_edges = self.graph.adj(g_n)
-            for edge_pair in itertools.combinations(adjacent_edges, 2):
-                self.node_indicators[edge_pair] = num_variables
-                self.node_indicators_costs.append(0)  # used for constraints, no cost?
-                num_variables += 1
+        # pick exactly one of the match_indicators per edge
 
+        for graph_e in self.graph.edges():
 
-def match_graph_to_tree(graph, tree, match_attribute):
-    MATCH_DISTANCE_THRESHOLD = 100
-    matcher = GraphToTreeMatcher(graph, tree, MATCH_DISTANCE_THRESHOLD)
+            constraint = pylp.LinearConstraint()
+            for match_indicator in self.match_indicators[graph_e].values():
+                constraint.set_coefficient(match_indicators, 1)
+            constraint.set_relation(pylp.Relation.Equal)
+            constraint.set_value(1)
+
+            self.constraints.add(constraint)
+
+        # branch nodes in graph have to correspond to branch nodes in tree
+        #
+        # We model this constraint by requiring that as soon as a graph node
+        # has degree > 2, the number of times a label is used on incident edges
+        # is at most 1.
+
+        for n in self.graph.nodes():
+
+            k = self.graph.degree(n)
+
+            # can't be a branch node
+            if k <= 2:
+                continue
+
+            edges = self.graph.adj(n)
+            possible_matches = []
+            for e in edges:
+                possible_matches += self.graph.edges[e]['__possible_matches']
+            possible_matches = set(possible_matches)
+
+            for l in possible_matches:
+                # k = degree of node
+                # x = effective degree of node (k - # of None edges)
+                # y = # of edges labelled l
+                #
+                # (k - 2)*y + x <= 2k - 2
+
+                constraint = pylp.LinearConstraint()
+
+                # (k - 2)*y
+                if l is not None:
+                    for e in edges:
+                        i_el = self.match_indicators[e].get(l, None)
+                        if i_el is None:
+                            continue
+                        constraint.set_coefficient(i_el, k - 2)
+
+                # + x
+                for e in edges:
+                    i_e0 = self.match_indicators[e][None]
+                    constraint.set_coefficient(i_e0, 1)
+
+                # <= 2k - 2
+                constraint.set_relation(pylp.Relation.LessEqual)
+                constraint.set_value(2*k - 2)
+
+                self.constraints.add(constraint)
+
+    def __create_objective(self):
+
+        self.objective = pylp.LinearObjective(self.num_variables)
+
+        for i, c in enumerate(self.match_indicator_costs):
+            self.objective.set_coefficient(i, c)
+
+def match_graph_to_tree(graph, tree, match_attribute, match_distance_treshold):
+
+    matcher = GraphToTreeMatcher(graph, tree, match_distance_treshold)
     matches = matcher.match()
 
     for e1, e2 in matches:
