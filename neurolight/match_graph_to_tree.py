@@ -400,4 +400,4 @@ def match_graph_to_tree(graph, tree, match_attribute, match_distance_threshold):
     matches = matcher.match()
 
     for e1, e2 in matches:
-        graph.edges[(e1.u, e1.v)][match_attribute] = (e2.u, e2.v)
+        graph.edges[(e1.u, e1.v)][match_attribute] = e2
