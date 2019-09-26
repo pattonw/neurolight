@@ -13,7 +13,12 @@ class Edge:
     def empty(self):
         return self.u is None or self.v is None
 
+    def __contains__(self, item):
+        return item == self.u or item == self.v
+
     def __eq__(self, other):
+        if not isinstance(other, Edge):
+            raise ValueError("cannot compare to classes other than Edge")
         return (self.u == other.u or self.u == other.v) and (
             self.v == other.u or self.v == other.v
         )
