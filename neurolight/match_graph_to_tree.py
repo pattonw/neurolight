@@ -144,9 +144,9 @@ class GraphToTreeMatcher:
                         (node, neighbor), location=self.tree.nodes[node]["location"]
                     )
                     self.tree.add_edge(neighbor, (node, neighbor))
-                    self.tree.remove_edge(node, neighbor)
                     for j in range(i):
                         self.tree.add_edge((node, neighbor), (node, neighbors[j]))
+                self.tree.remove_node(node)
 
         # For each edge, keep track of all edges that share a node with it
         # including itself and the "no match" edge None.
