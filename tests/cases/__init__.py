@@ -5,6 +5,7 @@ from .grow_labels import GrowLabelsTest
 from .pipeline import PipelineTest
 from .rasterize_skeleton import RasterizeSkeletonTest
 from .swc_file_source import SwcFileSourceTest
+from .consensus_match import ConsensusMatchTest
 
 __all__ = [
     "EnsureCenteredTest",
@@ -13,5 +14,6 @@ __all__ = [
     "GrowLabelsTest",
     "PipelineTest",
     "RasterizeSkeletonTest",
-    "SwcFileSourceTest"
+    "SwcFileSourceTest",
+    "ConsensusMatchTest",
 ]
