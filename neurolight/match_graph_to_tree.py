@@ -41,14 +41,14 @@ class GraphToTreeMatcher:
         self.tree = tree
         self.match_distance_threshold = match_distance_threshold
 
+        self.objective = None
+        self.constraints = None
+
         self.__preprocess_tree()
         self.__find_possible_matches()
         self.__create_inidicators()
         self.__create_constraints()
         self.__create_objective()
-
-        self.objective = None
-        self.constraints = None
 
     def match(self):
         """Return a list of tuples from ``graph`` edges to ``tree`` edges (or
