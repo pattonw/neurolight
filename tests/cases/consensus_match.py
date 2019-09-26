@@ -52,13 +52,13 @@ class ConsensusMatchTest(unittest.TestCase):
 
         # consensus graph:
         #
-        #       A
-        #       |
-        #       |
+        #    A
+        #     \
+        #      \
         # D-----X-----B
-        #       |
-        #       |
-        #       C
+        #        \
+        #         \
+        #          C
         #
         # center node gets replaced with:
         #
@@ -95,8 +95,8 @@ class ConsensusMatchTest(unittest.TestCase):
                 ("D", {"location": np.array([0, 0, 0])}),
                 ("B", {"location": np.array([0, 0, 20])}),
                 ("X", {"location": np.array([0, 0, 10])}),
-                ("A", {"location": np.array([0, -10, 10])}),
-                ("C", {"location": np.array([0, 10, 10])}),
+                ("A", {"location": np.array([0, -10, 5])}),
+                ("C", {"location": np.array([0, 10, 15])}),
             ]
         )
         consensus.add_edges_from([("A", "X"), ("B", "X"), ("C", "X"), ("D", "X")])
