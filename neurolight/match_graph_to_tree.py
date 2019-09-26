@@ -115,13 +115,16 @@ class GraphToTreeMatcher:
             v_x_edges = []  # edges on the v side of current_e adjacent to x not y
             v_y_edges = []  # edges on the v side of current_e adjacent to y not x
 
-            non_adjacents = [] # edges that are not adjacent to this edge
+            non_adjacents = []  # edges that are not adjacent to current_e
 
             # check all edges that are adjacent to the current edge u
             for u, v, u_neighbor_attrs in self.graph.edges(current_e.u, data=True):
                 u_neighbor_e = Edge(u, v)
                 u_neighbor_assigned_e = u_neighbor_attrs["__assigned_edge"]
-                if (
+                if u_neighbor_assigned_e.empty:
+                    # handle as if adjacent to both since "no_match" is always allowed
+                    pass
+                elif (
                     current_x in u_neighbor_assigned_e
                     and current_y not in u_neighbor_assigned_e
             ):
@@ -145,7 +148,10 @@ class GraphToTreeMatcher:
             for u, v, v_neighbor_attrs in self.graph.edges(current_e.v, data=True):
                 v_neighbor_e = Edge(u, v)
                 v_neighbor_assigned_e = v_neighbor_attrs["__assigned_edge"]
-                if (
+                if u_neighbor_assigned_e.empty:
+                    # handle as if adjacent to both since "no_match" is always allowed
+                    pass
+                elif (
                     current_x in v_neighbor_assigned_e
                     and current_y not in v_neighbor_assigned_e
                 ):
