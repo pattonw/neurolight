@@ -3,38 +3,39 @@ import neurolight as nl
 import networkx as nx
 import numpy as np
 
+from neurolight.match_graph_to_tree import Edge
 
 class ConsensusMatchTest(unittest.TestCase):
     def test_simple(self):
 
         # consensus graph:
         #
-        # o-----o-----o
+        # A-----B-----C
         #
         # skeleton graph:
         #
-        # o--o--o--o--o
+        # a--b--c--d--e
         consensus = nx.Graph()
         consensus.add_nodes_from(
             [
-                (1, {"location": np.array([0, 0, 0])}),
-                (2, {"location": np.array([0, 0, 10])}),
-                (3, {"location": np.array([0, 0, 20])}),
+                ("A", {"location": np.array([0, 0, 0])}),
+                ("B", {"location": np.array([0, 0, 10])}),
+                ("C", {"location": np.array([0, 0, 20])}),
             ]
         )
-        consensus.add_edges_from([(1, 2), (2, 3)])
+        consensus.add_edges_from([("A", "B"), ("B", "C")])
 
         skeleton = nx.Graph()
         skeleton.add_nodes_from(
             [
-                (1, {"location": np.array([0, 0, 0])}),
-                (2, {"location": np.array([0, 0, 5])}),
-                (3, {"location": np.array([0, 0, 10])}),
-                (4, {"location": np.array([0, 0, 15])}),
-                (5, {"location": np.array([0, 0, 20])}),
+                ("a", {"location": np.array([0, 0, 0])}),
+                ("b", {"location": np.array([0, 0, 5])}),
+                ("c", {"location": np.array([0, 0, 10])}),
+                ("d", {"location": np.array([0, 0, 15])}),
+                ("e", {"location": np.array([0, 0, 20])}),
             ]
         )
-        skeleton.add_edges_from([(1, 2), (2, 3), (3, 4), (4, 5)])
+        skeleton.add_edges_from([("a", "b"), ("b", "c"), ("c", "d"), ("d", "e")])
 
         nl.match_graph_to_tree(
             skeleton,
@@ -43,10 +44,10 @@ class ConsensusMatchTest(unittest.TestCase):
             match_attribute="matched_edge",
         )
 
-        self.assertEqual(skeleton.edges[(1, 2)]["matched_edge"] == (1, 2))
-        self.assertEqual(skeleton.edges[(2, 3)]["matched_edge"] == (1, 2))
-        self.assertEqual(skeleton.edges[(3, 4)]["matched_edge"] == (2, 3))
-        self.assertEqual(skeleton.edges[(4, 5)]["matched_edge"] == (2, 3))
+        self.assertEqual(skeleton.edges[("a", "b")]["matched_edge"], Edge("A", "B"))
+        self.assertEqual(skeleton.edges[("b", "c")]["matched_edge"], Edge("A", "B"))
+        self.assertEqual(skeleton.edges[("c", "d")]["matched_edge"], Edge("B", "C"))
+        self.assertEqual(skeleton.edges[("d", "e")]["matched_edge"], Edge("B", "C"))
 
     def test_simple_4_way(self):
 
@@ -135,30 +136,22 @@ class ConsensusMatchTest(unittest.TestCase):
             match_attribute="matched_edge",
         )
 
-        self.assertEqual(
-            skeleton.edges[("a", "b")]["matched_edge"] == ("A", ("X", "A"))
-        )
-        self.assertEqual(
-            skeleton.edges[("c", "d")]["matched_edge"] == ("D", ("X", "D"))
-        )
-        self.assertEqual(
-            skeleton.edges[("f", "g")]["matched_edge"] == ("B", ("X", "B"))
-        )
-        self.assertEqual(
-            skeleton.edges[("h", "i")]["matched_edge"] == ("C", ("X", "C"))
-        )
+        self.assertEqual(skeleton.edges[("a", "b")]["matched_edge"], Edge("A", ("X", "A")))
+        self.assertEqual(skeleton.edges[("c", "d")]["matched_edge"], Edge("D", ("X", "D")))
+        self.assertEqual(skeleton.edges[("f", "g")]["matched_edge"], Edge("B", ("X", "B")))
+        self.assertEqual(skeleton.edges[("h", "i")]["matched_edge"], Edge("C", ("X", "C")))
 
         self.assertEqual(
-            skeleton.edges[("b", "d")]["matched_edge"], (("X", "A"), ("X", "D"))
+            skeleton.edges[("b", "d")]["matched_edge"], Edge(("X", "A"), ("X", "D"))
         )
         self.assertEqual(
-            skeleton.edges[("d", "e")]["matched_edge"], (("X", "D"), ("X", "B"))
+            skeleton.edges[("d", "e")]["matched_edge"], Edge(("X", "D"), ("X", "B"))
         )
         self.assertEqual(
-            skeleton.edges[("e", "f")]["matched_edge"], (("X", "D"), ("X", "B"))
+            skeleton.edges[("e", "f")]["matched_edge"], Edge(("X", "D"), ("X", "B"))
         )
         self.assertEqual(
-            skeleton.edges[("f", "h")]["matched_edge"], (("X", "B"), ("X", "C"))
+            skeleton.edges[("f", "h")]["matched_edge"], Edge(("X", "B"), ("X", "C"))
         )
 
     def test_confounding_chain(self):
@@ -219,11 +212,11 @@ class ConsensusMatchTest(unittest.TestCase):
             match_attribute="matched_edge",
         )
 
-        self.assertEqual(skeleton.edges[("a", "b")]["matched_edge"], ("A", "B"))
-        self.assertEqual(skeleton.edges[("b", "c")]["matched_edge"], ("A", "B"))
-        self.assertEqual(skeleton.edges[("c", "d")]["matched_edge"], ("B", "C"))
-        self.assertEqual(skeleton.edges[("d", "e")]["matched_edge"], ("B", "C"))
-        self.assertEqual(skeleton.edges[("c", "f")]["matched_edge"], None)
-        self.assertEqual(skeleton.edges[("f", "h")]["matched_edge"], None)
-        self.assertEqual(skeleton.edges[("h", "i")]["matched_edge"], None)
+        self.assertEqual(skeleton.edges[("a", "b")]["matched_edge"], Edge("A", "B"))
+        self.assertEqual(skeleton.edges[("b", "c")]["matched_edge"], Edge("A", "B"))
+        self.assertEqual(skeleton.edges[("c", "d")]["matched_edge"], Edge("B", "C"))
+        self.assertEqual(skeleton.edges[("d", "e")]["matched_edge"], Edge("B", "C"))
+        self.assertEqual(skeleton.edges[("c", "f")]["matched_edge"], Edge())
+        self.assertEqual(skeleton.edges[("f", "h")]["matched_edge"], Edge())
+        self.assertEqual(skeleton.edges[("h", "i")]["matched_edge"], Edge())
 
