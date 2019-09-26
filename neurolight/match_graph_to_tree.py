@@ -4,6 +4,33 @@ import numpy as np
 import itertools
 
 
+class Edge:
+    def __init__(self, u=None, v=None):
+        self.u = u
+        self.v = v
+
+    @property
+    def empty(self):
+        return self.u is None or self.v is None
+
+    def __eq__(self, other):
+        return (self.u == other.u or self.u == other.v) and (
+            self.v == other.u or self.v == other.v
+        )
+
+    def __str__(self):
+        if hash(self.u) <= hash(self.v):
+            return f"({self.u}, {self.v})"
+        else:
+            return f"({self.v}, {self.u})"
+
+    def __repr__(self):
+        return str(self)
+
+    def __hash__(self):
+        return hash(hash(self.u) + hash(self.v))
+
+
 class GraphToTreeMatcher:
 
     NO_MATCH_COST = 10e5
