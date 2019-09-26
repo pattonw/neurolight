@@ -261,10 +261,13 @@ class GraphToTreeMatcher:
 
             for tree_e in possible_matches:
                 # k = degree of node
-                # x = effective degree of node (k - # of None edges)
+                # n = number of None edges
+                # x = effective degree of node (k - n)
                 # y = # of edges labelled tree_e
                 #
                 # (k - 2)*y + x <= 2k - 2
+                # (k - 2)*y + k - n <= 2k -2
+                # (k - 2)*y - n <= k - 2
 
                 constraint = pylp.LinearConstraint()
 
@@ -276,14 +279,14 @@ class GraphToTreeMatcher:
                             continue
                         constraint.set_coefficient(i_el, k - 2)
 
-                # + x
+                # + n
                 for e in edges:
                     i_e0 = self.match_indicators[e][Edge()]
-                    constraint.set_coefficient(i_e0, 1)
+                    constraint.set_coefficient(i_e0, -1)
 
-                # <= 2k - 2
+                # <= k - 2
                 constraint.set_relation(pylp.Relation.LessEqual)
-                constraint.set_value(2 * k - 2)
+                constraint.set_value(k - 2)
 
                 self.constraints.add(constraint)
 
