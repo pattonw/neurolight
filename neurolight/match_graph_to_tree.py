@@ -174,12 +174,14 @@ class GraphToTreeMatcher:
                 constraint = pylp.LinearConstraint()
                 coefficient_a = self.match_indicators[x_edge][x_assigned]
                 coefficient_b = self.match_indicators[y_edge][y_assigned]
+                coefficient_c = self.match_indicators[current_e][current_assigned]
 
                 constraint.set_coefficient(coefficient_a, 1)
                 constraint.set_coefficient(coefficient_b, 1)
+                constraint.set_coefficient(coefficient_c, 1)
 
                 constraint.set_relation(pylp.Relation.LessEqual)
-                constraint.set_value(1)
+                constraint.set_value(2)
 
                 self.constraints.add(constraint)
 
@@ -192,12 +194,14 @@ class GraphToTreeMatcher:
                     constraint = pylp.LinearConstraint()
                 coefficient_a = self.match_indicators[u_edge][u_assigned]
                 coefficient_b = self.match_indicators[v_edge][v_assigned]
+                coefficient_c = self.match_indicators[current_e][current_assigned]
 
                 constraint.set_coefficient(coefficient_a, 1)
                 constraint.set_coefficient(coefficient_b, 1)
+                constraint.set_coefficient(coefficient_c, 1)
 
                 constraint.set_relation(pylp.Relation.LessEqual)
-                constraint.set_value(1)
+                constraint.set_value(2)
 
                 self.constraints.add(constraint)
 
