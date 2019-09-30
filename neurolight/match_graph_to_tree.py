@@ -4,47 +4,27 @@ import numpy as np
 import itertools
 
 
-class Edge:
-    def __init__(self, u=None, v=None):
-        self.u = u
-        self.v = v
-
-    @property
-    def empty(self):
-        return self.u is None or self.v is None
-
-    def __contains__(self, item):
-        return item == self.u or item == self.v
-
-    def __eq__(self, other):
-        if not isinstance(other, Edge):
-            raise ValueError("cannot compare to classes other than Edge")
-        return (self.u == other.u or self.u == other.v) and (
-            self.v == other.u or self.v == other.v
-        )
-
-    def __str__(self):
-        if hash(self.u) <= hash(self.v):
-            return f"({self.u}, {self.v})"
-        else:
-            return f"({self.v}, {self.u})"
-
-    def __repr__(self):
-        return str(self)
-
-    def __hash__(self):
-        return hash(hash(self.u) + hash(self.v))
-
-
 class GraphToTreeMatcher:
 
     NO_MATCH_COST = 10e5
 
-    def __init__(self, graph, tree, match_distance_threshold):
+    def __init__(
+        self,
+        graph: nx.Graph,
+        tree: nx.DiGraph,
+        match_distance_threshold: float,
+        epsilon: float = 0.1,
+    ):
 
-        self.graph = graph
+        self.graph = graph.to_directed()
         self.tree = tree
+        assert nx.is_arborescence(self.tree), (
+            "cannot match an arbitrary source to an arbitrary target. "
+            + "target graph should be a tree. i.e. DAG with max in_degree = 1"
+        )
+
         self.match_distance_threshold = match_distance_threshold
+        self.epsilon = epsilon
 
         self.objective = None
         self.constraints = None
@@ -64,7 +44,6 @@ class GraphToTreeMatcher:
 
         matches = []
         for graph_e in self.graph.edges():
-            graph_e = Edge(*graph_e)
             for l, i in self.match_indicators[graph_e].items():
                 if solution[i] > 0.5:
                     matches.append((graph_e, l))
@@ -91,8 +70,7 @@ class GraphToTreeMatcher:
 
     def __check_consistency(self, solution):
 
-        # TODO: check if solution is consistent
-        # if not, add additional constraints and return False
+        return True
 
         self.__assign_edges_to_graph(solution)
 
@@ -242,31 +220,24 @@ class GraphToTreeMatcher:
                     seen += 1
 
     def __preprocess_tree(self):
-        for node, degree in list(self.tree.degree()):
-            if degree > 3:
-                neighbors = list(self.tree.neighbors(node))
-                for i, neighbor in enumerate(neighbors):
-                    self.tree.add_node(
-                        (node, neighbor), location=self.tree.nodes[node]["location"]
-                    )
-                    self.tree.add_edge(neighbor, (node, neighbor))
-                    for j in range(i):
-                        self.tree.add_edge((node, neighbor), (node, neighbors[j]))
-                self.tree.remove_node(node)
-
-        # For each edge, keep track of all edges that share a node with it
-        # including itself and the "no match" edge None.
-        # The graph cannot contain adjacent edge assignments that are not adjacent
-        # in the tree.
-        self.adjacent_edges = {}
-        for current_e in self.tree.edges():
-            current_e = Edge(*current_e)
-            self.adjacent_edges[current_e] = set([Edge()])
-            for neighbor_e in itertools.chain(
-                self.tree.edges(current_e.u), self.tree.edges(current_e.v)
-            ):
-                neighbor_e = Edge(*neighbor_e)
-                self.adjacent_edges[current_e].add(neighbor_e)
+        """
+        No special handling of high order branching. consider:
+        G:          o               | T:        o
+                    |               |           |
+                    o               |           |
+                    |               |           |
+              o-o-o-o-o-o-o-o-o     |   o-------o----------o
+                        |           |            \
+                        o           |             \
+                        |           |              \
+                        o           |               o
+        Our constraints would be unable to handle this case which is very
+        likely if G is generated through some skeletonization algorithm.
+        If this is likely to occur in you G, you may need to do some pre
+        processing to add potential edges such that it is possible to extract
+        a subset of edges of G that are topologically identical to T.
+        """
+        pass
 
     def __find_possible_matches(self):
 
@@ -285,7 +256,7 @@ class GraphToTreeMatcher:
 
     def __edge_distance(self, graph_edge, tree_edge):
         # average the distance of the endpoints of the graph edge to the tree edge
-        g_u, g_v = graph_edge.u, graph_edge.v
+        g_u, g_v = graph_edge[0], graph_edge[1]
         dist = (
             self.__point_to_edge_dist(g_u, tree_edge)
             + self.__point_to_edge_dist(g_v, tree_edge)
@@ -294,8 +265,8 @@ class GraphToTreeMatcher:
 
     def __point_to_edge_dist(self, point, edge):
         point_loc = self.graph.nodes[point]["location"]
-        u_loc = self.tree.nodes[edge.u]["location"]
-        v_loc = self.tree.nodes[edge.v]["location"]
+        u_loc = self.tree.nodes[edge[0]]["location"]
+        v_loc = self.tree.nodes[edge[1]]["location"]
         slope = v_loc - u_loc
         edge_mag = np.linalg.norm(slope)
         if np.isclose(edge_mag, 0):
