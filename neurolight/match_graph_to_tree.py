@@ -163,56 +163,134 @@ class GraphToTreeMatcher:
         self.match_indicators = {}
         self.match_indicator_costs = []
 
-        for graph_e, graph_e_data in self.graph.edges.items():
-            graph_e = Edge(*graph_e)
+        for graph_e, graph_e_attrs in self.graph.edges.items():
 
-            self.match_indicators[graph_e] = {}
+            graph_e_indicators = self.match_indicators.setdefault(graph_e, {})
 
-            for tree_e, distance in graph_e_data["__possible_matches"]:
-                self.match_indicators[graph_e][tree_e] = self.num_variables
+            for tree_e, distance in graph_e_attrs["__possible_matches"]:
+                graph_e_indicators[tree_e] = self.num_variables
                 self.match_indicator_costs.append(distance)
 
                 self.num_variables += 1
 
-    def __create_constraints(self):
+        self.transition_indicators = {}
 
-        self.constraints = pylp.LinearConstraints()
+        for graph_n, graph_n_attrs in self.graph.nodes.items():
+            """
+            Enumerating allowable transitions:
+            two cases:
+            1) graph_n is part way through an edge
+                - graph_n inputs == graph_n outputs
+                - there is only 1 input and 1 output, the rest are None
+            2) graph_n is essentially assigned to some tree_n.
+                - graph_n inputs must match to tree_n inputs (1)
+                - graph_n outputs must match to tree_n outputs (k)
+                - a subset of graph_n inputs and outputs must make
+                a 1-1 and onto mapping with tree_n inputs and outputs
+                - remaining graph_n inputs and outputs must be none
+            """
+            node_indicators = self.transition_indicators.setdefault(graph_n, {})
 
-        # pick exactly one of the match_indicators per edge
+            graph_in_edges = self.graph.in_edges(graph_n)
+            graph_out_edges = self.graph.out_edges(graph_n)
 
-        for graph_e in self.graph.edges():
-            graph_e = Edge(*graph_e)
+            possible_tree_in_edges = set(
+                [
+                    tree_edge
+                    for graph_e in graph_in_edges
+                    for tree_edge, cost in self.graph.edges[graph_e][
+                        "__possible_matches"
+                    ]
+                ]
+            )
 
-            constraint = pylp.LinearConstraint()
-            for match_indicator in self.match_indicators[graph_e].values():
-                constraint.set_coefficient(match_indicator, 1)
-            constraint.set_relation(pylp.Relation.Equal)
-            constraint.set_value(1)
+            possible_tree_out_edges = set(
+                [
+                    tree_edge
+                    for graph_e in graph_out_edges
+                    for tree_edge, cost in self.graph.edges[graph_e][
+                        "__possible_matches"
+                    ]
+                ]
+            )
 
-            self.constraints.add(constraint)
+            possible_chains = possible_tree_in_edges & possible_tree_out_edges
 
-        # branch nodes in graph have to correspond to branch nodes in tree
-        #
-        # We model this constraint by requiring that as soon as a graph node
-        # has degree > 2, the number of times a label is used on incident edges
-        # is at most 1.
+            possible_edge_matches = {
+                graph_e: set(
+                    e for e, c in self.graph.edges()[graph_e]["__possible_matches"]
+                )
+                for graph_e in set(graph_in_edges) | set(graph_out_edges)
+            }
 
-        for n in self.graph.nodes():
+            # case 1:
+            for possible_chain in possible_chains:
+                for g_in, g_out in itertools.product(graph_in_edges, graph_out_edges):
+                    if (
+                        g_in != g_out
+                        and g_in != tuple(g_out[::-1])
+                        and possible_chain in possible_edge_matches[g_in]
+                        and possible_chain in possible_edge_matches[g_out]
+                    ):
+                        node_indicators[self.num_variables] = {
+                            g_in: possible_chain,
+                            g_out: possible_chain,
+                        }
 
-            k = self.graph.degree(n)
+                        # set the rest to None:
+                        for graph_e in itertools.chain(graph_in_edges, graph_out_edges):
+                            node_indicators[self.num_variables].setdefault(
+                                graph_e, None
+                            )
 
-            # can't be a branch node
-            if k <= 2:
-                continue
+                        self.num_variables += 1
 
-            edges = [Edge(*e) for e in self.graph.edges(n)]
-            possible_matches = []
-            for graph_e in edges:
-                for tree_e, distance in self.graph.edges[(graph_e.u, graph_e.v)][
-                    "__possible_matches"
-                ]:
-                    possible_matches += [tree_e]
-            possible_matches = set(possible_matches)
+            # case 2:
+            possible_nodes = set(
+                n
+                for e in itertools.chain(
+                    possible_tree_in_edges, possible_tree_out_edges
+                )
+                for n in e
+            )
+            for possible_node in possible_nodes:
+                ness_in_edges = list(self.tree.in_edges(possible_node))
+                ness_out_edges = list(self.tree.out_edges(possible_node))
+                g_ins = itertools.combinations(graph_in_edges, len(ness_in_edges))
+                g_outs = itertools.combinations(graph_out_edges, len(ness_out_edges))
+                for ins, outs in itertools.product(g_ins, g_outs):
+                    if (
+                        all(
+                            [
+                                ness_out in possible_edge_matches[g_out]
+                                for g_out, ness_out in zip(outs, ness_out_edges)
+                            ]
+                        )
+                        and all(
+                            [
+                                ness_in in possible_edge_matches[g_in]
+                                for g_in, ness_in in zip(ins, ness_in_edges)
+                            ]
+                        )
+                        and all(g_in not in outs for g_in in ins)
+                        and all(tuple(g_in[::-1]) not in outs for g_in in ins)
+                    ):
+                        config = node_indicators.setdefault(self.num_variables, {})
+                        config.update(
+                            {
+                                g_out: ness_out
+                                for g_out, ness_out in zip(outs, ness_out_edges)
+                            }
+                        )
+                        config.update(
+                            {g_in: ness_in for g_in, ness_in in zip(ins, ness_in_edges)}
+                        )
+
+                        # set the rest to None:
+                        for graph_e in itertools.chain(graph_in_edges, graph_out_edges):
+                            config.setdefault(graph_e, None)
+
+                        self.num_variables += 1
 
             for tree_e in possible_matches:
                 # k = degree of node
