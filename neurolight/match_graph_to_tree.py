@@ -104,17 +104,26 @@ class GraphToTreeMatcher:
 
         self.possible_matches = {}
 
-        for g_u, g_v, graph_e_data in self.graph.edges(data=True):
-            graph_e = Edge(g_u, g_v)
-            graph_e_data["__possible_matches"] = [(Edge(), self.NO_MATCH_COST)]
+        # iterate over out edges to avoid repeated computations.
+        for graph_n in self.graph.nodes():
+            for graph_e_out in self.graph.out_edges(graph_n):
+                e_out = graph_e_out
+                e_in = tuple([graph_e_out[1], graph_e_out[0]])
 
-            for t_u, t_v, tree_e_data in self.tree.edges(data=True):
-                tree_e = Edge(t_u, t_v)
-                distance = self.__edge_distance(graph_e, tree_e)
+                for tree_e, tree_e_data in self.tree.edges.items():
+                    distance = self.__edge_distance(graph_e_out, tree_e)
+                    cost = self.__cost(distance)
 
                 if distance <= self.match_distance_threshold:
-                    graph_e_data["__possible_matches"].append((tree_e, distance))
+                        out_matches = self.graph.edges[e_out].setdefault(
+                            "__possible_matches", []
+                        )
+                        in_matches = self.graph.edges[e_in].setdefault(
+                            "__possible_matches", []
+                        )
 
+                        out_matches.append((tree_e, cost))
+                        in_matches.append((tree_e, cost))
     def __edge_distance(self, graph_edge, tree_edge):
         # average the distance of the endpoints of the graph edge to the tree edge
         g_u, g_v = graph_edge[0], graph_edge[1]
