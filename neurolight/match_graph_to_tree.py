@@ -124,6 +124,14 @@ class GraphToTreeMatcher:
 
                         out_matches.append((tree_e, cost))
                         in_matches.append((tree_e, cost))
+
+    def __cost(self, distance: float) -> float:
+        """
+        The cost formula given some distance between two edges.
+        Negative costs indicate rewards
+        """
+        return -self.match_distance_threshold / max(self.epsilon, distance)
+
     def __edge_distance(self, graph_edge, tree_edge):
         # average the distance of the endpoints of the graph edge to the tree edge
         g_u, g_v = graph_edge[0], graph_edge[1]
