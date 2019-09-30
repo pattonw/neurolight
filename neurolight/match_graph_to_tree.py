@@ -74,14 +74,11 @@ class GraphToTreeMatcher:
 
     def __assign_edges_to_graph(self, solution):
         for graph_e, graph_e_attrs in self.graph.edges().items():
-            graph_e = Edge(*graph_e)
-            seen = 0
             for possible_match, cost in graph_e_attrs["__possible_matches"]:
                 coefficient_ind = self.match_indicators[graph_e][possible_match]
                 coefficient = solution[coefficient_ind]
                 if coefficient == 1:
                     graph_e_attrs["__assigned_edge"] = possible_match
-                    seen += 1
 
     def __preprocess_tree(self):
         """
