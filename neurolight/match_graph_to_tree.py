@@ -292,36 +292,57 @@ class GraphToTreeMatcher:
 
                         self.num_variables += 1
 
-            for tree_e in possible_matches:
-                # k = degree of node
-                # n = number of None edges
-                # x = effective degree of node (k - n)
-                # y = # of edges labelled tree_e
-                #
-                # (k - 2)*y + x <= 2k - 2
-                # (k - 2)*y + k - n <= 2k -2
-                # (k - 2)*y - n <= k - 2
+    def __create_constraints(self):
 
-                constraint = pylp.LinearConstraint()
+        self.constraints = pylp.LinearConstraints()
 
-                # (k - 2)*y
-                if not tree_e.empty:
-                    for graph_e in edges:
-                        i_el = self.match_indicators[graph_e].get(tree_e, None)
-                        if i_el is None:
-                            continue
-                        constraint.set_coefficient(i_el, k - 2)
+        # pick exactly one of the match_indicators per edge:
 
-                # + n
-                for e in edges:
-                    i_e0 = self.match_indicators[e][Edge()]
-                    constraint.set_coefficient(i_e0, -1)
+        for graph_e in self.graph.edges():
 
-                # <= k - 2
+            constraint = pylp.LinearConstraint()
+            for match_indicator in self.match_indicators[graph_e].values():
+                constraint.set_coefficient(match_indicator, 1)
                 constraint.set_relation(pylp.Relation.LessEqual)
-                constraint.set_value(k - 2)
+            constraint.set_value(1)
 
                 self.constraints.add(constraint)
+
+        for graph_n in self.graph.nodes():
+            # each node has a set of configurations, of which only one can be active
+            unique_config_constraint = pylp.LinearConstraint()
+            for node_indicator, configuration in self.transition_indicators[
+                graph_n
+            ].items():
+                unique_config_constraint.set_coefficient(node_indicator, 1)
+
+                config_constraint = pylp.LinearConstraint()
+                num_assignments = 0
+                num_nones = 0
+                for graph_e, tree_e in configuration.items():
+                    if tree_e is not None:
+                        match_indicator = self.match_indicators[graph_e][tree_e]
+                        config_constraint.set_coefficient(match_indicator, -1)
+                        num_assignments += 1
+                for graph_e, tree_e in configuration.items():
+                    if tree_e is None:
+                        for match_indicator in self.match_indicators[graph_e].values():
+                            config_constraint.set_coefficient(
+                                match_indicator, num_assignments
+                            )
+                            num_nones += 1
+
+                # if x_node_indicator: on the edge, only satisfied if all assignments = True
+                config_constraint.set_coefficient(
+                    node_indicator, num_assignments * (num_nones + 1)
+                )
+                config_constraint.set_relation(pylp.Relation.LessEqual)
+                config_constraint.set_value(num_assignments * num_nones)
+                self.constraints.add(config_constraint)
+
+            unique_config_constraint.set_relation(pylp.Relation.Equal)
+            unique_config_constraint.set_value(1)
+            self.constraints.add(unique_config_constraint)
 
     def __create_objective(self):
 
