@@ -3,19 +3,19 @@ import neurolight as nl
 import networkx as nx
 import numpy as np
 
-from neurolight.match_graph_to_tree import Edge
+from neurolight.match_graph_to_tree import GraphToTreeMatcher
 
 class ConsensusMatchTest(unittest.TestCase):
     def test_simple(self):
 
         # consensus graph:
         #
-        # A-----B-----C
+        # A---->B---->C
         #
         # skeleton graph:
         #
         # a--b--c--d--e
-        consensus = nx.Graph()
+        consensus = nx.DiGraph()
         consensus.add_nodes_from(
             [
                 ("A", {"location": np.array([0, 0, 0])}),
@@ -49,6 +49,11 @@ class ConsensusMatchTest(unittest.TestCase):
         self.assertEqual(skeleton.edges[("c", "d")]["matched_edge"], Edge("B", "C"))
         self.assertEqual(skeleton.edges[("d", "e")]["matched_edge"], Edge("B", "C"))
 
+        self.assertEqual(skeleton.edges[("a", "b")]["matched_edge"], ("A", "B"))
+        self.assertEqual(skeleton.edges[("b", "c")]["matched_edge"], ("A", "B"))
+        self.assertEqual(skeleton.edges[("c", "d")]["matched_edge"], ("B", "C"))
+        self.assertEqual(skeleton.edges[("d", "e")]["matched_edge"], ("B", "C"))
+
     def test_simple_4_way(self):
 
         # consensus graph:
@@ -56,41 +61,35 @@ class ConsensusMatchTest(unittest.TestCase):
         #    A
         #     \
         #      \
-        # D-----X-----B
+        # D<----X---->B
         #        \
         #         \
         #          C
-        #
-        # center node gets replaced with:
-        #
-        #  tl   XA   tr
-        #     / | \
-        #  XD---+---XB  h (horizontal) v(vertical)
-        #     \ | /
-        #  bl   XC   br
         #
         # skeleton graph:
         #
         #    a
         #    |
         #    b
-        #    |
+        #    | \
         # c--d--e--f--g
-        #          |
+        #        \ |
         #          h
         #          |
         #          i
         #
-        # a should map to A-XA
-        # b should map to XA-XD
-        # c should map to D-XD
-        # d should map to XB-XD
-        # e should map to XB-XD
-        # f should map to B-XB
-        # g should map to XB-XC
-        # h should map to C-XC
+        # ab should map to A->X
+        # bd should map to None
+        # be should map to A->X
+        # cd should map to X->D
+        # de should map to X->D
+        # ef should map to X->B
+        # eh should map to X->C
+        # fg should map to X->B
+        # hi should map to X->C
+        # fh should map to None
 
-        consensus = nx.Graph()
+        consensus = nx.DiGraph()
         consensus.add_nodes_from(
             [
                 ("D", {"location": np.array([0, 0, 0])}),
@@ -100,7 +99,7 @@ class ConsensusMatchTest(unittest.TestCase):
                 ("C", {"location": np.array([0, 10, 15])}),
             ]
         )
-        consensus.add_edges_from([("A", "X"), ("B", "X"), ("C", "X"), ("D", "X")])
+        consensus.add_edges_from([("A", "X"), ("X", "B"), ("X", "C"), ("X", "D")])
 
         skeleton = nx.Graph()
         skeleton.add_nodes_from(
@@ -120,9 +119,11 @@ class ConsensusMatchTest(unittest.TestCase):
             [
                 ("a", "b"),
                 ("b", "d"),
+                ("b", "e"),
                 ("c", "d"),
                 ("d", "e"),
                 ("e", "f"),
+                ("e", "h"),
                 ("f", "g"),
                 ("f", "h"),
                 ("h", "i"),
@@ -141,24 +142,22 @@ class ConsensusMatchTest(unittest.TestCase):
         self.assertEqual(skeleton.edges[("f", "g")]["matched_edge"], Edge("B", ("X", "B")))
         self.assertEqual(skeleton.edges[("h", "i")]["matched_edge"], Edge("C", ("X", "C")))
 
-        self.assertEqual(
-            skeleton.edges[("b", "d")]["matched_edge"], Edge(("X", "A"), ("X", "D"))
-        )
-        self.assertEqual(
-            skeleton.edges[("d", "e")]["matched_edge"], Edge(("X", "D"), ("X", "B"))
-        )
-        self.assertEqual(
-            skeleton.edges[("e", "f")]["matched_edge"], Edge(("X", "D"), ("X", "B"))
-        )
-        self.assertEqual(
-            skeleton.edges[("f", "h")]["matched_edge"], Edge(("X", "B"), ("X", "C"))
-        )
+        self.assertEqual(skeleton.edges()[("a", "b")]["matched_edge"], ("A", "X"))
+        self.assertEqual(skeleton.edges()[("b", "d")].get("matched_edge"), None)
+        self.assertEqual(skeleton.edges()[("b", "e")]["matched_edge"], ("A", "X"))
+        self.assertEqual(skeleton.edges()[("c", "d")]["matched_edge"], ("X", "D"))
+        self.assertEqual(skeleton.edges()[("d", "e")]["matched_edge"], ("X", "D"))
+        self.assertEqual(skeleton.edges()[("e", "f")]["matched_edge"], ("X", "B"))
+        self.assertEqual(skeleton.edges()[("e", "h")]["matched_edge"], ("X", "C"))
+        self.assertEqual(skeleton.edges()[("f", "g")]["matched_edge"], ("X", "B"))
+        self.assertEqual(skeleton.edges()[("f", "h")].get("matched_edge"), None)
+        self.assertEqual(skeleton.edges()[("h", "i")]["matched_edge"], ("X", "C"))
 
     def test_confounding_chain(self):
 
         # consensus graph:
         #
-        # A-----B-----C
+        # A---->B---->C
         #
         #
         # skeleton graph:
@@ -170,7 +169,7 @@ class ConsensusMatchTest(unittest.TestCase):
         # the optimal matching should not cheat and assign
         # None to c-f, and BC to f-h, and h-i to reduce cost
 
-        consensus = nx.Graph()
+        consensus = nx.DiGraph()
         consensus.add_nodes_from(
             [
                 ("A", {"location": np.array([0, 0, 0])}),
@@ -212,11 +211,11 @@ class ConsensusMatchTest(unittest.TestCase):
             match_attribute="matched_edge",
         )
 
-        self.assertEqual(skeleton.edges[("a", "b")]["matched_edge"], Edge("A", "B"))
-        self.assertEqual(skeleton.edges[("b", "c")]["matched_edge"], Edge("A", "B"))
-        self.assertEqual(skeleton.edges[("c", "d")]["matched_edge"], Edge("B", "C"))
-        self.assertEqual(skeleton.edges[("d", "e")]["matched_edge"], Edge("B", "C"))
-        self.assertEqual(skeleton.edges[("c", "f")]["matched_edge"], Edge())
-        self.assertEqual(skeleton.edges[("f", "h")]["matched_edge"], Edge())
-        self.assertEqual(skeleton.edges[("h", "i")]["matched_edge"], Edge())
+        self.assertEqual(skeleton.edges[("a", "b")]["matched_edge"], ("A", "B"))
+        self.assertEqual(skeleton.edges[("b", "c")]["matched_edge"], ("A", "B"))
+        self.assertEqual(skeleton.edges[("c", "d")]["matched_edge"], ("B", "C"))
+        self.assertEqual(skeleton.edges[("d", "e")]["matched_edge"], ("B", "C"))
+        self.assertEqual(skeleton.edges[("c", "f")].get("matched_edge"), None)
+        self.assertEqual(skeleton.edges[("f", "h")].get("matched_edge"), None)
+        self.assertEqual(skeleton.edges[("h", "i")].get("matched_edge"), None)
 
