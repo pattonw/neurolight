@@ -173,6 +173,7 @@ class GraphToTreeMatcher:
                 self.num_variables += 1
 
         self.transition_indicators = {}
+        self.root_transitions = []
 
         for graph_n, graph_n_attrs in self.graph.nodes.items():
             """
@@ -274,6 +275,8 @@ class GraphToTreeMatcher:
                         and all(g_in not in outs for g_in in ins)
                         and all(tuple(g_in[::-1]) not in outs for g_in in ins)
                     ):
+                        if self.tree.in_degree(possible_node) == 0:
+                            self.root_transitions.append(self.num_variables)
                         config = node_indicators.setdefault(self.num_variables, {})
                         config.update(
                             {
@@ -290,6 +293,15 @@ class GraphToTreeMatcher:
                             config.setdefault(graph_e, None)
 
                         self.num_variables += 1
+
+            # allow all None transitions
+            config = node_indicators.setdefault(self.num_variables, {})
+
+            # set the rest to None:
+            for graph_e in itertools.chain(graph_in_edges, graph_out_edges):
+                config.setdefault(graph_e, None)
+
+            self.num_variables += 1
 
     def __create_constraints(self):
 
@@ -326,22 +338,28 @@ class GraphToTreeMatcher:
                 for graph_e, tree_e in configuration.items():
                     if tree_e is None:
                         for match_indicator in self.match_indicators[graph_e].values():
-                            config_constraint.set_coefficient(
-                                match_indicator, num_assignments
-                            )
+                            config_constraint.set_coefficient(match_indicator, 1)
                             num_nones += 1
 
                 # if x_node_indicator: on the edge, only satisfied if all assignments = True
                 config_constraint.set_coefficient(
-                    node_indicator, num_assignments * (num_nones + 1)
+                    node_indicator, num_assignments + num_nones
                 )
                 config_constraint.set_relation(pylp.Relation.LessEqual)
-                config_constraint.set_value(num_assignments * num_nones)
+                config_constraint.set_value(num_nones)
                 self.constraints.add(config_constraint)
 
             unique_config_constraint.set_relation(pylp.Relation.Equal)
             unique_config_constraint.set_value(1)
             self.constraints.add(unique_config_constraint)
+
+        # only 1 transition from none to root allowed:
+        unique_root_constraint = pylp.LinearConstraint()
+        for transition_indicator in self.root_transitions:
+            unique_root_constraint.set_coefficient(transition_indicator, 1)
+        unique_root_constraint.set_relation(pylp.Relation.LessEqual)
+        unique_root_constraint.set_value(1)
+        self.constraints.add(unique_root_constraint)
 
     def __create_objective(self):
 
