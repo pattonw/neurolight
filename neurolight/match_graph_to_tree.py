@@ -36,6 +36,15 @@ class GraphToTreeMatcher:
         self.__create_constraints()
         self.__create_objective()
 
+    def possible_matches(self):
+        possible_edge_matches = {
+            graph_e: set(
+                e for e, c in self.graph.edges()[graph_e]["__possible_matches"]
+            )
+            for graph_e in self.graph.edges
+        }
+        return possible_edge_matches
+
     def match(self):
         """Return a list of tuples from ``graph`` edges to ``tree`` edges (or
         ``None``, if no match was found).
@@ -102,12 +111,16 @@ class GraphToTreeMatcher:
         pass
 
     def __find_possible_matches(self):
+        self.possible_matches = {}
 
         # iterate over out edges to avoid repeated computations.
         for graph_n in self.graph.nodes():
             for graph_e_out in self.graph.out_edges(graph_n):
                 e_out = graph_e_out
                 e_in = tuple([graph_e_out[1], graph_e_out[0]])
+
+                pms_in = self.possible_matches.setdefault(e_in, set())
+                pms_out = self.possible_matches.setdefault(e_out, set())
 
                 for tree_e, tree_e_data in self.tree.edges.items():
                     distance = self.__edge_distance(graph_e_out, tree_e)
@@ -123,6 +136,9 @@ class GraphToTreeMatcher:
 
                         out_matches.append((tree_e, cost))
                         in_matches.append((tree_e, cost))
+
+                        pms_in.add(tree_e)
+                        pms_out.add(tree_e)
 
     def __cost(self, distance: float) -> float:
         """
@@ -151,6 +167,32 @@ class GraphToTreeMatcher:
         frac = np.clip(np.dot(point_loc - u_loc, slope) / np.dot(slope, slope), 0, 1)
         min_dist = np.linalg.norm(frac * slope + u_loc - point_loc)
         return min_dist
+
+    def __tree_candidates(self, graph_edges):
+        edge_view = self.graph.edges()
+        return set(
+            [
+                tree_edge
+                for graph_e in graph_edges
+                for tree_edge, _ in edge_view[graph_e]["__possible_matches"]
+            ]
+        )
+
+    def __can_match(self, graph_e, tree_e):
+        return tree_e in self.possible_matches[graph_e]
+
+    def __all_match(self, graph_es, tree_es):
+        return all([self.__can_match(g_e, t_e) for g_e, t_e in zip(graph_es, tree_es)])
+
+    def __valid_chain(
+        self, u: Tuple[Any, Any], v: Tuple[Any, Any], match: Tuple[Any, Any]
+    ):
+        return (
+            u != v
+            and u != tuple(v[::-1])
+            and self.__can_match(u, match)
+            and self.__can_match(v, match)
+        )
 
     def __create_inidicators(self):
 
@@ -194,44 +236,15 @@ class GraphToTreeMatcher:
             graph_in_edges = self.graph.in_edges(graph_n)
             graph_out_edges = self.graph.out_edges(graph_n)
 
-            possible_tree_in_edges = set(
-                [
-                    tree_edge
-                    for graph_e in graph_in_edges
-                    for tree_edge, cost in self.graph.edges[graph_e][
-                        "__possible_matches"
-                    ]
-                ]
-            )
+            tree_in_cands = self.__tree_candidates(graph_in_edges)
+            tree_out_cands = self.__tree_candidates(graph_out_edges)
 
-            possible_tree_out_edges = set(
-                [
-                    tree_edge
-                    for graph_e in graph_out_edges
-                    for tree_edge, cost in self.graph.edges[graph_e][
-                        "__possible_matches"
-                    ]
-                ]
-            )
-
-            possible_chains = possible_tree_in_edges & possible_tree_out_edges
-
-            possible_edge_matches = {
-                graph_e: set(
-                    e for e, c in self.graph.edges()[graph_e]["__possible_matches"]
-                )
-                for graph_e in set(graph_in_edges) | set(graph_out_edges)
-            }
+            possible_chains = tree_in_cands & tree_out_cands
 
             # case 1:
             for possible_chain in possible_chains:
                 for g_in, g_out in itertools.product(graph_in_edges, graph_out_edges):
-                    if (
-                        g_in != g_out
-                        and g_in != tuple(g_out[::-1])
-                        and possible_chain in possible_edge_matches[g_in]
-                        and possible_chain in possible_edge_matches[g_out]
-                    ):
+                    if self.__valid_chain(g_in, g_out, possible_chain):
                         node_indicators[self.num_variables] = {
                             g_in: possible_chain,
                             g_out: possible_chain,
@@ -247,32 +260,18 @@ class GraphToTreeMatcher:
 
             # case 2:
             possible_nodes = set(
-                n
-                for e in itertools.chain(
-                    possible_tree_in_edges, possible_tree_out_edges
-                )
-                for n in e
+                n for e in itertools.chain(tree_in_cands, tree_out_cands) for n in e
             )
             for possible_node in possible_nodes:
-                ness_in_edges = list(self.tree.in_edges(possible_node))
-                ness_out_edges = list(self.tree.out_edges(possible_node))
-                g_ins = itertools.combinations(graph_in_edges, len(ness_in_edges))
-                g_outs = itertools.combinations(graph_out_edges, len(ness_out_edges))
+                ness_in_edges = self.tree.in_edges(possible_node)
+                ness_out_edges = self.tree.out_edges(possible_node)
+                g_ins = itertools.permutations(graph_in_edges, len(ness_in_edges))
+                g_outs = itertools.permutations(graph_out_edges, len(ness_out_edges))
                 for ins, outs in itertools.product(g_ins, g_outs):
                     if (
-                        all(
-                            [
-                                ness_out in possible_edge_matches[g_out]
-                                for g_out, ness_out in zip(outs, ness_out_edges)
-                            ]
-                        )
-                        and all(
-                            [
-                                ness_in in possible_edge_matches[g_in]
-                                for g_in, ness_in in zip(ins, ness_in_edges)
-                            ]
-                        )
-                        and all(g_in not in outs for g_in in ins)
+                        self.__all_match(outs, ness_out_edges)
+                        and self.__all_match(ins, ness_in_edges)
+                        and all(g_in not in outs for g_in in ins)  # no repeated edges
                         and all(tuple(g_in[::-1]) not in outs for g_in in ins)
                     ):
                         if self.tree.in_degree(possible_node) == 0:
