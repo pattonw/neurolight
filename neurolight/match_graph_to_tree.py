@@ -301,6 +301,8 @@ class GraphToTreeMatcher:
                 g_outs = itertools.permutations(graph_out_edges, len(t_outs))
                 for ins, outs in itertools.product(g_ins, g_outs):
                     if self.__valid_transition(g_ins, g_outs, t_ins, t_outs):
+
+                        # store all root transitions, we only want 1
                         if self.tree.in_degree(possible_node) == 0:
                             self.root_transitions.append(self.num_variables)
                         config = node_indicators.setdefault(self.num_variables, {})
@@ -380,7 +382,7 @@ class GraphToTreeMatcher:
         unique_root_constraint = pylp.LinearConstraint()
         for transition_indicator in self.root_transitions:
             unique_root_constraint.set_coefficient(transition_indicator, 1)
-        unique_root_constraint.set_relation(pylp.Relation.LessEqual)
+        unique_root_constraint.set_relation(pylp.Relation.Equal)
         unique_root_constraint.set_value(1)
         self.constraints.add(unique_root_constraint)
 
