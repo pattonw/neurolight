@@ -2,6 +2,7 @@ import unittest
 import neurolight as nl
 import networkx as nx
 import numpy as np
+import itertools
 
 
 class ConsensusMatchTest(unittest.TestCase):
@@ -208,7 +209,6 @@ class ConsensusMatchTest(unittest.TestCase):
         self.assertEqual(skeleton.edges[("f", "h")].get("matched_edge"), None)
         self.assertEqual(skeleton.edges[("h", "i")].get("matched_edge"), None)
 
-
     def test_confounding_loop(self):
 
         # consensus graph:
@@ -224,8 +224,7 @@ class ConsensusMatchTest(unittest.TestCase):
         #        | /
         #        i
         #
-        # the optimal matching should not cheat and assign
-        # None to c-f, and BC to f-h, and h-i to reduce cost
+        # the optimal matching should not create a loop around f-h-i
 
         consensus = nx.DiGraph()
         consensus.add_nodes_from(
@@ -276,4 +275,114 @@ class ConsensusMatchTest(unittest.TestCase):
         self.assertEqual(skeleton.edges[("f", "h")].get("matched_edge"), None)
         self.assertEqual(skeleton.edges[("f", "i")].get("matched_edge"), None)
         self.assertEqual(skeleton.edges[("h", "i")].get("matched_edge"), None)
+
+    def test_better_with_loop(self):
+
+        # consensus graph:
+        #
+        # A---->B---->C---->D
+        #
+        #
+        # skeleton graph:
+        #
+        #     k--l--m--n--o
+        #     |           |
+        #  a--b--c--d--e--f--g
+        #        |     |
+        #        h--i--j
+        #
+        # the optimal matching would be a-b-c-d-e-f-g
+        # however a higher score could be achieved by taking
+        # the upper path and allowing a loop in the middle
+
+        consensus = nx.DiGraph()
+        consensus.add_nodes_from(
+            [
+                ("A", {"location": np.array([0, 0, 0])}),
+                ("B", {"location": np.array([0, 0, 10])}),
+                ("C", {"location": np.array([0, 0, 20])}),
+                ("D", {"location": np.array([0, 0, 30])}),
+            ]
+        )
+        consensus.add_edges_from([("A", "B"), ("B", "C"), ("C", "D")])
+
+        skeleton = nx.Graph()
+        skeleton.add_nodes_from(
+            [
+                ("a", {"location": np.array([0, 0, 0])}),
+                ("b", {"location": np.array([0, 0, 5])}),
+                ("c", {"location": np.array([0, 0, 10])}),
+                ("d", {"location": np.array([0, 0, 15])}),
+                ("e", {"location": np.array([0, 0, 20])}),
+                ("f", {"location": np.array([0, 0, 25])}),
+                ("g", {"location": np.array([0, 0, 30])}),
+                ("h", {"location": np.array([0, 0.1, 10])}),
+                ("i", {"location": np.array([0, 0.1, 15])}),
+                ("j", {"location": np.array([0, 0.1, 20])}),
+                ("k", {"location": np.array([0, -0.1, 5])}),
+                ("l", {"location": np.array([0, -0.1, 10])}),
+                ("m", {"location": np.array([0, -0.1, 15])}),
+                ("n", {"location": np.array([0, -0.1, 20])}),
+                ("o", {"location": np.array([0, -0.1, 25])}),
+            ]
+        )
+        skeleton.add_edges_from(
+            [
+                ("a", "b"),
+                ("b", "c"),
+                ("c", "d"),
+                ("d", "e"),
+                ("e", "f"),
+                ("f", "g"),
+                ("c", "h"),
+                ("e", "j"),
+                ("h", "i"),
+                ("i", "j"),
+                ("b", "k"),
+                ("f", "o"),
+                ("k", "l"),
+                ("l", "m"),
+                ("m", "n"),
+                ("n", "o"),
+            ]
+        )
+
+        matcher, optimized_score = nl.match_graph_to_tree(
+            skeleton,
+            consensus,
+            match_distance_threshold=100,
+            match_attribute="matched_edge",
+        )
+
+        expected_tree = {
+            ("a", "b"): ("A", "B"),
+            ("b", "c"): ("A", "B"),
+            ("c", "d"): ("B", "C"),
+            ("d", "e"): ("B", "C"),
+            ("e", "f"): ("C", "D"),
+            ("f", "g"): ("C", "D"),
+        }
+
+        expected_nones = {
+            ("c", "h"): None,
+            ("e", "j"): None,
+            ("h", "i"): None,
+            ("i", "j"): None,
+            ("b", "k"): None,
+            ("f", "o"): None,
+            ("k", "l"): None,
+            ("l", "m"): None,
+            ("m", "n"): None,
+            ("n", "o"): None,
+        }
+
+        matcher.enforce_expected_assignments(expected_tree)
+        _, expected_tree_score = matcher.match()
+
+        self.assertLessEqual(expected_tree_score, optimized_score)
+
+        for graph_e, tree_e in itertools.chain(
+            expected_tree.items(), expected_nones.items()
+        ):
+            self.assertEqual(skeleton.edges[graph_e].get("matched_edge"), tree_e)
 
