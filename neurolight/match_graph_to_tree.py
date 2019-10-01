@@ -4,9 +4,11 @@ import networkx as nx
 
 import itertools
 import logging
-from typing import Any, Tuple
+from typing import Hashable, Tuple, List, Iterable, Set, Dict
 
 logger = logging.getLogger(__name__)
+
+Edge = Tuple[Hashable, Hashable]
 
 
 class GraphToTreeMatcher:
@@ -40,7 +42,7 @@ class GraphToTreeMatcher:
         self.__create_constraints()
         self.__create_objective()
 
-    def match(self):
+    def match(self) -> List[Tuple[Edge, Edge]]:
         """Return a list of tuples from ``graph`` edges to ``tree`` edges (or
         ``None``, if no match was found).
         """
@@ -89,7 +91,6 @@ class GraphToTreeMatcher:
         return total
 
     def __check_consistency(self, solution):
-
         return True
 
     def __assign_edges_to_graph(self, solution):
@@ -157,16 +158,16 @@ class GraphToTreeMatcher:
         """
         return -self.match_distance_threshold / max(self.epsilon, distance)
 
-    def __edge_distance(self, graph_edge, tree_edge):
+    def __edge_distance(self, graph_e: Edge, tree_e: Edge) -> float:
         # average the distance of the endpoints of the graph edge to the tree edge
-        g_u, g_v = graph_edge[0], graph_edge[1]
+        g_u, g_v = graph_e[0], graph_e[1]
         dist = (
-            self.__point_to_edge_dist(g_u, tree_edge)
-            + self.__point_to_edge_dist(g_v, tree_edge)
+            self.__point_to_edge_dist(g_u, tree_e)
+            + self.__point_to_edge_dist(g_v, tree_e)
         ) / 2
         return dist
 
-    def __point_to_edge_dist(self, point, edge):
+    def __point_to_edge_dist(self, point: Hashable, edge: Edge):
         point_loc = self.graph.nodes[point]["location"]
         u_loc = self.tree.nodes[edge[0]]["location"]
         v_loc = self.tree.nodes[edge[1]]["location"]
@@ -178,7 +179,7 @@ class GraphToTreeMatcher:
         min_dist = np.linalg.norm(frac * slope + u_loc - point_loc)
         return min_dist
 
-    def __tree_candidates(self, graph_edges):
+    def __tree_candidates(self, graph_edges: Iterable[Edge]) -> Set[Edge]:
         edge_view = self.graph.edges()
         return set(
             [
@@ -188,15 +189,13 @@ class GraphToTreeMatcher:
             ]
         )
 
-    def __can_match(self, graph_e, tree_e):
+    def __can_match(self, graph_e: Edge, tree_e: Edge) -> bool:
         return tree_e in self.possible_matches[graph_e]
 
     def __all_match(self, graph_es, tree_es):
         return all([self.__can_match(g_e, t_e) for g_e, t_e in zip(graph_es, tree_es)])
 
-    def __valid_chain(
-        self, u: Tuple[Any, Any], v: Tuple[Any, Any], match: Tuple[Any, Any]
-    ):
+    def __valid_chain(self, u: Edge, v: Edge, match: Edge) -> bool:
         return (
             u != v
             and u != tuple(v[::-1])
@@ -377,7 +376,7 @@ class GraphToTreeMatcher:
         for i, c in enumerate(self.match_indicator_costs):
             self.objective.set_coefficient(i, c)
 
-    def enforce_expected_assignments(self, expected_assignments):
+    def enforce_expected_assignments(self, expected_assignments: Dict[Edge, Edge]):
         expected_assignment_constraint = pylp.LinearConstraint()
         for c, s in expected_assignments.items():
             if s is None:
@@ -394,7 +393,12 @@ class GraphToTreeMatcher:
         self.constraints.add(expected_assignment_constraint)
 
 
-def match_graph_to_tree(graph, tree, match_attribute, match_distance_threshold):
+def match_graph_to_tree(
+    graph: nx.Graph,
+    tree: nx.DiGraph,
+    match_attribute: str,
+    match_distance_threshold: float,
+):
 
     matcher = GraphToTreeMatcher(graph, tree, match_distance_threshold)
     matches = matcher.match()
