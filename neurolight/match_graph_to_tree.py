@@ -103,8 +103,6 @@ class GraphToTreeMatcher:
 
     def __find_possible_matches(self):
 
-        self.possible_matches = {}
-
         # iterate over out edges to avoid repeated computations.
         for graph_n in self.graph.nodes():
             for graph_e_out in self.graph.out_edges(graph_n):
