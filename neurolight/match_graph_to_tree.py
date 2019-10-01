@@ -180,6 +180,9 @@ class GraphToTreeMatcher:
         return min_dist
 
     def __tree_candidates(self, graph_edges: Iterable[Edge]) -> Set[Edge]:
+        """
+        Returns all tree edges that can be assigned to at least one of the graph edges.
+        """
         edge_view = self.graph.edges()
         return set(
             [
@@ -192,7 +195,7 @@ class GraphToTreeMatcher:
     def __can_match(self, graph_e: Edge, tree_e: Edge) -> bool:
         return tree_e in self.possible_matches[graph_e]
 
-    def __all_match(self, graph_es, tree_es):
+    def __all_match(self, graph_es: Iterable[Edge], tree_es: Iterable[Edge]):
         return all([self.__can_match(g_e, t_e) for g_e, t_e in zip(graph_es, tree_es)])
 
     def __valid_chain(self, u: Edge, v: Edge, match: Edge) -> bool:
@@ -201,6 +204,21 @@ class GraphToTreeMatcher:
             and u != tuple(v[::-1])
             and self.__can_match(u, match)
             and self.__can_match(v, match)
+        )
+
+    def __valid_transition(
+        self,
+        g_ins: Iterable[Edge],
+        g_outs: Iterable[Edge],
+        t_ins: Iterable[Edge],
+        t_outs: Iterable[Edge],
+    ) -> bool:
+        g_ins, g_outs, t_ins, t_outs = [list(x) for x in (g_ins, g_outs, t_ins, t_outs)]
+        return (
+            self.__all_match(g_outs, t_outs)  # all out assignments possible
+            and self.__all_match(g_ins, t_ins)  # all in assignments possible
+            and all(g_in not in g_outs for g_in in g_ins)  # no repeated edges
+            and all(tuple(g_in[::-1]) not in g_outs for g_in in g_ins)
         )
 
     def __create_inidicators(self):
@@ -231,14 +249,17 @@ class GraphToTreeMatcher:
             Enumerating allowable transitions:
             two cases:
             1) graph_n is part way through an edge
-                - graph_n inputs == graph_n outputs
-                - there is only 1 input and 1 output, the rest are None
-            2) graph_n is essentially assigned to some tree_n.
-                - graph_n inputs must match to tree_n inputs (1)
-                - graph_n outputs must match to tree_n outputs (k)
-                - a subset of graph_n inputs and outputs must make
-                a 1-1 and onto mapping with tree_n inputs and outputs
-                - remaining graph_n inputs and outputs must be none
+                - there is only 1 valid in_edge and 1 valid out_edge,
+                  the remaining edges adjacent to graph_n are assigned to None
+                - the assignment for graph_n's in_edge and out_edge are the same
+            2) graph_n is at a branch point in tree_n.
+                - graph_n in_edges must match to tree_n in_edges.
+                  There should only be 1 in_edge.
+                - graph_n out_edges must match to tree_n out_edges.
+                  There could be any number of out_edges
+                - a subset of graph_n in_edges and out_edges must make
+                  a 1-1 and onto mapping with tree_n in_edges and out_edges
+                - remaining graph_n in_edges and out_edges must be assigned to None
             """
             node_indicators = self.transition_indicators.setdefault(graph_n, {})
 
@@ -272,28 +293,22 @@ class GraphToTreeMatcher:
                 n for e in itertools.chain(tree_in_cands, tree_out_cands) for n in e
             )
             for possible_node in possible_nodes:
-                ness_in_edges = self.tree.in_edges(possible_node)
-                ness_out_edges = self.tree.out_edges(possible_node)
-                g_ins = itertools.permutations(graph_in_edges, len(ness_in_edges))
-                g_outs = itertools.permutations(graph_out_edges, len(ness_out_edges))
+                # t_ins and t_outs are fixed for a possible assignment
+                t_ins = self.tree.in_edges(possible_node)
+                t_outs = self.tree.out_edges(possible_node)
+                # get all possible g_ins and g_outs that might satisfy t_ins and t_outs
+                g_ins = itertools.permutations(graph_in_edges, len(t_ins))
+                g_outs = itertools.permutations(graph_out_edges, len(t_outs))
                 for ins, outs in itertools.product(g_ins, g_outs):
-                    if (
-                        self.__all_match(outs, ness_out_edges)
-                        and self.__all_match(ins, ness_in_edges)
-                        and all(g_in not in outs for g_in in ins)  # no repeated edges
-                        and all(tuple(g_in[::-1]) not in outs for g_in in ins)
-                    ):
+                    if self.__valid_transition(g_ins, g_outs, t_ins, t_outs):
                         if self.tree.in_degree(possible_node) == 0:
                             self.root_transitions.append(self.num_variables)
                         config = node_indicators.setdefault(self.num_variables, {})
                         config.update(
-                            {
-                                g_out: ness_out
-                                for g_out, ness_out in zip(outs, ness_out_edges)
-                            }
+                            {g_out: ness_out for g_out, ness_out in zip(outs, t_outs)}
                         )
                         config.update(
-                            {g_in: ness_in for g_in, ness_in in zip(ins, ness_in_edges)}
+                            {g_in: ness_in for g_in, ness_in in zip(ins, t_ins)}
                         )
 
                         # set the rest to None:
