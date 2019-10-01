@@ -86,8 +86,10 @@ class GraphToTreeMatcher:
 
     def _score_solution(self, solution):
         total = 0
-        for i, cost in enumerate(self.match_indicator_costs):
-            total += cost * solution[i]
+        for graph_e in self.graph.edges():
+            for l, i in self.match_indicators[graph_e].items():
+                if solution[i] > 0.5:
+                    total += self.match_indicator_costs[i]
         return total
 
     def __check_consistency(self, solution):
