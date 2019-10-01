@@ -285,11 +285,15 @@ class ConsensusMatchTest(unittest.TestCase):
         #
         # skeleton graph:
         #
-        #     k--l--m--n--o
+        #        l--m--n
+        #      /         \
+        #     k           o
         #     |           |
         #  a--b--c--d--e--f--g
         #        |     |
-        #        h--i--j
+        #        h     j
+        #         \   /
+        #           i
         #
         # the optimal matching would be a-b-c-d-e-f-g
         # however a higher score could be achieved by taking
@@ -316,14 +320,14 @@ class ConsensusMatchTest(unittest.TestCase):
                 ("e", {"location": np.array([0, 0, 20])}),
                 ("f", {"location": np.array([0, 0, 25])}),
                 ("g", {"location": np.array([0, 0, 30])}),
-                ("h", {"location": np.array([0, 0.1, 10])}),
-                ("i", {"location": np.array([0, 0.1, 15])}),
-                ("j", {"location": np.array([0, 0.1, 20])}),
-                ("k", {"location": np.array([0, -0.1, 5])}),
-                ("l", {"location": np.array([0, -0.1, 10])}),
-                ("m", {"location": np.array([0, -0.1, 15])}),
-                ("n", {"location": np.array([0, -0.1, 20])}),
-                ("o", {"location": np.array([0, -0.1, 25])}),
+                ("h", {"location": np.array([0, 0.4, 10])}),
+                ("i", {"location": np.array([0, 10, 15])}),
+                ("j", {"location": np.array([0, 0.4, 20])}),
+                ("k", {"location": np.array([0, -0.3, 5])}),
+                ("l", {"location": np.array([0, -10, 10])}),
+                ("m", {"location": np.array([0, -10, 15])}),
+                ("n", {"location": np.array([0, -10, 20])}),
+                ("o", {"location": np.array([0, -0.3, 25])}),
             ]
         )
         skeleton.add_edges_from(
