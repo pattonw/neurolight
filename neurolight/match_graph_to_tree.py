@@ -64,7 +64,7 @@ class GraphToTreeMatcher:
                 + f"{self.match_indicator_costs[self.match_indicators[graph_e][tree_e]]}"
             )
 
-        return matches
+        return matches, self._score_solution(solution)
 
     def __solve(self):
 
@@ -422,7 +422,9 @@ def match_graph_to_tree(
 ):
 
     matcher = GraphToTreeMatcher(graph, tree, match_distance_threshold)
-    matches = matcher.match()
+    matches, score = matcher.match()
 
     for e1, e2 in matches:
         graph.edges[e1][match_attribute] = e2
+
+    return matcher, score
