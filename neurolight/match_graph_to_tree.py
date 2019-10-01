@@ -397,18 +397,20 @@ class GraphToTreeMatcher:
 
     def enforce_expected_assignments(self, expected_assignments: Dict[Edge, Edge]):
         expected_assignment_constraint = pylp.LinearConstraint()
-        for c, s in expected_assignments.items():
-            if s is None:
-                for ns, cost in self.graph.edges[c]["__possible_matches"]:
+        num_assignments = 0
+        for graph_e, tree_e in expected_assignments.items():
+            if tree_e is None:
+                for ns, cost in self.graph.edges[graph_e]["__possible_matches"]:
                     expected_assignment_constraint.set_coefficient(
-                        self.match_indicators[c][ns], -1
+                        self.match_indicators[graph_e][ns], -1
                     )
             else:
                 expected_assignment_constraint.set_coefficient(
-                    self.match_indicators[c][s], 1
+                    self.match_indicators[graph_e][tree_e], 1
                 )
+                num_assignments += 1
         expected_assignment_constraint.set_relation(pylp.Relation.Equal)
-        expected_assignment_constraint.set_value(8)
+        expected_assignment_constraint.set_value(num_assignments)
         self.constraints.add(expected_assignment_constraint)
 
 
