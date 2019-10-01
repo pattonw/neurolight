@@ -3,7 +3,6 @@ import neurolight as nl
 import networkx as nx
 import numpy as np
 
-from neurolight.match_graph_to_tree import GraphToTreeMatcher
 
 class ConsensusMatchTest(unittest.TestCase):
     def test_simple(self):
@@ -43,11 +42,6 @@ class ConsensusMatchTest(unittest.TestCase):
             match_distance_threshold=100,
             match_attribute="matched_edge",
         )
-
-        self.assertEqual(skeleton.edges[("a", "b")]["matched_edge"], Edge("A", "B"))
-        self.assertEqual(skeleton.edges[("b", "c")]["matched_edge"], Edge("A", "B"))
-        self.assertEqual(skeleton.edges[("c", "d")]["matched_edge"], Edge("B", "C"))
-        self.assertEqual(skeleton.edges[("d", "e")]["matched_edge"], Edge("B", "C"))
 
         self.assertEqual(skeleton.edges[("a", "b")]["matched_edge"], ("A", "B"))
         self.assertEqual(skeleton.edges[("b", "c")]["matched_edge"], ("A", "B"))
@@ -136,11 +130,6 @@ class ConsensusMatchTest(unittest.TestCase):
             match_distance_threshold=100,
             match_attribute="matched_edge",
         )
-
-        self.assertEqual(skeleton.edges[("a", "b")]["matched_edge"], Edge("A", ("X", "A")))
-        self.assertEqual(skeleton.edges[("c", "d")]["matched_edge"], Edge("D", ("X", "D")))
-        self.assertEqual(skeleton.edges[("f", "g")]["matched_edge"], Edge("B", ("X", "B")))
-        self.assertEqual(skeleton.edges[("h", "i")]["matched_edge"], Edge("C", ("X", "C")))
 
         self.assertEqual(skeleton.edges()[("a", "b")]["matched_edge"], ("A", "X"))
         self.assertEqual(skeleton.edges()[("b", "d")].get("matched_edge"), None)
