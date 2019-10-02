@@ -177,10 +177,10 @@ class SwcFileSource(BatchProvider):
 
     def _graph_to_kdtree(self) -> None:
         # add node_ids to coordinates to support overlapping nodes in cKDTree
-        data = [
-            tuple(point_attrs["location"]) + (point_id,)
-            for point_id, point_attrs in self.g.nodes.items()
-        ]
+        ids, attrs = zip(*self.g.nodes.items())
+        inds, ids = zip(*enumerate(ids))
+        self.ind_to_id_map = {ind: i for ind, i in zip(inds, ids)}
+        data = [tuple(point_attrs["location"]) for point_attrs in attrs]
         logger.debug("placing {} nodes in the kdtree".format(len(data)))
         # place nodes in the kdtree
         self.data = cKDTree(np.array(list(data)))
@@ -211,8 +211,14 @@ class SwcFileSource(BatchProvider):
             ):
                 return self._query_kdtree(node.greater, bb)
             else:
-                greater_roi = (substitute_dim(bb[0], node.split_dim, node.split), bb[1])
-                lesser_roi = (bb[0], substitute_dim(bb[1], node.split_dim, node.split))
+                greater_roi = (
+                    substitute_dim(bb[0], node.split_dim, np.floor(node.split)),
+                    bb[1],
+                )
+                lesser_roi = (
+                    bb[0],
+                    substitute_dim(bb[1], node.split_dim, np.ceil(node.split)),
+                )
                 return self._query_kdtree(
                     node.greater, greater_roi
                 ) + self._query_kdtree(node.lesser, lesser_roi)
@@ -227,7 +233,11 @@ class SwcFileSource(BatchProvider):
                     )
                 ),
             )
-            points = [point for point in node.data_points if bbox.contains(point)]
+            points = [
+                tuple(point) + (self.ind_to_id_map[ind],)
+                for ind, point in zip(node.indices, node.data_points)
+                if bbox.contains(point)
+            ]
             return points
 
     def _parse_swc(self, filename: Path):
@@ -321,20 +331,20 @@ class SwcFileSource(BatchProvider):
         If `with_neighbors` is True, the subgraph contains all neighbors
         of all points in `nodes` as well.
         """
-        # TODO use nx subgraph function
         sub_g = SpatialGraph()
         subgraph_nodes = set(nodes)
-        subgraph_edges = set()
         if with_neighbors:
             for n in nodes:
                 for successor in self.g.successors(n):
                     subgraph_nodes.add(successor)
-                    subgraph_edges.add((n, successor))
                 for predecessor in self.g.predecessors(n):
                     subgraph_nodes.add(predecessor)
-                    subgraph_edges.add((predecessor, n))
-        for n in subgraph_nodes:
-            sub_g.add_node(n, **self.g.nodes[n])
-        sub_g.add_edges_from(subgraph_edges)
+        sub_g.add_nodes_from((n, self.g.nodes[n]) for n in subgraph_nodes)
+        sub_g.add_edges_from(
+            (n, nbr, d)
+            for n in subgraph_nodes
+            for nbr, d in self.g.adj[n].items()
+            if nbr in subgraph_nodes
+        )
         return sub_g
 
