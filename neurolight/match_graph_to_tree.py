@@ -23,6 +23,7 @@ class GraphToTreeMatcher:
         epsilon: float = 0.1,
     ):
 
+        self.undirected_graph = graph
         self.graph = graph.to_directed()
         self.tree = tree
         assert nx.is_arborescence(self.tree), (
@@ -128,30 +129,55 @@ class GraphToTreeMatcher:
 
         # iterate over out edges to avoid repeated computations.
         for graph_n in self.graph.nodes():
-            for graph_e_out in self.graph.out_edges(graph_n):
-                e_out = graph_e_out
-                e_in = tuple([graph_e_out[1], graph_e_out[0]])
+            possible_tree_nodes = self.__tree_nodes_query(
+                self.graph.nodes[graph_n]["location"], self.node_match_threshold
+            )
+            pm_node = self.possible_matches.setdefault(graph_n, {})
+            for tree_n in possible_tree_nodes:
+                node_cost = self.__node_cost(graph_n, tree_n)
+                if node_cost is not None:
+                    pm_node[tree_n] = node_cost
 
-                pms_in = self.possible_matches.setdefault(e_in, set())
-                pms_out = self.possible_matches.setdefault(e_out, set())
+        for graph_e in self.undirected_graph.edges():
 
-                for tree_e, tree_e_data in self.tree.edges.items():
-                    distance = self.__edge_distance(graph_e_out, tree_e)
-                    cost = self.__cost(distance)
-
-                    if distance <= self.match_distance_threshold:
-                        out_matches = self.graph.edges[e_out].setdefault(
-                            "__possible_matches", []
-                        )
-                        in_matches = self.graph.edges[e_in].setdefault(
-                            "__possible_matches", []
+            possible_tree_edges = self.__tree_edge_query(
+                self.graph.nodes[graph_e[0]]["location"],
+                self.graph.nodes[graph_e[1]]["location"],
+                self.edge_match_threshold,
                         )
 
-                        out_matches.append((tree_e, cost))
-                        in_matches.append((tree_e, cost))
+            pm_edge = self.possible_matches.setdefault(graph_e, {})
 
-                        pms_in.add(tree_e)
-                        pms_out.add(tree_e)
+            for tree_e in possible_tree_edges:
+                edge_cost = self.__edge_cost(graph_e, tree_e)
+                if edge_cost is not None:
+                    pm_edge[tree_e] = edge_cost
+
+    def __tree_nodes_query(self, center: np.ndarray, radius: float):
+        for tree_n, tree_n_attrs in self.tree.nodes.items():
+            dist = np.linalg.norm(tree_n_attrs["location"] - center)
+            if dist < radius:
+                yield tree_n
+
+    def __tree_edge_query(self, u_loc: np.ndarray, v_loc: np.ndarray, radius: float):
+        for tree_e in self.tree.edges:
+            dist = self.__edge_dist(
+                u_loc,
+                v_loc,
+                self.tree.nodes[tree_e[0]]["location"],
+                self.tree.nodes[tree_e[1]]["location"],
+            )
+            if dist < radius:
+                yield tree_e
+
+    def __edge_dist(
+        self, u_loc: np.ndarray, v_loc: np.ndarray, x_loc: np.ndarray, y_loc: np.ndarray
+    ) -> float:
+        dist = (
+            self.__point_to_edge_dist(u_loc, x_loc, y_loc)
+            + self.__point_to_edge_dist(v_loc, x_loc, y_loc)
+        ) / 2
+        return dist
 
     def __cost(self, distance: float) -> float:
         """
@@ -160,25 +186,30 @@ class GraphToTreeMatcher:
         """
         return -self.match_distance_threshold / max(self.epsilon, distance)
 
-    def __edge_distance(self, graph_e: Edge, tree_e: Edge) -> float:
-        # average the distance of the endpoints of the graph edge to the tree edge
-        g_u, g_v = graph_e[0], graph_e[1]
-        dist = (
-            self.__point_to_edge_dist(g_u, tree_e)
-            + self.__point_to_edge_dist(g_v, tree_e)
-        ) / 2
+    def __node_cost(self, graph_n: Hashable, tree_n: Hashable) -> float:
+        distance = np.linalg.norm(
+            self.graph.nodes[graph_n]["location"] - self.tree.nodes[tree_n]["location"]
+        )
+        return distance
+
+    def __edge_cost(self, graph_e: Edge, tree_e: Edge) -> float:
+        dist = self.__edge_dist(
+            self.graph.nodes[graph_e[0]]["location"],
+            self.graph.nodes[graph_e[1]]["location"],
+            self.tree.nodes[tree_e[0]]["location"],
+            self.tree.nodes[tree_e[1]]["location"],
+        )
         return dist
 
-    def __point_to_edge_dist(self, point: Hashable, edge: Edge):
-        point_loc = self.graph.nodes[point]["location"]
-        u_loc = self.tree.nodes[edge[0]]["location"]
-        v_loc = self.tree.nodes[edge[1]]["location"]
+    def __point_to_edge_dist(
+        self, center: np.ndarray, u_loc: np.ndarray, v_loc: np.ndarray
+    ) -> float:
         slope = v_loc - u_loc
         edge_mag = np.linalg.norm(slope)
         if np.isclose(edge_mag, 0):
-            return np.linalg.norm(u_loc - point_loc)
-        frac = np.clip(np.dot(point_loc - u_loc, slope) / np.dot(slope, slope), 0, 1)
-        min_dist = np.linalg.norm(frac * slope + u_loc - point_loc)
+            return np.linalg.norm(u_loc - center)
+        frac = np.clip(np.dot(center - u_loc, slope) / np.dot(slope, slope), 0, 1)
+        min_dist = np.linalg.norm(frac * slope + u_loc - center)
         return min_dist
 
     def __tree_candidates(self, graph_edges: Iterable[Edge]) -> Set[Edge]:
