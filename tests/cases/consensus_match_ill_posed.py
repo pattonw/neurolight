@@ -6,7 +6,6 @@ import neurolight as nl
 
 
 class IllPosedConsensusMatchTest(unittest.TestCase):
-    @unittest.expectedFailure
     def test_topological_error_vs_absolute_error(self):
 
         # consensus graph:
@@ -79,24 +78,23 @@ class IllPosedConsensusMatchTest(unittest.TestCase):
         self.assertEqual(skeleton.edges[("a", "f")].get("matched_edge"), ("A", "F"))
         self.assertEqual(skeleton.edges[("f", "g")].get("matched_edge"), ("F", "G"))
 
-    @unittest.expectedFailure
     def test_edge_sharing(self):
 
         # consensus graph:
         #
-        #     B-------->C
+        #     B-------->C--------->F-------->H
         #   /
         # A
         #   \
-        #     D-------->E
+        #     D-------->E--------->G-------->I
         #
         # skeleton graph:
         #
-        #     b       g
-        #   / |       |
-        # a   d-->e-->f
-        #   \ |       |
-        #     c       h
+        #     b       g-----------i----------k
+        #   / |     /
+        # a   d---e
+        #   \ |     \
+        #     c       h-----------j----------l
         #
         # should d-e-f be able to match both B-C and D-E?
         # if you want to be able to assign multiple labels per edge,
@@ -110,9 +108,24 @@ class IllPosedConsensusMatchTest(unittest.TestCase):
                 ("C", {"location": np.array([0, 1, 20])}),
                 ("D", {"location": np.array([0, -1, 10])}),
                 ("E", {"location": np.array([0, -1, 20])}),
+                ("F", {"location": np.array([0, 1, 30])}),
+                ("G", {"location": np.array([0, -1, 30])}),
+                ("H", {"location": np.array([0, 1, 40])}),
+                ("I", {"location": np.array([0, -1, 40])}),
             ]
         )
-        consensus.add_edges_from([("A", "B"), ("B", "C"), ("A", "D"), ("D", "E")])
+        consensus.add_edges_from(
+            [
+                ("A", "B"),
+                ("B", "C"),
+                ("A", "D"),
+                ("D", "E"),
+                ("C", "F"),
+                ("E", "G"),
+                ("F", "H"),
+                ("G", "I"),
+            ]
+        )
 
         skeleton = nx.Graph()
         skeleton.add_nodes_from(
@@ -122,9 +135,12 @@ class IllPosedConsensusMatchTest(unittest.TestCase):
                 ("c", {"location": np.array([1, -1, 10])}),
                 ("d", {"location": np.array([1, 0, 13])}),
                 ("e", {"location": np.array([1, 0, 15])}),
-                ("f", {"location": np.array([1, 0, 17])}),
                 ("g", {"location": np.array([1, 1, 20])}),
                 ("h", {"location": np.array([1, -1, 20])}),
+                ("i", {"location": np.array([1, 1, 30])}),
+                ("j", {"location": np.array([1, -1, 30])}),
+                ("k", {"location": np.array([1, 1, 40])}),
+                ("l", {"location": np.array([1, -1, 40])}),
             ]
         )
         skeleton.add_edges_from(
@@ -134,19 +150,26 @@ class IllPosedConsensusMatchTest(unittest.TestCase):
                 ("a", "c"),
                 ("c", "d"),
                 ("d", "e"),
-                ("e", "f"),
-                ("f", "g"),
-                ("f", "h"),
+                ("e", "g"),
+                ("e", "h"),
+                ("g", "i"),
+                ("h", "j"),
+                ("i", "k"),
+                ("j", "l"),
             ]
         )
 
-        nl.match_graph_to_tree(
+        self.assertRaises(
+            ValueError,
+            nl.match_graph_to_tree,
             skeleton,
             consensus,
             match_distance_threshold=100,
             match_attribute="matched_edge",
         )
 
+        # if this multiple edges assignments were allowed, this would be the expected output
+        """
         self.assertEqual(skeleton.edges[("a", "b")].get("matched_edge"), ("A", "B"))
         self.assertEqual(skeleton.edges[("a", "c")].get("matched_edge"), ("A", "D"))
         self.assertEqual(skeleton.edges[("b", "d")].get("matched_edge"), ("B", "C"))
@@ -154,30 +177,27 @@ class IllPosedConsensusMatchTest(unittest.TestCase):
         self.assertCountEqual(
             skeleton.edges[("d", "e")].get("matched_edge"), (("B", "C"), ("D", "E"))
         )
-        self.assertCountEqual(
-            skeleton.edges[("e", "f")].get("matched_edge"), (("B", "C"), ("D", "E"))
-        )
-        self.assertEqual(skeleton.edges[("f", "g")].get("matched_edge"), ("B", "C"))
-        self.assertEqual(skeleton.edges[("f", "h")].get("matched_edge"), ("D", "E"))
+        self.assertEqual(skeleton.edges[("e", "g")].get("matched_edge"), ("B", "C"))
+        self.assertEqual(skeleton.edges[("e", "h")].get("matched_edge"), ("D", "E"))
+        """
 
-    @unittest.expectedFailure
     def test_crossover(self):
 
         # consensus graph:
         #
-        #     B-------->C
+        #     B-------->C------->D
         #   /
         # A
         #   \
-        #     D-------->E
+        #     E-------->F------->G
         #
         # skeleton graph:
         #
-        #     b       e
+        #     b       e----------g
         #   /   \   /
         # a       d
         #   \   /   \
-        #     c       f
+        #     c       f----------h
         #
         # should this be possible or not? Depends on the problem.
         # if you want to be able to represent multiple chains crossing through 1 node,
@@ -189,11 +209,15 @@ class IllPosedConsensusMatchTest(unittest.TestCase):
                 ("A", {"location": np.array([0, 0, 0])}),
                 ("B", {"location": np.array([0, 1, 10])}),
                 ("C", {"location": np.array([0, 1, 20])}),
-                ("D", {"location": np.array([0, -1, 10])}),
-                ("E", {"location": np.array([0, -1, 20])}),
+                ("D", {"location": np.array([0, 1, 30])}),
+                ("E", {"location": np.array([0, -1, 10])}),
+                ("F", {"location": np.array([0, -1, 20])}),
+                ("G", {"location": np.array([0, -1, 30])}),
             ]
         )
-        consensus.add_edges_from([("A", "B"), ("B", "C"), ("A", "D"), ("D", "E")])
+        consensus.add_edges_from(
+            [("A", "B"), ("B", "C"), ("C", "D"), ("A", "E"), ("E", "F"), ("F", "G")]
+        )
 
         skeleton = nx.Graph()
         skeleton.add_nodes_from(
@@ -204,45 +228,62 @@ class IllPosedConsensusMatchTest(unittest.TestCase):
                 ("d", {"location": np.array([1, 0, 15])}),
                 ("e", {"location": np.array([1, 1, 20])}),
                 ("f", {"location": np.array([1, -1, 20])}),
+                ("g", {"location": np.array([1, 1, 30])}),
+                ("h", {"location": np.array([1, -1, 30])}),
             ]
         )
         skeleton.add_edges_from(
-            [("a", "b"), ("b", "d"), ("a", "c"), ("c", "d"), ("d", "e"), ("d", "f")]
+            [
+                ("a", "b"),
+                ("b", "d"),
+                ("a", "c"),
+                ("c", "d"),
+                ("d", "e"),
+                ("d", "f"),
+                ("e", "g"),
+                ("f", "h"),
+            ]
         )
 
-        nl.match_graph_to_tree(
+        self.assertRaises(
+            ValueError,
+            nl.match_graph_to_tree,
             skeleton,
             consensus,
             match_distance_threshold=100,
             match_attribute="matched_edge",
         )
 
+        # if crossovers were allowed, this would be the expected result
+        """
         self.assertEqual(skeleton.edges[("a", "b")].get("matched_edge"), ("A", "B"))
-        self.assertEqual(skeleton.edges[("a", "c")].get("matched_edge"), ("A", "D"))
+        self.assertEqual(skeleton.edges[("a", "c")].get("matched_edge"), ("A", "E"))
         self.assertEqual(skeleton.edges[("b", "d")].get("matched_edge"), ("B", "C"))
-        self.assertEqual(skeleton.edges[("c", "d")].get("matched_edge"), ("D", "E"))
+        self.assertEqual(skeleton.edges[("c", "d")].get("matched_edge"), ("E", "F"))
         self.assertEqual(skeleton.edges[("d", "e")].get("matched_edge"), ("B", "C"))
-        self.assertEqual(skeleton.edges[("d", "f")].get("matched_edge"), ("D", "E"))
+        self.assertEqual(skeleton.edges[("d", "f")].get("matched_edge"), ("E", "F"))
+        self.assertEqual(skeleton.edges[("e", "g")].get("matched_edge"), ("C", "D"))
+        self.assertEqual(skeleton.edges[("f", "h")].get("matched_edge"), ("F", "G"))
+        """
 
-    @unittest.expectedFailure
     def test_bidirected_edges(self):
 
         # consensus graph:
         #
+        #     D E F
+        #      \|/
         # A---->B---->C
         #
         # skeleton graph:
         #
+        #       e
+        #       |
+        #    d--b--f
+        #       |
+        #   a---g---c
         #
-        #
-        # a     d     f
-        #  \    |    /
-        #   b---c---e
-        #
-        # should it be possible to map c-d to A-B and d-c to B-C?
-        # If you want to be able to assign labels to c-d and d-c
-        # remove the constraint that the number of assignments per e in G
-        # totals 1
+        # This is only possible if b->B and
+        # a-g-b -> AB and b-g-a -> BC
 
         consensus = nx.DiGraph()
         consensus.add_nodes_from(
@@ -250,40 +291,52 @@ class IllPosedConsensusMatchTest(unittest.TestCase):
                 ("A", {"location": np.array([0, 0, 0])}),
                 ("B", {"location": np.array([0, 0, 10])}),
                 ("C", {"location": np.array([0, 0, 20])}),
+                ("D", {"location": np.array([0, 10, 0])}),
+                ("E", {"location": np.array([0, 10, 10])}),
+                ("F", {"location": np.array([0, 10, 20])}),
             ]
         )
-        consensus.add_edges_from([("A", "B"), ("B", "C")])
+        consensus.add_edges_from(
+            [("A", "B"), ("B", "C"), ("B", "D"), ("B", "E"), ("B", "F")]
+        )
 
         skeleton = nx.Graph()
         skeleton.add_nodes_from(
             [
                 ("a", {"location": np.array([1, 0, 0])}),
-                ("b", {"location": np.array([1, 1, 5])}),
-                ("c", {"location": np.array([1, 1, 10])}),
-                ("d", {"location": np.array([1, 0, 10])}),
-                ("e", {"location": np.array([1, 1, 15])}),
-                ("f", {"location": np.array([1, 0, 20])}),
+                ("g", {"location": np.array([1, -1, 10])}),
+                ("b", {"location": np.array([1, 0, 10])}),
+                ("c", {"location": np.array([1, 0, 20])}),
+                ("d", {"location": np.array([1, 10, 0])}),
+                ("e", {"location": np.array([1, 10, 10])}),
+                ("f", {"location": np.array([1, 10, 20])}),
             ]
         )
         skeleton.add_edges_from(
-            [("a", "b"), ("b", "c"), ("c", "d"), ("c", "e"), ("e", "f")]
+            [("a", "g"), ("g", "b"), ("g", "c"), ("b", "d"), ("b", "e"), ("b", "f")]
         )
 
-        nl.match_graph_to_tree(
+        self.assertRaises(
+            ValueError,
+            nl.match_graph_to_tree,
             skeleton,
             consensus,
             match_distance_threshold=100,
             match_attribute="matched_edge",
         )
 
-        self.assertEqual(skeleton.edges[("a", "b")].get("matched_edge"), ("A", "B"))
-        self.assertEqual(skeleton.edges[("b", "c")].get("matched_edge"), ("A", "B"))
-        self.assertEqual(skeleton.edges[("c", "d")].get("matched_edge"), ("A", "B"))
-        self.assertEqual(skeleton.edges[("d", "c")].get("matched_edge"), ("B", "C"))
-        self.assertEqual(skeleton.edges[("c", "e")].get("matched_edge"), ("B", "C"))
-        self.assertEqual(skeleton.edges[("e", "f")].get("matched_edge"), ("B", "C"))
+        # expected output if bidirectional edges were allowed:
+        """
+        self.assertEqual(skeleton.edges[("a", "g")].get("matched_edge"), ("A", "B"))
+        self.assertEqual(skeleton.edges[("g", "c")].get("matched_edge"), ("B", "C"))
+        self.assertCountEqual(
+            skeleton.edges[("g", "b")].get("matched_edge"), (("A", "B"), ("B", "C"))
+        )
+        self.assertEqual(skeleton.edges[("b", "d")].get("matched_edge"), ("B", "D"))
+        self.assertEqual(skeleton.edges[("b", "e")].get("matched_edge"), ("B", "E"))
+        self.assertEqual(skeleton.edges[("b", "f")].get("matched_edge"), ("B", "F"))
+        """
 
-    @unittest.expectedFailure
     def test_multi_edge_match(self):
 
         # consensus graph:
@@ -331,4 +384,20 @@ class IllPosedConsensusMatchTest(unittest.TestCase):
         self.assertEqual(skeleton.edges[("b", "c")].get("matched_edge"), ("A", "B"))
         self.assertEqual(skeleton.edges[("c", "d")].get("matched_edge"), ("B", "C"))
         self.assertEqual(skeleton.edges[("d", "e")].get("matched_edge"), ("B", "C"))
+
+        # expected output if multi_edge_matches weren't allowed:
+        """
+        nl.match_graph_to_tree(
+            skeleton,
+            consensus,
+            match_distance_threshold=100,
+            match_attribute="matched_edge",
+        )
+
+        self.assertEqual(skeleton.edges[("a", "b")].get("matched_edge"), None)
+        self.assertEqual(skeleton.edges[("b", "c")].get("matched_edge"), ("A", "B"))
+        self.assertEqual(skeleton.edges[("c", "d")].get("matched_edge"), ("B", "C"))
+        self.assertEqual(skeleton.edges[("d", "e")].get("matched_edge"), None)
+        """
+
 
