@@ -2,9 +2,8 @@ import pylp
 import numpy as np
 import networkx as nx
 
-import itertools
 import logging
-from typing import Hashable, Tuple, List, Iterable, Set, Dict
+from typing import Hashable, Tuple, List, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -16,13 +15,10 @@ class GraphToTreeMatcher:
     NO_MATCH_COST = 10e5
 
     def __init__(
-        self,
-        graph: nx.Graph,
-        tree: nx.DiGraph,
-        match_distance_threshold: float,
-        epsilon: float = 0.1,
+        self, graph: nx.Graph, tree: nx.DiGraph, match_distance_threshold: float
     ):
 
+        self.undirected_graph = graph
         self.graph = graph.to_directed()
         self.tree = tree
         assert nx.is_arborescence(self.tree), (
@@ -31,16 +27,23 @@ class GraphToTreeMatcher:
         )
 
         self.match_distance_threshold = match_distance_threshold
-        self.epsilon = epsilon
 
         self.objective = None
         self.constraints = None
 
-        self.__preprocess_tree()
+        self.__preprocess_graph()
         self.__find_possible_matches()
         self.__create_inidicators()
         self.__create_constraints()
         self.__create_objective()
+
+    @property
+    def node_match_threshold(self):
+        return self.match_distance_threshold
+
+    @property
+    def edge_match_threshold(self):
+        return self.match_distance_threshold
 
     def match(self) -> List[Tuple[Edge, Edge]]:
         """Return a list of tuples from ``graph`` edges to ``tree`` edges (or
@@ -51,7 +54,7 @@ class GraphToTreeMatcher:
 
         matches = []
         for graph_e in self.graph.edges():
-            for l, i in self.match_indicators[graph_e].items():
+            for l, i in self.g2t_match_indicators[graph_e].items():
                 if solution[i] > 0.5:
                     matches.append((graph_e, l))
 
@@ -61,7 +64,7 @@ class GraphToTreeMatcher:
         for graph_e, tree_e in matches:
             logger.debug(
                 f"edge {graph_e} assigned to {tree_e} with score: "
-                + f"{self.match_indicator_costs[self.match_indicators[graph_e][tree_e]]}"
+                + f"{self.match_indicator_costs[self.g2t_match_indicators[graph_e][tree_e]]}"
             )
 
         return matches, self._score_solution(solution)
@@ -80,6 +83,8 @@ class GraphToTreeMatcher:
 
             solver.set_constraints(self.constraints)
             solution, message = solver.solve()
+            if "NOT" in message:
+                raise ValueError("No solution could be found for this problem!")
             consistent = self.__check_consistency(solution)
 
         return solution
@@ -87,7 +92,7 @@ class GraphToTreeMatcher:
     def _score_solution(self, solution):
         total = 0
         for graph_e in self.graph.edges():
-            for l, i in self.match_indicators[graph_e].items():
+            for l, i in self.g2t_match_indicators[graph_e].items():
                 if solution[i] > 0.5:
                     total += self.match_indicator_costs[i]
         return total
@@ -98,12 +103,12 @@ class GraphToTreeMatcher:
     def __assign_edges_to_graph(self, solution):
         for graph_e, graph_e_attrs in self.graph.edges().items():
             for possible_match, cost in graph_e_attrs["__possible_matches"]:
-                coefficient_ind = self.match_indicators[graph_e][possible_match]
+                coefficient_ind = self.g2t_match_indicators[graph_e][possible_match]
                 coefficient = solution[coefficient_ind]
                 if coefficient == 1:
                     graph_e_attrs["__assigned_edge"] = possible_match
 
-    def __preprocess_tree(self):
+    def __preprocess_graph(self):
         """
         No special handling of high order branching. consider:
         G:          o               | T:        o
@@ -128,100 +133,81 @@ class GraphToTreeMatcher:
 
         # iterate over out edges to avoid repeated computations.
         for graph_n in self.graph.nodes():
-            for graph_e_out in self.graph.out_edges(graph_n):
-                e_out = graph_e_out
-                e_in = tuple([graph_e_out[1], graph_e_out[0]])
+            possible_tree_nodes = self.__tree_nodes_query(
+                self.graph.nodes[graph_n]["location"], self.node_match_threshold
+            )
+            pm_node = self.possible_matches.setdefault(graph_n, {})
+            for tree_n in possible_tree_nodes:
+                node_cost = self.__node_cost(graph_n, tree_n)
+                if node_cost is not None:
+                    pm_node[tree_n] = node_cost
 
-                pms_in = self.possible_matches.setdefault(e_in, set())
-                pms_out = self.possible_matches.setdefault(e_out, set())
+        for graph_e in self.undirected_graph.edges():
 
-                for tree_e, tree_e_data in self.tree.edges.items():
-                    distance = self.__edge_distance(graph_e_out, tree_e)
-                    cost = self.__cost(distance)
+            possible_tree_edges = self.__tree_edge_query(
+                self.graph.nodes[graph_e[0]]["location"],
+                self.graph.nodes[graph_e[1]]["location"],
+                self.edge_match_threshold,
+            )
 
-                    if distance <= self.match_distance_threshold:
-                        out_matches = self.graph.edges[e_out].setdefault(
-                            "__possible_matches", []
-                        )
-                        in_matches = self.graph.edges[e_in].setdefault(
-                            "__possible_matches", []
-                        )
+            pm_edge = self.possible_matches.setdefault(graph_e, {})
 
-                        out_matches.append((tree_e, cost))
-                        in_matches.append((tree_e, cost))
+            for tree_e in possible_tree_edges:
+                edge_cost = self.__edge_cost(graph_e, tree_e)
+                if edge_cost is not None:
+                    pm_edge[tree_e] = edge_cost
 
-                        pms_in.add(tree_e)
-                        pms_out.add(tree_e)
+    def __tree_nodes_query(self, center: np.ndarray, radius: float):
+        for tree_n, tree_n_attrs in self.tree.nodes.items():
+            dist = np.linalg.norm(tree_n_attrs["location"] - center)
+            if dist < radius:
+                yield tree_n
 
-    def __cost(self, distance: float) -> float:
-        """
-        The cost formula given some distance between two edges.
-        Negative costs indicate rewards
-        """
-        return -self.match_distance_threshold / max(self.epsilon, distance)
+    def __tree_edge_query(self, u_loc: np.ndarray, v_loc: np.ndarray, radius: float):
+        for tree_e in self.tree.edges:
+            dist = self.__edge_dist(
+                u_loc,
+                v_loc,
+                self.tree.nodes[tree_e[0]]["location"],
+                self.tree.nodes[tree_e[1]]["location"],
+            )
+            if dist < radius:
+                yield tree_e
 
-    def __edge_distance(self, graph_e: Edge, tree_e: Edge) -> float:
-        # average the distance of the endpoints of the graph edge to the tree edge
-        g_u, g_v = graph_e[0], graph_e[1]
+    def __edge_dist(
+        self, u_loc: np.ndarray, v_loc: np.ndarray, x_loc: np.ndarray, y_loc: np.ndarray
+    ) -> float:
         dist = (
-            self.__point_to_edge_dist(g_u, tree_e)
-            + self.__point_to_edge_dist(g_v, tree_e)
+            self.__point_to_edge_dist(u_loc, x_loc, y_loc)
+            + self.__point_to_edge_dist(v_loc, x_loc, y_loc)
         ) / 2
         return dist
 
-    def __point_to_edge_dist(self, point: Hashable, edge: Edge):
-        point_loc = self.graph.nodes[point]["location"]
-        u_loc = self.tree.nodes[edge[0]]["location"]
-        v_loc = self.tree.nodes[edge[1]]["location"]
+    def __node_cost(self, graph_n: Hashable, tree_n: Hashable) -> float:
+        distance = np.linalg.norm(
+            self.graph.nodes[graph_n]["location"] - self.tree.nodes[tree_n]["location"]
+        )
+        return distance
+
+    def __edge_cost(self, graph_e: Edge, tree_e: Edge) -> float:
+        dist = self.__edge_dist(
+            self.graph.nodes[graph_e[0]]["location"],
+            self.graph.nodes[graph_e[1]]["location"],
+            self.tree.nodes[tree_e[0]]["location"],
+            self.tree.nodes[tree_e[1]]["location"],
+        )
+        return dist
+
+    def __point_to_edge_dist(
+        self, center: np.ndarray, u_loc: np.ndarray, v_loc: np.ndarray
+    ) -> float:
         slope = v_loc - u_loc
         edge_mag = np.linalg.norm(slope)
         if np.isclose(edge_mag, 0):
-            return np.linalg.norm(u_loc - point_loc)
-        frac = np.clip(np.dot(point_loc - u_loc, slope) / np.dot(slope, slope), 0, 1)
-        min_dist = np.linalg.norm(frac * slope + u_loc - point_loc)
+            return np.linalg.norm(u_loc - center)
+        frac = np.clip(np.dot(center - u_loc, slope) / np.dot(slope, slope), 0, 1)
+        min_dist = np.linalg.norm(frac * slope + u_loc - center)
         return min_dist
-
-    def __tree_candidates(self, graph_edges: Iterable[Edge]) -> Set[Edge]:
-        """
-        Returns all tree edges that can be assigned to at least one of the graph edges.
-        """
-        edge_view = self.graph.edges()
-        return set(
-            [
-                tree_edge
-                for graph_e in graph_edges
-                for tree_edge, _ in edge_view[graph_e]["__possible_matches"]
-            ]
-        )
-
-    def __can_match(self, graph_e: Edge, tree_e: Edge) -> bool:
-        return tree_e in self.possible_matches[graph_e]
-
-    def __all_match(self, graph_es: Iterable[Edge], tree_es: Iterable[Edge]):
-        return all([self.__can_match(g_e, t_e) for g_e, t_e in zip(graph_es, tree_es)])
-
-    def __valid_chain(self, u: Edge, v: Edge, match: Edge) -> bool:
-        return (
-            u != v
-            and u != tuple(v[::-1])
-            and self.__can_match(u, match)
-            and self.__can_match(v, match)
-        )
-
-    def __valid_transition(
-        self,
-        g_ins: Iterable[Edge],
-        g_outs: Iterable[Edge],
-        t_ins: Iterable[Edge],
-        t_outs: Iterable[Edge],
-    ) -> bool:
-        g_ins, g_outs, t_ins, t_outs = [list(x) for x in (g_ins, g_outs, t_ins, t_outs)]
-        return (
-            self.__all_match(g_outs, t_outs)  # all out assignments possible
-            and self.__all_match(g_ins, t_ins)  # all in assignments possible
-            and all(g_in not in g_outs for g_in in g_ins)  # no repeated edges
-            and all(tuple(g_in[::-1]) not in g_outs for g_in in g_ins)
-        )
 
     def __create_inidicators(self):
 
@@ -230,163 +216,205 @@ class GraphToTreeMatcher:
 
         self.num_variables = 0
 
-        self.match_indicators = {}
+        self.g2t_match_indicators = {}
+        self.t2g_match_indicators = {}
         self.match_indicator_costs = []
 
-        for graph_e, graph_e_attrs in self.graph.edges.items():
+        for graph_e in self.graph.edges:
 
-            graph_e_indicators = self.match_indicators.setdefault(graph_e, {})
+            g2t_e_indicators = self.g2t_match_indicators.setdefault(graph_e, {})
 
-            for tree_e, distance in graph_e_attrs["__possible_matches"]:
-                graph_e_indicators[tree_e] = self.num_variables
-                self.match_indicator_costs.append(distance)
+            pm = self.possible_matches.get(
+                graph_e, self.possible_matches.get(tuple(graph_e[::-1]), {})
+            )
+
+            for tree_e, cost in pm.items():
+                t2g_e_indicators = self.t2g_match_indicators.setdefault(tree_e, {})
+                t2g_e_indicators[graph_e] = self.num_variables
+                g2t_e_indicators[tree_e] = self.num_variables
+                self.match_indicator_costs.append(cost)
 
                 self.num_variables += 1
 
-        self.transition_indicators = {}
-        self.root_transitions = []
+        for graph_n in self.graph.nodes:
 
-        for graph_n, graph_n_attrs in self.graph.nodes.items():
-            """
-            Enumerating allowable transitions:
-            two cases:
-            1) graph_n is part way through an edge
-                - there is only 1 valid in_edge and 1 valid out_edge,
-                  the remaining edges adjacent to graph_n are assigned to None
-                - the assignment for graph_n's in_edge and out_edge are the same
-            2) graph_n is at a branch point in tree_n.
-                - graph_n in_edges must match to tree_n in_edges.
-                  There should only be 1 in_edge.
-                - graph_n out_edges must match to tree_n out_edges.
-                  There could be any number of out_edges
-                - a subset of graph_n in_edges and out_edges must make
-                  a 1-1 and onto mapping with tree_n in_edges and out_edges
-                - remaining graph_n in_edges and out_edges must be assigned to None
-            """
-            node_indicators = self.transition_indicators.setdefault(graph_n, {})
+            g2t_n_indicators = self.g2t_match_indicators.setdefault(graph_n, {})
 
-            graph_in_edges = self.graph.in_edges(graph_n)
-            graph_out_edges = self.graph.out_edges(graph_n)
+            pm = self.possible_matches[graph_n]
 
-            tree_in_cands = self.__tree_candidates(graph_in_edges)
-            tree_out_cands = self.__tree_candidates(graph_out_edges)
+            for tree_n, cost in pm.items():
+                t2g_n_indicators = self.t2g_match_indicators.setdefault(tree_n, {})
+                t2g_n_indicators[graph_n] = self.num_variables
+                g2t_n_indicators[tree_n] = self.num_variables
+                self.match_indicator_costs.append(cost)
 
-            possible_chains = tree_in_cands & tree_out_cands
+                self.num_variables += 1
 
-            # case 1:
-            for possible_chain in possible_chains:
-                for g_in, g_out in itertools.product(graph_in_edges, graph_out_edges):
-                    if self.__valid_chain(g_in, g_out, possible_chain):
-                        node_indicators[self.num_variables] = {
-                            g_in: possible_chain,
-                            g_out: possible_chain,
-                        }
-
-                        # set the rest to None:
-                        for graph_e in itertools.chain(graph_in_edges, graph_out_edges):
-                            node_indicators[self.num_variables].setdefault(
-                                graph_e, None
-                            )
-
-                        self.num_variables += 1
-
-            # case 2:
-            possible_nodes = set(
-                n for e in itertools.chain(tree_in_cands, tree_out_cands) for n in e
-            )
-            for possible_node in possible_nodes:
-                # t_ins and t_outs are fixed for a possible assignment
-                t_ins = self.tree.in_edges(possible_node)
-                t_outs = self.tree.out_edges(possible_node)
-                # get all possible g_ins and g_outs that might satisfy t_ins and t_outs
-                g_ins = itertools.permutations(graph_in_edges, len(t_ins))
-                g_outs = itertools.permutations(graph_out_edges, len(t_outs))
-                for ins, outs in itertools.product(g_ins, g_outs):
-                    if self.__valid_transition(g_ins, g_outs, t_ins, t_outs):
-
-                        # store all root transitions, we only want 1
-                        if self.tree.in_degree(possible_node) == 0:
-                            self.root_transitions.append(self.num_variables)
-                        config = node_indicators.setdefault(self.num_variables, {})
-                        config.update(
-                            {g_out: ness_out for g_out, ness_out in zip(outs, t_outs)}
-                        )
-                        config.update(
-                            {g_in: ness_in for g_in, ness_in in zip(ins, t_ins)}
-                        )
-
-                        # set the rest to None:
-                        for graph_e in itertools.chain(graph_in_edges, graph_out_edges):
-                            config.setdefault(graph_e, None)
-
-                        self.num_variables += 1
-
-            # allow all None transitions
-            config = node_indicators.setdefault(self.num_variables, {})
-
-            # set the rest to None:
-            for graph_e in itertools.chain(graph_in_edges, graph_out_edges):
-                config.setdefault(graph_e, None)
+            # nodes can match to nothing
+            g2t_n_indicators[None] = self.num_variables
+            self.match_indicator_costs.append(0)
 
             self.num_variables += 1
 
     def __create_constraints(self):
+        """
+        constraints based on the implementation described here:
+        https://hal.archives-ouvertes.fr/hal-00726076/document
+        pg 11
+        Pierre Le Bodic, Pierre Héroux, Sébastien Adam, Yves Lecourtier. An integer linear program for
+        substitution-tolerant subgraph isomorphism and its use for symbol spotting in technical drawings.
+        Pattern Recognition, Elsevier, 2012, 45 (12), pp.4214-4224. ffhal-00726076
+        """
 
         self.constraints = pylp.LinearConstraints()
 
-        # pick exactly one of the match_indicators per edge:
-
-        for graph_e in self.graph.edges():
+        # (2b) 1-1 Tree node to Graph node mapping
+        for tree_n in self.tree.nodes():
 
             constraint = pylp.LinearConstraint()
-            for match_indicator in self.match_indicators[graph_e].values():
+            for match_indicator in self.t2g_match_indicators[tree_n].values():
                 constraint.set_coefficient(match_indicator, 1)
-            constraint.set_relation(pylp.Relation.LessEqual)
+            constraint.set_relation(pylp.Relation.Equal)
             constraint.set_value(1)
-
             self.constraints.add(constraint)
 
+        # (2c): 1-n Tree edge to Graph edge mapping (n=1 if multi_edge_match == False)
+        for tree_e in self.tree.edges():
+
+            constraint = pylp.LinearConstraint()
+            for match_indicator in self.t2g_match_indicators[tree_e].values():
+                constraint.set_coefficient(match_indicator, -1)
+            constraint.set_relation(pylp.Relation.LessEqual)
+            constraint.set_value(-1)
+            self.constraints.add(constraint)
+
+        # (2d) 1-1 Graph node to Tree node mapping
         for graph_n in self.graph.nodes():
-            # each node has a set of configurations, of which only one can be active
-            unique_config_constraint = pylp.LinearConstraint()
-            for node_indicator, configuration in self.transition_indicators[
-                graph_n
-            ].items():
-                unique_config_constraint.set_coefficient(node_indicator, 1)
 
-                config_constraint = pylp.LinearConstraint()
-                num_assignments = 0
-                num_nones = 0
-                for graph_e, tree_e in configuration.items():
-                    if tree_e is not None:
-                        match_indicator = self.match_indicators[graph_e][tree_e]
-                        config_constraint.set_coefficient(match_indicator, -1)
-                        num_assignments += 1
-                for graph_e, tree_e in configuration.items():
-                    if tree_e is None:
-                        for match_indicator in self.match_indicators[graph_e].values():
-                            config_constraint.set_coefficient(match_indicator, 1)
-                            num_nones += 1
+            constraint = pylp.LinearConstraint()
+            for match_indicator in self.g2t_match_indicators[graph_n].values():
+                constraint.set_coefficient(match_indicator, 1)
+            constraint.set_relation(pylp.Relation.Equal)
+            constraint.set_value(1)
+            self.constraints.add(constraint)
 
-                # if x_node_indicator: on the edge, only satisfied if all assignments = True
-                config_constraint.set_coefficient(
-                    node_indicator, num_assignments + num_nones
-                )
-                config_constraint.set_relation(pylp.Relation.LessEqual)
-                config_constraint.set_value(num_nones)
-                self.constraints.add(config_constraint)
+        # (2e, 2f)
+        for graph_n in self.graph.nodes:
+            for tree_n in self.possible_matches[graph_n]:
+                g2t_n_indicator = self.g2t_match_indicators[graph_n][tree_n]
 
-            unique_config_constraint.set_relation(pylp.Relation.Equal)
-            unique_config_constraint.set_value(1)
-            self.constraints.add(unique_config_constraint)
+                # (2e) 1-1 Tree out edge to Graph out edge mapping for any pair of matched nodes
+                for tree_out_e in self.tree.out_edges(tree_n):
 
-        # only 1 transition from none to root allowed:
-        unique_root_constraint = pylp.LinearConstraint()
-        for transition_indicator in self.root_transitions:
-            unique_root_constraint.set_coefficient(transition_indicator, 1)
-        unique_root_constraint.set_relation(pylp.Relation.Equal)
-        unique_root_constraint.set_value(1)
-        self.constraints.add(unique_root_constraint)
+                    constraint = pylp.LinearConstraint()
+                    constraint.set_coefficient(g2t_n_indicator, 1)
+                    for graph_out_e in self.graph.out_edges(graph_n):
+                        g2t_e_indicator = self.g2t_match_indicators[graph_out_e].get(
+                            tree_out_e, None
+                        )
+                        if g2t_e_indicator is not None:
+                            constraint.set_coefficient(g2t_e_indicator, -1)
+                    constraint.set_relation(pylp.Relation.LessEqual)
+                    constraint.set_value(0)
+                    self.constraints.add(constraint)
+
+                # (2f) 1-1 Tree in edge to Graph in edge mapping for any pair of matched nodes
+                for tree_in_e in self.tree.in_edges(tree_n):
+
+                    constraint = pylp.LinearConstraint()
+                    constraint.set_coefficient(g2t_n_indicator, 1)
+                    for graph_in_e in self.graph.in_edges(graph_n):
+                        g2t_e_indicator = self.g2t_match_indicators[graph_in_e].get(
+                            tree_in_e, None
+                        )
+                        if g2t_e_indicator is not None:
+                            constraint.set_coefficient(g2t_e_indicator, -11)
+                    constraint.set_relation(pylp.Relation.LessEqual)
+                    constraint.set_value(0)
+                    self.constraints.add(constraint)
+
+        # EXTRA CONSTRAINT: balanced in_edges/out_edges
+        # The previous 5 are enough to cover isomorphisms, but we need to model chains
+        # in G representing edges in S
+        # 1) If two vertices are matched together, an edge originating at the vertex of S
+        # must be mapped to n edges targeting the vertex of G, and n+1 edges originating
+        # from the vertex in G.
+        # 1) is Redundant since this is enforced by previous constraints with n=0
+        # 2) Similarly, an edge targeting the vertex of S must be mapped to n+1 edges targeting
+        # the vertex of G, and n edges originating from the vertex in G.
+        # 2) is Redundant since this is enforced by previous constraints with n=0
+        # 3) If a vertex in G is not mapped to a vertex in S, any edge in S
+        # matched to n edges targeting the vertex in G, must also be mapped to n edges
+        # originating from the vertex in G.
+
+        # MATH
+        # given x_ij for all i in V(G) and j in V(T)
+        # given y_ab_cd for all (a,b) in E(G) and (c,d) in E(T)
+        # For every node i in V(G) and edge (c, d) in E(T)
+        #   let n_i_cd = SUM(y_ei_cd) over all edges (e, i) in E(G) (number if in edges)
+        #   let m_i_cd = SUM(y_ie_cd) over all edges (i, e) in E(G) (number of out edges)
+        #   let imbalance = SUM(x_ih * {1 if h==c, -1 if h==d}) over all nodes h in N(T)
+        #   constrain n_i_cd - m_i_cd + imbalance = 0
+        for graph_n in self.graph.nodes:
+
+            possible_edges = set(
+                tree_e
+                for tree_n in self.g2t_match_indicators[graph_n]
+                for tree_e in self.tree.edges(tree_n)
+            )
+            for tree_e in possible_edges:
+                equality_constraint = pylp.LinearConstraint()
+                for graph_in_e in self.graph.in_edges(graph_n):
+                    indicator = self.g2t_match_indicators[graph_in_e].get(tree_e, None)
+                    if indicator is not None:
+                        # -1 if an in edge matches
+                        equality_constraint.set_coefficient(indicator, -1)
+                for graph_out_e in self.graph.out_edges(graph_n):
+                    indicator = self.g2t_match_indicators[graph_out_e].get(tree_e, None)
+                    if indicator is not None:
+                        # +1 if an out edge matches
+                        equality_constraint.set_coefficient(indicator, 1)
+
+                for tree_n, tree_n_indicator in self.g2t_match_indicators[
+                    graph_n
+                ].items():
+                    # tree_e must be an out edge
+                    if tree_n == tree_e[0]:
+                        equality_constraint.set_coefficient(tree_n_indicator, -1)
+                    # tree_e must be an in edge
+                    if tree_n == tree_e[1]:
+                        equality_constraint.set_coefficient(tree_n_indicator, 1)
+
+                equality_constraint.set_relation(pylp.Relation.Equal)
+                equality_constraint.set_value(0)
+                self.constraints.add(equality_constraint)
+
+        # Avoid crossovers in chains
+        # given x_ij for all i in V(G) and j in V(T)
+        # given y_ab_cd for all (a, b) in E(G) and (c, d) in E(T)
+        # let degree(None) = 2
+        # For every node i in V(G)
+        #   let N = SUM(degree(c)*x_ic) for all c in V(T) Union None
+        #   let y = SUM(y_ai_cd) + SUM(y_ia_cd) for all a adjacent to i, and all (c,d) in E(T)
+        #   y - N <= 0
+        for graph_n in self.graph.nodes:
+            degree_constraint = pylp.LinearConstraint()
+            for tree_n, tree_n_indicator in self.g2t_match_indicators[graph_n].items():
+                n = 2 if tree_n is None else self.tree.degree(tree_n)
+                degree_constraint.set_coefficient(tree_n_indicator, -n)
+            for neighbor in self.graph.neighbors(graph_n):
+                for adj_edge_indicator in self.g2t_match_indicators[
+                    (graph_n, neighbor)
+                ].values():
+                    degree_constraint.set_coefficient(adj_edge_indicator, 1)
+                for adj_edge_indicator in self.g2t_match_indicators[
+                    (neighbor, graph_n)
+                ].values():
+                    degree_constraint.set_coefficient(adj_edge_indicator, 1)
+
+            degree_constraint.set_relation(pylp.Relation.LessEqual)
+            degree_constraint.set_value(0)
+            self.constraints.add(degree_constraint)
 
     def __create_objective(self):
 
@@ -402,11 +430,11 @@ class GraphToTreeMatcher:
             if tree_e is None:
                 for ns, cost in self.graph.edges[graph_e]["__possible_matches"]:
                     expected_assignment_constraint.set_coefficient(
-                        self.match_indicators[graph_e][ns], -1
+                        self.g2t_match_indicators[graph_e][ns], -1
                     )
             else:
                 expected_assignment_constraint.set_coefficient(
-                    self.match_indicators[graph_e][tree_e], 1
+                    self.g2t_match_indicators[graph_e][tree_e], 1
                 )
                 num_assignments += 1
         expected_assignment_constraint.set_relation(pylp.Relation.Equal)
@@ -420,11 +448,18 @@ def match_graph_to_tree(
     match_attribute: str,
     match_distance_threshold: float,
 ):
+    for graph_e, graph_e_attrs in graph.edges.items():
+        if match_attribute in graph_e_attrs:
+            del graph_e_attrs[match_attribute]
 
     matcher = GraphToTreeMatcher(graph, tree, match_distance_threshold)
     matches, score = matcher.match()
 
     for e1, e2 in matches:
-        graph.edges[e1][match_attribute] = e2
+        match_attr = graph.edges[e1].setdefault(match_attribute, e2)
+        if isinstance(match_attribute, list):
+            match_attr.append(e1)
+        elif match_attr != e2:
+            graph.edges[e1][match_attribute] = [match_attr, e2]
 
     return matcher, score
