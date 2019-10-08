@@ -2,9 +2,8 @@ import pylp
 import numpy as np
 import networkx as nx
 
-import itertools
 import logging
-from typing import Hashable, Tuple, List, Iterable, Set, Dict
+from typing import Hashable, Tuple, List, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -16,11 +15,7 @@ class GraphToTreeMatcher:
     NO_MATCH_COST = 10e5
 
     def __init__(
-        self,
-        graph: nx.Graph,
-        tree: nx.DiGraph,
-        match_distance_threshold: float,
-        epsilon: float = 0.1,
+        self, graph: nx.Graph, tree: nx.DiGraph, match_distance_threshold: float
     ):
 
         self.undirected_graph = graph
@@ -32,12 +27,11 @@ class GraphToTreeMatcher:
         )
 
         self.match_distance_threshold = match_distance_threshold
-        self.epsilon = epsilon
 
         self.objective = None
         self.constraints = None
 
-        self.__preprocess_tree()
+        self.__preprocess_graph()
         self.__find_possible_matches()
         self.__create_inidicators()
         self.__create_constraints()
@@ -114,7 +108,7 @@ class GraphToTreeMatcher:
                 if coefficient == 1:
                     graph_e_attrs["__assigned_edge"] = possible_match
 
-    def __preprocess_tree(self):
+    def __preprocess_graph(self):
         """
         No special handling of high order branching. consider:
         G:          o               | T:        o
@@ -188,13 +182,6 @@ class GraphToTreeMatcher:
             + self.__point_to_edge_dist(v_loc, x_loc, y_loc)
         ) / 2
         return dist
-
-    def __cost(self, distance: float) -> float:
-        """
-        The cost formula given some distance between two edges.
-        Negative costs indicate rewards
-        """
-        return -self.match_distance_threshold / max(self.epsilon, distance)
 
     def __node_cost(self, graph_n: Hashable, tree_n: Hashable) -> float:
         distance = np.linalg.norm(
