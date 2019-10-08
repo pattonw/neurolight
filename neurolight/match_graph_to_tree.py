@@ -220,48 +220,6 @@ class GraphToTreeMatcher:
         min_dist = np.linalg.norm(frac * slope + u_loc - center)
         return min_dist
 
-    def __tree_candidates(self, graph_edges: Iterable[Edge]) -> Set[Edge]:
-        """
-        Returns all tree edges that can be assigned to at least one of the graph edges.
-        """
-        edge_view = self.graph.edges()
-        return set(
-            [
-                tree_edge
-                for graph_e in graph_edges
-                for tree_edge, _ in edge_view[graph_e]["__possible_matches"]
-            ]
-        )
-
-    def __can_match(self, graph_e: Edge, tree_e: Edge) -> bool:
-        return tree_e in self.possible_matches[graph_e]
-
-    def __all_match(self, graph_es: Iterable[Edge], tree_es: Iterable[Edge]):
-        return all([self.__can_match(g_e, t_e) for g_e, t_e in zip(graph_es, tree_es)])
-
-    def __valid_chain(self, u: Edge, v: Edge, match: Edge) -> bool:
-        return (
-            u != v
-            and u != tuple(v[::-1])
-            and self.__can_match(u, match)
-            and self.__can_match(v, match)
-        )
-
-    def __valid_transition(
-        self,
-        g_ins: Iterable[Edge],
-        g_outs: Iterable[Edge],
-        t_ins: Iterable[Edge],
-        t_outs: Iterable[Edge],
-    ) -> bool:
-        g_ins, g_outs, t_ins, t_outs = [list(x) for x in (g_ins, g_outs, t_ins, t_outs)]
-        return (
-            self.__all_match(g_outs, t_outs)  # all out assignments possible
-            and self.__all_match(g_ins, t_ins)  # all in assignments possible
-            and all(g_in not in g_outs for g_in in g_ins)  # no repeated edges
-            and all(tuple(g_in[::-1]) not in g_outs for g_in in g_ins)
-        )
-
     def __create_inidicators(self):
 
         # one binary indicator per edge in graph and possible match edge in
