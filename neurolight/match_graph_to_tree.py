@@ -43,6 +43,14 @@ class GraphToTreeMatcher:
         self.__create_constraints()
         self.__create_objective()
 
+    @property
+    def node_match_threshold(self):
+        return self.match_distance_threshold
+
+    @property
+    def edge_match_threshold(self):
+        return self.match_distance_threshold
+
     def match(self) -> List[Tuple[Edge, Edge]]:
         """Return a list of tuples from ``graph`` edges to ``tree`` edges (or
         ``None``, if no match was found).
