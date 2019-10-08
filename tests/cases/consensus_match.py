@@ -28,11 +28,11 @@ class ConsensusMatchTest(unittest.TestCase):
         skeleton = nx.Graph()
         skeleton.add_nodes_from(
             [
-                ("a", {"location": np.array([0, 0, 0])}),
-                ("b", {"location": np.array([0, 0, 5])}),
-                ("c", {"location": np.array([0, 0, 10])}),
-                ("d", {"location": np.array([0, 0, 15])}),
-                ("e", {"location": np.array([0, 0, 20])}),
+                ("a", {"location": np.array([1, 0, 0])}),
+                ("b", {"location": np.array([1, 0, 5])}),
+                ("c", {"location": np.array([1, 0, 10])}),
+                ("d", {"location": np.array([1, 0, 15])}),
+                ("e", {"location": np.array([1, 0, 20])}),
             ]
         )
         skeleton.add_edges_from([("a", "b"), ("b", "c"), ("c", "d"), ("d", "e")])
@@ -48,6 +48,83 @@ class ConsensusMatchTest(unittest.TestCase):
         self.assertEqual(skeleton.edges[("b", "c")]["matched_edge"], ("A", "B"))
         self.assertEqual(skeleton.edges[("c", "d")]["matched_edge"], ("B", "C"))
         self.assertEqual(skeleton.edges[("d", "e")]["matched_edge"], ("B", "C"))
+
+    def test_simple_long_chain(self):
+
+        # consensus graph:
+        #
+        #       A---------->B---------->C
+        #
+        # skeleton graph:
+        #
+        # a--b--c--d--e--f--g--h--i--j--k--l--m
+        #
+        # matching should not have too many or too few edge assignments
+
+        consensus = nx.DiGraph()
+        consensus.add_nodes_from(
+            [
+                ("A", {"location": np.array([0, 0, 10])}),
+                ("B", {"location": np.array([0, 0, 30])}),
+                ("C", {"location": np.array([0, 0, 50])}),
+            ]
+        )
+        consensus.add_edges_from([("A", "B"), ("B", "C")])
+
+        skeleton = nx.Graph()
+        skeleton.add_nodes_from(
+            [
+                ("a", {"location": np.array([1, 0, 0])}),
+                ("b", {"location": np.array([1, 0, 5])}),
+                ("c", {"location": np.array([1, 0, 10])}),
+                ("d", {"location": np.array([1, 0, 15])}),
+                ("e", {"location": np.array([1, 0, 20])}),
+                ("f", {"location": np.array([1, 0, 25])}),
+                ("g", {"location": np.array([1, 0, 30])}),
+                ("h", {"location": np.array([1, 0, 35])}),
+                ("i", {"location": np.array([1, 0, 40])}),
+                ("j", {"location": np.array([1, 0, 45])}),
+                ("k", {"location": np.array([1, 0, 50])}),
+                ("l", {"location": np.array([1, 0, 55])}),
+                ("m", {"location": np.array([1, 0, 60])}),
+            ]
+        )
+        skeleton.add_edges_from(
+            [
+                ("a", "b"),
+                ("b", "c"),
+                ("c", "d"),
+                ("d", "e"),
+                ("e", "f"),
+                ("f", "g"),
+                ("g", "h"),
+                ("h", "i"),
+                ("i", "j"),
+                ("j", "k"),
+                ("k", "l"),
+                ("l", "m"),
+            ]
+        )
+
+        nl.match_graph_to_tree(
+            skeleton,
+            consensus,
+            match_distance_threshold=100,
+            match_attribute="matched_edge",
+        )
+
+        self.assertEqual(skeleton.edges[("a", "b")].get("matched_edge"), None)
+        self.assertEqual(skeleton.edges[("b", "c")].get("matched_edge"), None)
+        self.assertEqual(skeleton.edges[("c", "d")].get("matched_edge"), ("A", "B"))
+        self.assertEqual(skeleton.edges[("d", "e")].get("matched_edge"), ("A", "B"))
+        self.assertEqual(skeleton.edges[("e", "f")].get("matched_edge"), ("A", "B"))
+        self.assertEqual(skeleton.edges[("f", "g")].get("matched_edge"), ("A", "B"))
+        self.assertEqual(skeleton.edges[("g", "h")].get("matched_edge"), ("B", "C"))
+        self.assertEqual(skeleton.edges[("h", "i")].get("matched_edge"), ("B", "C"))
+        self.assertEqual(skeleton.edges[("i", "j")].get("matched_edge"), ("B", "C"))
+        self.assertEqual(skeleton.edges[("j", "k")].get("matched_edge"), ("B", "C"))
+        self.assertEqual(skeleton.edges[("k", "l")].get("matched_edge"), None)
+        self.assertEqual(skeleton.edges[("l", "m")].get("matched_edge"), None)
 
     def test_simple_4_way(self):
 
@@ -73,16 +150,7 @@ class ConsensusMatchTest(unittest.TestCase):
         #          |
         #          i
         #
-        # ab should map to A->X
-        # bd should map to None
-        # be should map to A->X
-        # cd should map to X->D
-        # de should map to X->D
-        # ef should map to X->B
-        # eh should map to X->C
-        # fg should map to X->B
-        # hi should map to X->C
-        # fh should map to None
+        # Matching should be able to match realistic 4 way junction
 
         consensus = nx.DiGraph()
         consensus.add_nodes_from(
@@ -99,15 +167,15 @@ class ConsensusMatchTest(unittest.TestCase):
         skeleton = nx.Graph()
         skeleton.add_nodes_from(
             [
-                ("c", {"location": np.array([0, 0, 0])}),
-                ("d", {"location": np.array([0, 0, 5])}),
-                ("g", {"location": np.array([0, 0, 20])}),
-                ("f", {"location": np.array([0, 0, 15])}),
-                ("e", {"location": np.array([0, 0, 10])}),
-                ("b", {"location": np.array([0, -5, 5])}),
-                ("a", {"location": np.array([0, -10, 5])}),
-                ("h", {"location": np.array([0, 5, 15])}),
-                ("i", {"location": np.array([0, 10, 15])}),
+                ("c", {"location": np.array([1, 0, 0])}),
+                ("d", {"location": np.array([1, 0, 5])}),
+                ("g", {"location": np.array([1, 0, 20])}),
+                ("f", {"location": np.array([1, 0, 15])}),
+                ("e", {"location": np.array([1, 0, 10])}),
+                ("b", {"location": np.array([1, -5, 5])}),
+                ("a", {"location": np.array([1, -10, 5])}),
+                ("h", {"location": np.array([1, 5, 15])}),
+                ("i", {"location": np.array([1, 10, 15])}),
             ]
         )
         skeleton.add_edges_from(
@@ -132,16 +200,16 @@ class ConsensusMatchTest(unittest.TestCase):
             match_attribute="matched_edge",
         )
 
-        self.assertEqual(skeleton.edges()[("a", "b")]["matched_edge"], ("A", "X"))
+        self.assertEqual(skeleton.edges()[("a", "b")].get("matched_edge"), ("A", "X"))
         self.assertEqual(skeleton.edges()[("b", "d")].get("matched_edge"), None)
-        self.assertEqual(skeleton.edges()[("b", "e")]["matched_edge"], ("A", "X"))
-        self.assertEqual(skeleton.edges()[("c", "d")]["matched_edge"], ("X", "D"))
-        self.assertEqual(skeleton.edges()[("d", "e")]["matched_edge"], ("X", "D"))
-        self.assertEqual(skeleton.edges()[("e", "f")]["matched_edge"], ("X", "B"))
-        self.assertEqual(skeleton.edges()[("e", "h")]["matched_edge"], ("X", "C"))
-        self.assertEqual(skeleton.edges()[("f", "g")]["matched_edge"], ("X", "B"))
+        self.assertEqual(skeleton.edges()[("b", "e")].get("matched_edge"), ("A", "X"))
+        self.assertEqual(skeleton.edges()[("c", "d")].get("matched_edge"), ("X", "D"))
+        self.assertEqual(skeleton.edges()[("d", "e")].get("matched_edge"), ("X", "D"))
+        self.assertEqual(skeleton.edges()[("e", "f")].get("matched_edge"), ("X", "B"))
+        self.assertEqual(skeleton.edges()[("e", "h")].get("matched_edge"), ("X", "C"))
+        self.assertEqual(skeleton.edges()[("f", "g")].get("matched_edge"), ("X", "B"))
         self.assertEqual(skeleton.edges()[("f", "h")].get("matched_edge"), None)
-        self.assertEqual(skeleton.edges()[("h", "i")]["matched_edge"], ("X", "C"))
+        self.assertEqual(skeleton.edges()[("h", "i")].get("matched_edge"), ("X", "C"))
 
     def test_confounding_chain(self):
 
@@ -156,8 +224,7 @@ class ConsensusMatchTest(unittest.TestCase):
         #        |
         #        f--h--i
         #
-        # the optimal matching should not cheat and assign
-        # None to c-f, and BC to f-h, and h-i to reduce cost
+        # the optimal matching should not assign anything to extra chain
 
         consensus = nx.DiGraph()
         consensus.add_nodes_from(
@@ -172,14 +239,14 @@ class ConsensusMatchTest(unittest.TestCase):
         skeleton = nx.Graph()
         skeleton.add_nodes_from(
             [
-                ("a", {"location": np.array([0, 0, 0])}),
-                ("b", {"location": np.array([0, 0, 5])}),
-                ("c", {"location": np.array([0, 0, 10])}),
-                ("d", {"location": np.array([0, 0, 15])}),
-                ("e", {"location": np.array([0, 0, 20])}),
-                ("f", {"location": np.array([0, -1, 10])}),
-                ("h", {"location": np.array([0, -1, 15])}),
-                ("i", {"location": np.array([0, -1, 20])}),
+                ("a", {"location": np.array([1, 0, 0])}),
+                ("b", {"location": np.array([1, 0, 5])}),
+                ("c", {"location": np.array([1, 0, 10])}),
+                ("d", {"location": np.array([1, 0, 15])}),
+                ("e", {"location": np.array([1, 0, 20])}),
+                ("f", {"location": np.array([1, -1, 10])}),
+                ("h", {"location": np.array([1, -1, 15])}),
+                ("i", {"location": np.array([1, -1, 20])}),
             ]
         )
         skeleton.add_edges_from(
@@ -209,6 +276,7 @@ class ConsensusMatchTest(unittest.TestCase):
         self.assertEqual(skeleton.edges[("f", "h")].get("matched_edge"), None)
         self.assertEqual(skeleton.edges[("h", "i")].get("matched_edge"), None)
 
+
     def test_confounding_loop(self):
 
         # consensus graph:
@@ -224,7 +292,7 @@ class ConsensusMatchTest(unittest.TestCase):
         #        | /
         #        i
         #
-        # the optimal matching should not create a loop around f-h-i
+        # the optimal matching should not create a loop for extra reward
 
         consensus = nx.DiGraph()
         consensus.add_nodes_from(
@@ -239,14 +307,14 @@ class ConsensusMatchTest(unittest.TestCase):
         skeleton = nx.Graph()
         skeleton.add_nodes_from(
             [
-                ("a", {"location": np.array([0, 0, 0])}),
-                ("b", {"location": np.array([0, 0, 5])}),
-                ("c", {"location": np.array([0, 0, 10])}),
-                ("d", {"location": np.array([0, 0, 15])}),
-                ("e", {"location": np.array([0, 0, 20])}),
-                ("f", {"location": np.array([0, -1, 10])}),
-                ("h", {"location": np.array([0, -1, 15])}),
-                ("i", {"location": np.array([0, -2, 10])}),
+                ("a", {"location": np.array([1, 0, 0])}),
+                ("b", {"location": np.array([1, 0, 5])}),
+                ("c", {"location": np.array([1, 0, 10])}),
+                ("d", {"location": np.array([1, 0, 15])}),
+                ("e", {"location": np.array([1, 0, 20])}),
+                ("f", {"location": np.array([1, -1, 10])}),
+                ("h", {"location": np.array([1, -1, 15])}),
+                ("i", {"location": np.array([1, -2, 10])}),
             ]
         )
         skeleton.add_edges_from(
@@ -276,7 +344,7 @@ class ConsensusMatchTest(unittest.TestCase):
         self.assertEqual(skeleton.edges[("f", "i")].get("matched_edge"), None)
         self.assertEqual(skeleton.edges[("h", "i")].get("matched_edge"), None)
 
-    def test_better_with_loop(self):
+    def test_cheap_loops(self):
 
         # consensus graph:
         #
@@ -295,9 +363,7 @@ class ConsensusMatchTest(unittest.TestCase):
         #         \   /
         #           i
         #
-        # the optimal matching would be a-b-c-d-e-f-g
-        # however a higher score could be achieved by taking
-        # the upper path and allowing a loop in the middle
+        # the optimal matching should not create a loop for extra reward.
 
         consensus = nx.DiGraph()
         consensus.add_nodes_from(
@@ -313,21 +379,21 @@ class ConsensusMatchTest(unittest.TestCase):
         skeleton = nx.Graph()
         skeleton.add_nodes_from(
             [
-                ("a", {"location": np.array([0, 0, 0])}),
-                ("b", {"location": np.array([0, 0, 5])}),
-                ("c", {"location": np.array([0, 0, 10])}),
-                ("d", {"location": np.array([0, 0, 15])}),
-                ("e", {"location": np.array([0, 0, 20])}),
-                ("f", {"location": np.array([0, 0, 25])}),
-                ("g", {"location": np.array([0, 0, 30])}),
-                ("h", {"location": np.array([0, 0.4, 10])}),
-                ("i", {"location": np.array([0, 10, 15])}),
-                ("j", {"location": np.array([0, 0.4, 20])}),
-                ("k", {"location": np.array([0, -0.3, 5])}),
-                ("l", {"location": np.array([0, -10, 10])}),
-                ("m", {"location": np.array([0, -10, 15])}),
-                ("n", {"location": np.array([0, -10, 20])}),
-                ("o", {"location": np.array([0, -0.3, 25])}),
+                ("a", {"location": np.array([1, 0, 0])}),
+                ("b", {"location": np.array([1, 0, 5])}),
+                ("c", {"location": np.array([1, 0, 10])}),
+                ("d", {"location": np.array([1, 0, 15])}),
+                ("e", {"location": np.array([1, 0, 20])}),
+                ("f", {"location": np.array([1, 0, 25])}),
+                ("g", {"location": np.array([1, 0, 30])}),
+                ("h", {"location": np.array([1, 0.4, 10])}),
+                ("i", {"location": np.array([1, 10, 15])}),
+                ("j", {"location": np.array([1, 0.4, 20])}),
+                ("k", {"location": np.array([1, -0.3, 5])}),
+                ("l", {"location": np.array([1, -10, 10])}),
+                ("m", {"location": np.array([1, -10, 15])}),
+                ("n", {"location": np.array([1, -10, 20])}),
+                ("o", {"location": np.array([1, -0.3, 25])}),
             ]
         )
         skeleton.add_edges_from(
