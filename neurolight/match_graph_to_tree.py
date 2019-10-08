@@ -100,14 +100,6 @@ class GraphToTreeMatcher:
     def __check_consistency(self, solution):
         return True
 
-    def __assign_edges_to_graph(self, solution):
-        for graph_e, graph_e_attrs in self.graph.edges().items():
-            for possible_match, cost in graph_e_attrs["__possible_matches"]:
-                coefficient_ind = self.g2t_match_indicators[graph_e][possible_match]
-                coefficient = solution[coefficient_ind]
-                if coefficient == 1:
-                    graph_e_attrs["__assigned_edge"] = possible_match
-
     def __preprocess_graph(self):
         """
         No special handling of high order branching. consider:
@@ -389,7 +381,7 @@ class GraphToTreeMatcher:
                 equality_constraint.set_value(0)
                 self.constraints.add(equality_constraint)
 
-        # Avoid crossovers in chains
+        # Avoid crossovers in chains and branch points
         # given x_ij for all i in V(G) and j in V(T)
         # given y_ab_cd for all (a, b) in E(G) and (c, d) in E(T)
         # let degree(None) = 2
@@ -428,7 +420,7 @@ class GraphToTreeMatcher:
         num_assignments = 0
         for graph_e, tree_e in expected_assignments.items():
             if tree_e is None:
-                for ns, cost in self.graph.edges[graph_e]["__possible_matches"]:
+                for ns, cost in self.possible_matches.get(graph_e, {}).items():
                     expected_assignment_constraint.set_coefficient(
                         self.g2t_match_indicators[graph_e][ns], -1
                     )
