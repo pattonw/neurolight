@@ -44,10 +44,10 @@ class ConsensusMatchTest(unittest.TestCase):
             match_attribute="matched_edge",
         )
 
-        self.assertEqual(skeleton.edges[("a", "b")]["matched_edge"], ("A", "B"))
-        self.assertEqual(skeleton.edges[("b", "c")]["matched_edge"], ("A", "B"))
-        self.assertEqual(skeleton.edges[("c", "d")]["matched_edge"], ("B", "C"))
-        self.assertEqual(skeleton.edges[("d", "e")]["matched_edge"], ("B", "C"))
+        self.assertEqual(skeleton.edges[("a", "b")].get("matched_edge"), ("A", "B"))
+        self.assertEqual(skeleton.edges[("b", "c")].get("matched_edge"), ("A", "B"))
+        self.assertEqual(skeleton.edges[("c", "d")].get("matched_edge"), ("B", "C"))
+        self.assertEqual(skeleton.edges[("d", "e")].get("matched_edge"), ("B", "C"))
 
     def test_simple_long_chain(self):
 
@@ -275,7 +275,6 @@ class ConsensusMatchTest(unittest.TestCase):
         self.assertEqual(skeleton.edges[("c", "f")].get("matched_edge"), None)
         self.assertEqual(skeleton.edges[("f", "h")].get("matched_edge"), None)
         self.assertEqual(skeleton.edges[("h", "i")].get("matched_edge"), None)
-
 
     def test_confounding_loop(self):
 
