@@ -60,7 +60,7 @@ class GraphToTreeMatcher:
 
         matches = []
         for graph_e in self.graph.edges():
-            for l, i in self.match_indicators[graph_e].items():
+            for l, i in self.g2t_match_indicators[graph_e].items():
                 if solution[i] > 0.5:
                     matches.append((graph_e, l))
 
@@ -70,7 +70,7 @@ class GraphToTreeMatcher:
         for graph_e, tree_e in matches:
             logger.debug(
                 f"edge {graph_e} assigned to {tree_e} with score: "
-                + f"{self.match_indicator_costs[self.match_indicators[graph_e][tree_e]]}"
+                + f"{self.match_indicator_costs[self.g2t_match_indicators[graph_e][tree_e]]}"
             )
 
         return matches, self._score_solution(solution)
@@ -89,6 +89,8 @@ class GraphToTreeMatcher:
 
             solver.set_constraints(self.constraints)
             solution, message = solver.solve()
+            if "NOT" in message:
+                raise ValueError("No solution could be found for this problem!")
             consistent = self.__check_consistency(solution)
 
         return solution
@@ -96,7 +98,7 @@ class GraphToTreeMatcher:
     def _score_solution(self, solution):
         total = 0
         for graph_e in self.graph.edges():
-            for l, i in self.match_indicators[graph_e].items():
+            for l, i in self.g2t_match_indicators[graph_e].items():
                 if solution[i] > 0.5:
                     total += self.match_indicator_costs[i]
         return total
@@ -107,7 +109,7 @@ class GraphToTreeMatcher:
     def __assign_edges_to_graph(self, solution):
         for graph_e, graph_e_attrs in self.graph.edges().items():
             for possible_match, cost in graph_e_attrs["__possible_matches"]:
-                coefficient_ind = self.match_indicators[graph_e][possible_match]
+                coefficient_ind = self.g2t_match_indicators[graph_e][possible_match]
                 coefficient = solution[coefficient_ind]
                 if coefficient == 1:
                     graph_e_attrs["__assigned_edge"] = possible_match
@@ -152,7 +154,7 @@ class GraphToTreeMatcher:
                 self.graph.nodes[graph_e[0]]["location"],
                 self.graph.nodes[graph_e[1]]["location"],
                 self.edge_match_threshold,
-                        )
+            )
 
             pm_edge = self.possible_matches.setdefault(graph_e, {})
 
@@ -265,7 +267,7 @@ class GraphToTreeMatcher:
             g2t_n_indicators[None] = self.num_variables
             self.match_indicator_costs.append(0)
 
-                        self.num_variables += 1
+            self.num_variables += 1
 
     def __create_constraints(self):
         """
@@ -332,7 +334,7 @@ class GraphToTreeMatcher:
                 # (2f) 1-1 Tree in edge to Graph in edge mapping for any pair of matched nodes
                 for tree_in_e in self.tree.in_edges(tree_n):
 
-            constraint = pylp.LinearConstraint()
+                    constraint = pylp.LinearConstraint()
                     constraint.set_coefficient(g2t_n_indicator, 1)
                     for graph_in_e in self.graph.in_edges(graph_n):
                         g2t_e_indicator = self.g2t_match_indicators[graph_in_e].get(
@@ -340,7 +342,7 @@ class GraphToTreeMatcher:
                         )
                         if g2t_e_indicator is not None:
                             constraint.set_coefficient(g2t_e_indicator, -11)
-            constraint.set_relation(pylp.Relation.LessEqual)
+                    constraint.set_relation(pylp.Relation.LessEqual)
                     constraint.set_value(0)
                     self.constraints.add(constraint)
 
@@ -387,8 +389,8 @@ class GraphToTreeMatcher:
                         equality_constraint.set_coefficient(indicator, 1)
 
                 for tree_n, tree_n_indicator in self.g2t_match_indicators[
-                graph_n
-            ].items():
+                    graph_n
+                ].items():
                     # tree_e must be an out edge
                     if tree_n == tree_e[0]:
                         equality_constraint.set_coefficient(tree_n_indicator, -1)
@@ -441,11 +443,11 @@ class GraphToTreeMatcher:
             if tree_e is None:
                 for ns, cost in self.graph.edges[graph_e]["__possible_matches"]:
                     expected_assignment_constraint.set_coefficient(
-                        self.match_indicators[graph_e][ns], -1
+                        self.g2t_match_indicators[graph_e][ns], -1
                     )
             else:
                 expected_assignment_constraint.set_coefficient(
-                    self.match_indicators[graph_e][tree_e], 1
+                    self.g2t_match_indicators[graph_e][tree_e], 1
                 )
                 num_assignments += 1
         expected_assignment_constraint.set_relation(pylp.Relation.Equal)
@@ -459,11 +461,18 @@ def match_graph_to_tree(
     match_attribute: str,
     match_distance_threshold: float,
 ):
+    for graph_e, graph_e_attrs in graph.edges.items():
+        if match_attribute in graph_e_attrs:
+            del graph_e_attrs[match_attribute]
 
     matcher = GraphToTreeMatcher(graph, tree, match_distance_threshold)
     matches, score = matcher.match()
 
     for e1, e2 in matches:
-        graph.edges[e1][match_attribute] = e2
+        match_attr = graph.edges[e1].setdefault(match_attribute, e2)
+        if isinstance(match_attribute, list):
+            match_attr.append(e1)
+        elif match_attr != e2:
+            graph.edges[e1][match_attribute] = [match_attr, e2]
 
     return matcher, score
