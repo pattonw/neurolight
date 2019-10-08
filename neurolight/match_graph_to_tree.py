@@ -405,29 +405,29 @@ class GraphToTreeMatcher:
         # Avoid crossovers in chains
         # given x_ij for all i in V(G) and j in V(T)
         # given y_ab_cd for all (a, b) in E(G) and (c, d) in E(T)
+        # let degree(None) = 2
         # For every node i in V(G)
-        #   let N = degree(i)
+        #   let N = SUM(degree(c)*x_ic) for all c in V(T) Union None
         #   let y = SUM(y_ai_cd) + SUM(y_ia_cd) for all a adjacent to i, and all (c,d) in E(T)
-        #   y is the effective degree of i
-        #   constrain y + (N - 2) * x_i0 <= N
+        #   y - N <= 0
         for graph_n in self.graph.nodes:
-            n = self.graph.degree(graph_n)
-            no_match_degree_constraint = pylp.LinearConstraint()
+            degree_constraint = pylp.LinearConstraint()
+            for tree_n, tree_n_indicator in self.g2t_match_indicators[graph_n].items():
+                n = 2 if tree_n is None else self.tree.degree(tree_n)
+                degree_constraint.set_coefficient(tree_n_indicator, -n)
             for neighbor in self.graph.neighbors(graph_n):
                 for adj_edge_indicator in self.g2t_match_indicators[
                     (graph_n, neighbor)
                 ].values():
-                    no_match_degree_constraint.set_coefficient(adj_edge_indicator, 1)
+                    degree_constraint.set_coefficient(adj_edge_indicator, 1)
                 for adj_edge_indicator in self.g2t_match_indicators[
                     (neighbor, graph_n)
                 ].values():
-                    no_match_degree_constraint.set_coefficient(adj_edge_indicator, 1)
-            no_match_indicator = self.g2t_match_indicators[graph_n][None]
-            no_match_degree_constraint.set_coefficient(no_match_indicator, n - 2)
+                    degree_constraint.set_coefficient(adj_edge_indicator, 1)
 
-            no_match_degree_constraint.set_relation(pylp.Relation.LessEqual)
-            no_match_degree_constraint.set_value(n)
-            self.constraints.add(no_match_degree_constraint)
+            degree_constraint.set_relation(pylp.Relation.LessEqual)
+            degree_constraint.set_value(0)
+            self.constraints.add(degree_constraint)
 
     def __create_objective(self):
 
