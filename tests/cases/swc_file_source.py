@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from .swc_base_test import SWCBaseTest
+from swc_base_test import SWCBaseTest
 from neurolight.gunpowder.nodes.swc_file_source import SwcFileSource
 from gunpowder import PointsKey, PointsSpec, BatchRequest, Roi, build
 import numpy as np
@@ -47,6 +47,7 @@ class SwcFileSourceTest(SWCBaseTest):
             )
 
         temp_g = batch.points[swc].graph
+        temp_g._relabel_connected_components()
 
         previous_label = None
         ccs = list(nx.weakly_connected_components(temp_g))
@@ -155,6 +156,7 @@ class SwcFileSourceTest(SWCBaseTest):
             )
 
         temp_g = batch.points[swc].graph
+        temp_g._relabel_connected_components()
 
         previous_label = None
         ccs = list(nx.weakly_connected_components(temp_g))
@@ -191,6 +193,7 @@ class SwcFileSourceTest(SWCBaseTest):
             )
 
         temp_g = batch.points[swc].graph
+        temp_g._relabel_connected_components()
 
         previous_label = None
         ccs = list(nx.weakly_connected_components(temp_g))

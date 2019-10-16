@@ -1,4 +1,4 @@
-from .provider_test import TestWithTempFiles
+from provider_test import TestWithTempFiles
 from gunpowder import Roi, Coordinate, GraphPoint, GraphPoints, PointsSpec
 
 import numpy as np

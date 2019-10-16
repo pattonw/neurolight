@@ -1,4 +1,4 @@
-from .swc_base_test import SWCBaseTest
+from swc_base_test import SWCBaseTest
 from neurolight.gunpowder.nodes.swc_file_source import SwcFileSource
 from neurolight.gunpowder.nodes.fusion_augment import FusionAugment
 from neurolight.gunpowder.nodes.rasterize_skeleton import RasterizeSkeleton
@@ -27,8 +27,7 @@ class FusionAugmentTest(SWCBaseTest):
     def test_two_disjoint_lines_intensity(self):
         LABEL_RADIUS = 3
         RAW_RADIUS = 3
-        # exagerated to show problem
-        BLEND_SMOOTHNESS = 10
+        BLEND_SMOOTHNESS = 3
 
         bb = Roi(Coordinate([0, 0, 0]), ([256, 256, 256]))
         voxel_size = Coordinate([1, 1, 1])
@@ -147,8 +146,7 @@ class FusionAugmentTest(SWCBaseTest):
     def test_two_disjoint_lines_softmask(self):
         LABEL_RADIUS = 3
         RAW_RADIUS = 3
-        # exagerated to show problem
-        BLEND_SMOOTHNESS = 10
+        BLEND_SMOOTHNESS = 3
 
         bb = Roi(Coordinate([0, 0, 0]), ([256, 256, 256]))
         voxel_size = Coordinate([1, 1, 1])

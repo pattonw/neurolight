@@ -12,4 +12,8 @@ install-dev:
 
 .PHONY: test
 test:
-	python -m tests -v
+	pytest tests -v -m "not slow"
+
+.PHONY: test-all
+test-all:
+	pytest tests -v

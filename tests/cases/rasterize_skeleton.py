@@ -1,4 +1,4 @@
-from .swc_base_test import SWCBaseTest
+from swc_base_test import SWCBaseTest
 from neurolight.gunpowder.nodes.swc_file_source import SwcFileSource
 from neurolight.gunpowder.nodes.rasterize_skeleton import RasterizeSkeleton
 from gunpowder import (

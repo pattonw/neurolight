@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from .swc_base_test import SWCBaseTest
+from swc_base_test import SWCBaseTest
 from neurolight.gunpowder.nodes.mouselight_swc_file_source import MouselightSwcFileSource
 from neurolight.gunpowder.nodes.grow_labels import GrowLabels
 from neurolight.gunpowder.nodes.rasterize_skeleton import RasterizeSkeleton
@@ -14,6 +14,8 @@ import time
 
 import numpy as np
 import logging
+
+import pytest
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -81,6 +83,7 @@ class Crop(gp.BatchFilter):
         batch[self.output_array] = output_array
 
 
+@pytest.mark.slow
 class PipelineTest(SWCBaseTest):
     def setUp(self):
         super(PipelineTest, self).setUp()
