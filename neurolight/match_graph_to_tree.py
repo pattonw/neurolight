@@ -1,8 +1,12 @@
 import pylp
 import numpy as np
 import networkx as nx
+from scipy.spatial import cKDTree
+import rtree
 
 import logging
+import itertools
+from copy import deepcopy
 from typing import Hashable, Tuple, List, Dict
 
 logger = logging.getLogger(__name__)
@@ -42,6 +46,7 @@ class GraphToTreeMatcher:
         self.constraints = None
 
         self.__preprocess_graph()
+        self.__initialize_spatial_indicies()
         self.__find_possible_matches()
         self.__create_inidicators()
         self.__create_constraints()
@@ -147,6 +152,23 @@ class GraphToTreeMatcher:
                     total += self.match_indicator_costs[i]
         return total
 
+    def __initialize_spatial_indicies(self):
+        self.tree_kd_ids, tree_node_attrs = [
+            list(x) for x in zip(*self.tree.nodes.items())
+        ]
+        self.tree_kd = cKDTree([attrs["location"] for attrs in tree_node_attrs])
+
+        p = rtree.index.Property()
+        p.dimension = 3
+        self.tree_rtree = rtree.index.Index(properties=p)
+        for i, (u, v) in enumerate(self.tree.edges()):
+            u_loc = self.tree.nodes[u]["location"]
+            v_loc = self.tree.nodes[v]["location"]
+            mins = np.min(np.array([u_loc, v_loc]), axis=0)
+            maxs = np.max(np.array([u_loc, v_loc]), axis=0)
+            box = tuple(x for x in itertools.chain(mins.tolist(), maxs.tolist()))
+            self.tree_rtree.insert(i, box, obj=(u, v))
+
     def __check_consistency(self, solution):
         return True
 
@@ -174,6 +196,7 @@ class GraphToTreeMatcher:
         self.possible_matches = {}
 
         # iterate over out edges to avoid repeated computations.
+        # TODO: put graph nodes in a tree and use cKDTree.query_ball_tree
         for graph_n in self.graph.nodes():
             possible_tree_nodes = self.__tree_nodes_query(
                 self.graph.nodes[graph_n]["location"], self.node_match_threshold
@@ -184,6 +207,7 @@ class GraphToTreeMatcher:
                 if node_cost is not None:
                     pm_node[tree_n] = node_cost
 
+        # TODO: is there an rtree equivalent of cKDTree.query_ball_tree?
         for graph_e in self.undirected_graph.edges():
 
             possible_tree_edges = self.__tree_edge_query(
@@ -199,22 +223,34 @@ class GraphToTreeMatcher:
                 if edge_cost is not None:
                     pm_edge[tree_e] = edge_cost
 
-    def __tree_nodes_query(self, center: np.ndarray, radius: float):
-        for tree_n, tree_n_attrs in self.tree.nodes.items():
-            dist = np.linalg.norm(tree_n_attrs["location"] - center)
-            if dist < radius:
-                yield tree_n
+    def __tree_nodes_query(self, center: np.ndarray, radius: float) -> List[Hashable]:
+        # simply query the tree kdtree for all nodes within the radius
+        queried_ids = self.tree_kd.query_ball_point(center, radius)
+        return [self.tree_kd_ids[i] for i in queried_ids]
 
     def __tree_edge_query(self, u_loc: np.ndarray, v_loc: np.ndarray, radius: float):
-        for tree_e in self.tree.edges:
+        # r tree only stores bounding boxes of lines, so we have to retrieve all potential
+        # edges, and then filter them based on a line specific distance calculation
+        rect = tuple(
+            x
+            for x in itertools.chain(
+                (np.min(np.array([u_loc, v_loc]), axis=0) - radius).tolist(),
+                (np.min(np.array([u_loc, v_loc]), axis=0) + radius).tolist(),
+            )
+        )
+        possible_tree_edges = [
+            x.object for x in self.tree_rtree.intersection(rect, objects=True)
+        ]
+        # line distances
+        for x, y in possible_tree_edges:
             dist = self.__edge_dist(
                 u_loc,
                 v_loc,
-                self.tree.nodes[tree_e[0]]["location"],
-                self.tree.nodes[tree_e[1]]["location"],
+                self.tree.nodes[x]["location"],
+                self.tree.nodes[y]["location"],
             )
             if dist < radius:
-                yield tree_e
+                yield (x, y)
 
     def __edge_dist(
         self, u_loc: np.ndarray, v_loc: np.ndarray, x_loc: np.ndarray, y_loc: np.ndarray
