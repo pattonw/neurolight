@@ -27,8 +27,8 @@ class GraphToTreeMatcher:
     ):
 
         if isinstance(graph, nx.Graph):
-        self.undirected_graph = graph
-        self.graph = graph.to_directed()
+            self.undirected_graph = graph
+            self.graph = graph.to_directed()
         elif isinstance(graph, nx.DiGraph):
             self.undirected_graph = graph.to_undirected()
             # TODO: support graph as nx.DiGraph

@@ -331,25 +331,31 @@ class GetNeuronPair(BatchProvider):
                 points_add, -direction, request=request, batch_index=1, inplace=False
             )
             return_roi = self._return_roi(request)
-            center = (Coordinate(gradients.shape[0:3]) * voxel_size) // 2
+            center = (Coordinate(gradients.shape[0:3]) // 2) * voxel_size
+            radius = (return_roi.get_shape() // voxel_size) // 2 * voxel_size
+            pad = (
+                Coordinate(
+                    (np.array((return_roi.get_shape() // voxel_size)) % 2).tolist()
+                )
+                * voxel_size
+            )
             slices = tuple(
                 map(
                     slice,
-                    (center - return_roi.get_shape() // 2 + direction) // voxel_size,
-                    (center + return_roi.get_shape() // 2 + direction) // voxel_size,
+                    (center - radius + direction) // voxel_size,
+                    (center + radius + direction + voxel_size + pad) // voxel_size,
                 )
             )
             logger.debug("slices: {}".format(slices))
             if self._valid_pair(
                 points_add_shifted[self.point_source].graph, distances[slices]
             ):
-                logging.debug("Valid shift found: {}".format(direction))
+                logger.info("Valid shift found: {}".format(direction))
 
                 timing_process_points.stop()
                 profiling_stats.add(timing_process_points)
                 return direction
-            else:
-                logging.debug("{} was invalid!".format(direction))
+        logger.info("Request failed. New Request!")
 
         timing_process_points.stop()
         profiling_stats.add(timing_process_points)
@@ -382,7 +388,7 @@ class GetNeuronPair(BatchProvider):
         if not inplace:
             batch = copy.deepcopy(batch)
 
-        logging.debug("processing")
+        logger.debug("processing")
         points = batch.points.get(self.point_source, None)
         array = batch.arrays.get(self.array_source, None)
         label = batch.arrays.get(self.label_source, None)
@@ -494,7 +500,7 @@ class GetNeuronPair(BatchProvider):
         for point_id, point_attrs in add_graph.nodes.items():
             if distances[Coordinate(point_attrs["location"] // voxel_size)] < min_dist:
                 min_dist = distances[Coordinate(point_attrs["location"] // voxel_size)]
-        if min_dist < self.seperate_by[0]:
+        if min_dist < self.seperate_by[0] or min_dist > self.seperate_by[1]:
             logger.debug(
                 (
                     "expected a minimum distance between the two neurons "
@@ -503,4 +509,5 @@ class GetNeuronPair(BatchProvider):
             )
             return False
         else:
+            logger.info(f"Saw min dist of {min_dist}!")
             return True

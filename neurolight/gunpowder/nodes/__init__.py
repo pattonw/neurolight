@@ -7,6 +7,8 @@ from .recenter import Recenter
 from .grow_labels import GrowLabels
 from .synthetic_light_like import SyntheticLightLike
 from .binarize_labels import BinarizeLabels
+from .graph_source import GraphSource
+from .topological_graph_matching import TopologicalMatcher
 
 __all__ = [
     "RasterizeSkeleton",
@@ -18,4 +20,6 @@ __all__ = [
     "GrowLabels",
     "SyntheticLightLike",
     "BinarizeLabels",
+    "GraphSource",
+    "TopologicalMatcher",
 ]

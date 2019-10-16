@@ -8,6 +8,8 @@ from .nodes import (
     GrowLabels,
     SyntheticLightLike,
     BinarizeLabels,
+    GraphSource,
+    TopologicalMatcher,
 )
 
 __all__ = [
@@ -20,4 +22,6 @@ __all__ = [
     "GrowLabels",
     "SyntheticLightLike",
     "BinarizeLabels",
+    "GraphSource",
+    "TopologicalMatcher",
 ]

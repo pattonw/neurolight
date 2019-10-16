@@ -8,6 +8,8 @@ from .gunpowder import (
     GrowLabels,
     SyntheticLightLike,
     BinarizeLabels,
+    GraphSource,
+    TopologicalMatcher,
 )
 
 from .match_graph_to_tree import match_graph_to_tree
@@ -23,4 +25,6 @@ __all__ = [
     "SyntheticLightLike",
     "BinarizeLabels",
     "match_graph_to_tree",
+    "GraphSource",
+    "TopologicalMatcher",
 ]
