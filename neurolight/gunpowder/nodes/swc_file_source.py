@@ -320,7 +320,7 @@ class SwcFileSource(BatchProvider):
             if u in temp.nodes and v in temp.nodes:
                 temp.add_edge(u, v)
 
-        nx.convert_node_labels_to_integers(temp, first_label=len(self._graph.nodes))
+        temp = nx.convert_node_labels_to_integers(temp, first_label=len(self._graph.nodes))
 
         self._graph = nx.union(self._graph, temp)
         logger.debug("graph has {} nodes".format(len(self._graph.nodes)))
