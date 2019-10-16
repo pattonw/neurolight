@@ -174,22 +174,48 @@ class GraphToTreeMatcher:
 
     def __preprocess_graph(self):
         """
-        No special handling of high order branching. consider:
-        G:          o               | T:        o
-                    |               |           |
-                    o               |           |
-                    |               |           |
-              o-o-o-o-o-o-o-o-o     |   o-------o----------o
-                        |           |            \
-                        o           |             \
-                        |           |              \
-                        o           |               o
-        Our constraints would be unable to handle this case which is very
-        likely if G is generated through some skeletonization algorithm.
-        If this is likely to occur in you G, you may need to do some pre
-        processing to add potential edges such that it is possible to extract
-        a subset of edges of G that are topologically identical to T.
+        Solver only works if G is over complete. This function is responsible for
+        adding edges and or nodes to G s.t. some possible data quality issues in
+        G are resolved.
         """
+
+        # handle gaps:
+        # A------------------------------B
+        # a---b---c---d--e      f--g--h--i
+        #       wcc_a               wcc_b
+
+        # for every node x in wcc_a and y in wcc_b, if dist(x, y) < match_distance_threshold
+        # add an edge from x to y and y to x
+        wccs = list(list(x) for x in nx.weakly_connected_components(self.graph))
+        if len(wccs) < 2:
+            return
+        spatial_wccs = [
+            cKDTree([self.graph.nodes[x]["location"] for x in wcc]) for wcc in wccs
+        ]
+        for (ind_a, wcc_a), (ind_b, wcc_b) in itertools.combinations(
+            enumerate(spatial_wccs), 2
+        ):
+            for node_a_index, closest_nodes in itertools.chain(
+                *zip(
+                    enumerate(
+                        wcc_a.query_ball_tree(wcc_b, self.match_distance_threshold)
+                    )
+                )
+            ):
+                for node_b_index in closest_nodes:
+                    node_a = wccs[ind_a][node_a_index]
+                    node_b = wccs[ind_b][node_b_index]
+                    if (
+                        np.linalg.norm(
+                            self.graph.nodes[node_a]["location"]
+                            - self.graph.nodes[node_b]["location"]
+                        )
+                        < self.match_distance_threshold
+                    ):
+                        self.graph.add_edge(node_a, node_b)
+                        self.graph.add_edge(node_b, node_a)
+
+        # handle branching:
         pass
 
     def __find_possible_matches(self):
