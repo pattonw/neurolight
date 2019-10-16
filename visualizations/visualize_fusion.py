@@ -1,9 +1,8 @@
 from pathlib import Path
 
 import neurolight
-from neurolight.gunpowder.nodes.mouselight_swc_file_source import (
-    MouselightSwcFileSource,
-)
+from neurolight.gunpowder.nodes.graph_source import GraphSource
+from neurolight.gunpowder.nodes.topological_graph_matching import TopologicalMatcher
 from neurolight.gunpowder.nodes.grow_labels import GrowLabels
 from neurolight.gunpowder.nodes.rasterize_skeleton import RasterizeSkeleton
 from neurolight.gunpowder.nodes.get_neuron_pair import GetNeuronPair
@@ -21,7 +20,9 @@ import sys
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger(gp.nodes.random_location.__name__).setLevel(logging.INFO)
-logging.getLogger(neurolight.gunpowder.nodes.rasterize_skeleton.__name__).setLevel(logging.DEBUG)
+logging.getLogger(neurolight.gunpowder.nodes.rasterize_skeleton.__name__).setLevel(
+    logging.DEBUG
+)
 
 
 SEP_DIST = int(sys.argv[1])
@@ -97,23 +98,25 @@ path_to_data = Path("/nrs/funke/mouselight-v2")
 
 # array keys for data sources
 raw = gp.ArrayKey("RAW")
-swcs = gp.PointsKey("SWCS")
+consensus = gp.PointsKey("CONSENSUS")
+skeletonization = gp.PointsKey("SKELETONIZATION")
+matched = gp.PointsKey("MATCHED")
 labels = gp.ArrayKey("LABELS")
 
 # array keys for base volume
 raw_base = gp.ArrayKey("RAW_BASE")
 labels_base = gp.ArrayKey("LABELS_BASE")
-swc_base = gp.PointsKey("SWC_BASE")
+matched_base = gp.PointsKey("MATCHED_BASE")
 
 # array keys for add volume
 raw_add = gp.ArrayKey("RAW_ADD")
 labels_add = gp.ArrayKey("LABELS_ADD")
-swc_add = gp.PointsKey("SWC_ADD")
+matched_add = gp.PointsKey("MATCHED_ADD")
 
 # array keys for fused volume
 raw_fused = gp.ArrayKey("RAW_FUSED")
 labels_fused = gp.ArrayKey("LABELS_FUSED")
-swc_fused = gp.PointsKey("SWC_FUSED")
+matched_fused = gp.PointsKey("MATCHED_FUSED")
 
 # output data
 labels_fg = gp.ArrayKey("LABELS_FG")
@@ -129,7 +132,7 @@ output_size = output_size * voxel_size
 request = gp.BatchRequest()
 request.add(raw_fused, input_size)
 request.add(labels_fused, input_size)
-request.add(swc_fused, input_size)
+request.add(matched_fused, input_size)
 request.add(labels_fg, output_size)
 request.add(labels_fg_bin, output_size)
 request.add(loss_weights, output_size)
@@ -142,8 +145,8 @@ request.add(raw_base, input_size)
 request.add(raw_add, input_size)
 request.add(labels_base, input_size)
 request.add(labels_add, input_size)
-request.add(swc_base, input_size)
-request.add(swc_add, input_size)
+request.add(matched_base, input_size)
+request.add(matched_add, input_size)
 
 data_sources = tuple(
     (
@@ -161,30 +164,40 @@ data_sources = tuple(
                 )
             },
         ),
-        MouselightSwcFileSource(
+        GraphSource(
             filename=str(
                 Path(
-                    "/groups/mousebrainmicro/mousebrainmicro/scripts/carver/2018-07-02-v03/augmented-with-skeleton-nodes-as-swcs/G-002.swc"
+                    "/groups/mousebrainmicro/home/pattonw/Code/Packages/neurolight/skeletonization_carved-002-100.obj"
                 ).absolute()
             ),
-            points=(swcs,),
+            points=(skeletonization,),
             scale=voxel_size,
             transpose=(2, 1, 0),
-            transform_file=str((filename / "transform.txt").absolute()),
+        ),
+        GraphSource(
+            filename=str(
+                Path(
+                    "/groups/mousebrainmicro/home/pattonw/Code/Packages/neurolight/consensus-002.obj"
+                ).absolute()
+            ),
+            points=(consensus,),
+            scale=voxel_size,
+            transpose=(2, 1, 0),
         ),
     )
     + gp.MergeProvider()
     + gp.RandomLocation(
-        ensure_nonempty=swcs, ensure_centered=True, point_balance_radius=700
+        ensure_nonempty=consensus, ensure_centered=True, point_balance_radius=700
     )
+    + TopologicalMatcher(skeletonization, consensus, matched)
     + RasterizeSkeleton(
-        points=swcs,
+        points=matched,
         array=labels,
         array_spec=gp.ArraySpec(
             interpolatable=False, voxel_size=voxel_size, dtype=np.uint32
         ),
     )
-    + GrowLabels(labels, radii=[10])
+    + GrowLabels(labels, radii=[30])
     # augment
     + gp.ElasticAugment(
         [40, 10, 10],
@@ -205,10 +218,10 @@ pipeline = (
     data_sources
     + gp.RandomProvider()
     + GetNeuronPair(
-        swcs,
+        matched,
         raw,
         labels,
-        (swc_base, swc_add),
+        (matched_base, matched_add),
         (raw_base, raw_add),
         (labels_base, labels_add),
         seperate_by=SEPERATE_DISTANCE,
@@ -220,11 +233,11 @@ pipeline = (
         raw_add,
         labels_base,
         labels_add,
-        swc_base,
-        swc_add,
+        matched_base,
+        matched_add,
         raw_fused,
         labels_fused,
-        swc_fused,
+        matched_fused,
         blend_mode="labels_mask",
         blend_smoothness=10,
         num_blended_objects=0,
@@ -232,7 +245,7 @@ pipeline = (
     + Crop(labels_fused, labels_fg)
     + BinarizeGt(labels_fg, labels_fg_bin)
     + gp.BalanceLabels(labels_fg_bin, loss_weights)
-    + gp.PrintProfilingStats(every=10)
+    + gp.PrintProfilingStats(every=3)
     + gp.Snapshot(
         output_filename="snapshot_{}_{}.hdf".format(SEP_DIST, "{id}"),
         dataset_names={
@@ -254,7 +267,7 @@ request = BatchRequest()
 request = gp.BatchRequest()
 request.add(raw_fused, input_size)
 request.add(labels_fused, input_size)
-request.add(swc_fused, input_size)
+request.add(matched_fused, input_size)
 request.add(labels_fg, output_size)
 request.add(labels_fg_bin, output_size)
 request.add(loss_weights, output_size)
@@ -267,10 +280,10 @@ request.add(raw_base, input_size)
 request.add(raw_add, input_size)
 request.add(labels_base, input_size)
 request.add(labels_add, input_size)
-request.add(swc_base, input_size)
-request.add(swc_add, input_size)
+request.add(matched_base, input_size)
+request.add(matched_add, input_size)
 
 with build(pipeline):
     t1 = time.time()
-    for _ in range(10):
+    for _ in range(3):
         pipeline.request_batch(request)
