@@ -512,6 +512,10 @@ class GraphToTreeMatcher:
                     (graph_n, neighbor), {}
                 ).values():
                     degree_constraint.set_coefficient(adj_edge_indicator, 1)
+                for adj_edge_indicator in self.g2t_match_indicators.get(
+                    (neighbor, graph_n), {}
+                ).values():
+                    degree_constraint.set_coefficient(adj_edge_indicator, 1)
 
             degree_constraint.set_relation(pylp.Relation.LessEqual)
             degree_constraint.set_value(0)
