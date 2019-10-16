@@ -15,11 +15,20 @@ class GraphToTreeMatcher:
     NO_MATCH_COST = 10e5
 
     def __init__(
-        self, graph: nx.Graph, tree: nx.DiGraph, match_distance_threshold: float
+        self,
+        graph: nx.Graph,
+        tree: nx.DiGraph,
+        match_distance_threshold: float,
+        node_balance: float = 10,
     ):
 
+        if isinstance(graph, nx.Graph):
         self.undirected_graph = graph
         self.graph = graph.to_directed()
+        elif isinstance(graph, nx.DiGraph):
+            self.undirected_graph = graph.to_undirected()
+            # TODO: support graph as nx.DiGraph
+            self.graph = self.undirected_graph.to_directed(graph)
         self.tree = tree
         assert nx.is_arborescence(self.tree), (
             "cannot match an arbitrary source to an arbitrary target. "
@@ -27,6 +36,7 @@ class GraphToTreeMatcher:
         )
 
         self.match_distance_threshold = match_distance_threshold
+        self.node_balance = node_balance
 
         self.objective = None
         self.constraints = None
@@ -50,7 +60,7 @@ class GraphToTreeMatcher:
         ``None``, if no match was found).
         """
 
-        solution = self.__solve()
+        solution = self.solve()
 
         matches = []
         for graph_e in self.graph.edges():
@@ -69,7 +79,7 @@ class GraphToTreeMatcher:
 
         return matches, self._score_solution(solution)
 
-    def __solve(self):
+    def solve(self):
 
         solver = pylp.create_linear_solver(pylp.Preference.Gurobi)
         solver.initialize(self.num_variables, pylp.VariableType.Binary)
@@ -88,6 +98,46 @@ class GraphToTreeMatcher:
             consistent = self.__check_consistency(solution)
 
         return solution
+
+    def create_tree(self, solution):
+        matched_tree = nx.DiGraph()
+        for graph_e in self.graph.edges():
+            for l, i in self.g2t_match_indicators[graph_e].items():
+                if solution[i] > 0.5:
+                    matched_tree.add_node(
+                        graph_e[0], **deepcopy(self.graph.nodes[graph_e[0]])
+                    )
+                    matched_tree.add_node(
+                        graph_e[1], **deepcopy(self.graph.nodes[graph_e[1]])
+                    )
+                    matched_tree.add_edge(*graph_e)
+                    matched_tree.edges[graph_e]["matched_label"] = l
+                    matched_tree.edges[graph_e][
+                        "match_cost"
+                    ] = self.match_indicator_costs[i]
+        for graph_n in self.graph.nodes():
+            for l, i in self.g2t_match_indicators[graph_n].items():
+                if solution[i] > 0.5:
+                    if graph_n not in matched_tree.nodes and l is not None:
+                        logger.warning(
+                            f"Node {graph_n} in G matched to {l} in T with no adjacent edges "
+                            + f"matched!\nNode {l} in T has {len(list(self.tree.edges(l)))} "
+                            + f"neighbors!"
+                        )
+                        matched_tree.add_node(
+                            graph_n, **deepcopy(self.graph.nodes[graph_n])
+                        )
+                    elif graph_n not in matched_tree.nodes and l is None:
+                        # Assigning None to nodes in G has no cost, thus there are many optimal
+                        # solutions containing excess assignments. These can be ignored
+                        pass
+                    else:
+                        matched_tree.nodes[graph_n]["match_label"] = l
+                        matched_tree.nodes[graph_n][
+                            "match_cost"
+                        ] = self.match_indicator_costs[i]
+
+        return matched_tree
 
     def _score_solution(self, solution):
         total = 0
@@ -169,17 +219,17 @@ class GraphToTreeMatcher:
     def __edge_dist(
         self, u_loc: np.ndarray, v_loc: np.ndarray, x_loc: np.ndarray, y_loc: np.ndarray
     ) -> float:
-        dist = (
+        distance = (
             self.__point_to_edge_dist(u_loc, x_loc, y_loc)
             + self.__point_to_edge_dist(v_loc, x_loc, y_loc)
         ) / 2
-        return dist
+        return distance
 
     def __node_cost(self, graph_n: Hashable, tree_n: Hashable) -> float:
         distance = np.linalg.norm(
             self.graph.nodes[graph_n]["location"] - self.tree.nodes[tree_n]["location"]
         )
-        return distance
+        return self.node_balance * distance
 
     def __edge_cost(self, graph_e: Edge, tree_e: Edge) -> float:
         dist = self.__edge_dist(
@@ -264,7 +314,7 @@ class GraphToTreeMatcher:
         for tree_n in self.tree.nodes():
 
             constraint = pylp.LinearConstraint()
-            for match_indicator in self.t2g_match_indicators[tree_n].values():
+            for match_indicator in self.t2g_match_indicators.get(tree_n, {}).values():
                 constraint.set_coefficient(match_indicator, 1)
             constraint.set_relation(pylp.Relation.Equal)
             constraint.set_value(1)
@@ -274,7 +324,7 @@ class GraphToTreeMatcher:
         for tree_e in self.tree.edges():
 
             constraint = pylp.LinearConstraint()
-            for match_indicator in self.t2g_match_indicators[tree_e].values():
+            for match_indicator in self.t2g_match_indicators.get(tree_e, {}).values():
                 constraint.set_coefficient(match_indicator, -1)
             constraint.set_relation(pylp.Relation.LessEqual)
             constraint.set_value(-1)
@@ -291,7 +341,7 @@ class GraphToTreeMatcher:
             self.constraints.add(constraint)
 
         # (2e, 2f)
-        for graph_n in self.graph.nodes:
+        for graph_n in self.graph.nodes():
             for tree_n in self.possible_matches[graph_n]:
                 g2t_n_indicator = self.g2t_match_indicators[graph_n][tree_n]
 
@@ -347,7 +397,7 @@ class GraphToTreeMatcher:
         #   let m_i_cd = SUM(y_ie_cd) over all edges (i, e) in E(G) (number of out edges)
         #   let imbalance = SUM(x_ih * {1 if h==c, -1 if h==d}) over all nodes h in N(T)
         #   constrain n_i_cd - m_i_cd + imbalance = 0
-        for graph_n in self.graph.nodes:
+        for graph_n in self.graph.nodes():
 
             possible_edges = set(
                 tree_e
@@ -389,19 +439,16 @@ class GraphToTreeMatcher:
         #   let N = SUM(degree(c)*x_ic) for all c in V(T) Union None
         #   let y = SUM(y_ai_cd) + SUM(y_ia_cd) for all a adjacent to i, and all (c,d) in E(T)
         #   y - N <= 0
-        for graph_n in self.graph.nodes:
+        for graph_n in self.graph.nodes():
             degree_constraint = pylp.LinearConstraint()
             for tree_n, tree_n_indicator in self.g2t_match_indicators[graph_n].items():
                 n = 2 if tree_n is None else self.tree.degree(tree_n)
                 degree_constraint.set_coefficient(tree_n_indicator, -n)
+            # TODO: support graph being a nx.DiGraph
             for neighbor in self.graph.neighbors(graph_n):
-                for adj_edge_indicator in self.g2t_match_indicators[
-                    (graph_n, neighbor)
-                ].values():
-                    degree_constraint.set_coefficient(adj_edge_indicator, 1)
-                for adj_edge_indicator in self.g2t_match_indicators[
-                    (neighbor, graph_n)
-                ].values():
+                for adj_edge_indicator in self.g2t_match_indicators.get(
+                    (graph_n, neighbor), {}
+                ).values():
                     degree_constraint.set_coefficient(adj_edge_indicator, 1)
 
             degree_constraint.set_relation(pylp.Relation.LessEqual)
