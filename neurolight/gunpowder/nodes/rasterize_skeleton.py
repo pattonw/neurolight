@@ -89,7 +89,7 @@ class RasterizeSkeleton(BatchFilter):
         graph = points.graph
 
         if self.connected_component_labeling:
-            wccs = enumerate(nx.weakly_connected_components(graph))
+            wccs = list(enumerate(nx.weakly_connected_components(graph)))
             if len(wccs) > len(graph.nodes) / 2:
                 logger.warning(
                     f"{self.__name__} can get very slow for large numbers of connected "
