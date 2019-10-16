@@ -32,12 +32,20 @@ class RasterizeSkeleton(BatchFilter):
                 The key of the points to form the skeleton.
         """
 
-    def __init__(self, points, array, array_spec, radius=1.0):
+    def __init__(
+        self,
+        points,
+        array,
+        array_spec,
+        radius=1.0,
+        connected_component_labeling: bool = True,
+    ):
 
         self.points = points
         self.array = array
         self.array_spec = array_spec
         self.radius = radius
+        self.connected_component_labeling = connected_component_labeling
 
     def setup(self):
         self.enable_autoskip()
@@ -80,18 +88,38 @@ class RasterizeSkeleton(BatchFilter):
 
         graph = points.graph
 
-        for i, cc in enumerate(nx.weakly_connected_components(graph)):
-            cc = graph.subgraph(cc)
+        if self.connected_component_labeling:
+            wccs = enumerate(nx.weakly_connected_components(graph))
+            if len(wccs) > len(graph.nodes) / 2:
+                logger.warning(
+                    f"{self.__name__} can get very slow for large numbers of connected "
+                    + f"components! Your graph has {len(wccs)} connected components, "
+                    + f"and {len(graph.nodes)} nodes"
+                )
+            for i, cc in enumerate(nx.weakly_connected_components(graph)):
+                cc = graph.subgraph(cc)
+                binarized = np.zeros_like(array_data, dtype=np.bool)
+                for u, v in cc.edges:
+                    p1 = (cc.nodes[u]["location"] / voxel_size - offset).astype(int)
+                    p2 = (cc.nodes[v]["location"] / voxel_size - offset).astype(int)
+                    binarized = self._rasterize_line_segment(p1, p2, binarized)
+
+                overlap = np.logical_and(
+                    np.logical_and(array_data > 0, array_data != i + 1), binarized
+                )
+                array_data[binarized] = i + 1
+                array_data[overlap] = -1
+        else:
             binarized = np.zeros_like(array_data, dtype=np.bool)
-            for u, v in cc.edges:
-                p1 = (cc.nodes[u]["location"] / voxel_size - offset).astype(int)
-                p2 = (cc.nodes[v]["location"] / voxel_size - offset).astype(int)
+            for u, v in graph.edges:
+                p1 = (graph.nodes[u]["location"] / voxel_size - offset).astype(int)
+                p2 = (graph.nodes[v]["location"] / voxel_size - offset).astype(int)
                 binarized = self._rasterize_line_segment(p1, p2, binarized)
 
             overlap = np.logical_and(
                 np.logical_and(array_data > 0, array_data != i + 1), binarized
             )
-            array_data[binarized] = i + 1
+            array_data[binarized] = 1
             array_data[overlap] = -1
 
         array = Array(
