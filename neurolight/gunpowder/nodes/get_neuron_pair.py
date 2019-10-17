@@ -125,7 +125,7 @@ class GetNeuronPair(BatchProvider):
                 roi=request.array_specs.get(self.arrays[0], request[self.arrays[1]]).roi
             )
         elif any([labels in request for labels in self.labels]):
-            dps[self.points_source] = PointsSpec(
+            dps[self.point_source] = PointsSpec(
                 roi=request.array_specs.get(self.labels[0], request[self.labels[1]]).roi
             )
         else:
@@ -135,7 +135,9 @@ class GetNeuronPair(BatchProvider):
                 )
             )
 
-        dps[self.point_source].roi = dps[self.point_source].roi.grow(growth, growth)
+        dps[self.point_source].roi = dps[self.point_source].roi.grow(
+            growth, growth
+        )
         dps.place_holders[self.array_source] = copy.deepcopy(request[self.arrays[0]])
         dps.place_holders[self.array_source].roi = dps.place_holders[
             self.array_source
@@ -258,10 +260,18 @@ class GetNeuronPair(BatchProvider):
             if k > 10:
                 raise ValueError("Failed to retrieve a pair of neurons!")
 
+            while True:
             points_request_base, base_seed = self.prepare_points(request)
+
+                logger.debug(
+                    f"Requesting base roi: {points_request_base[self.point_source].roi}"
+                )
 
             base_batch = self.upstream_provider.request_batch(points_request_base)
             profiling_stats.merge_with(base_batch.profiling_stats)
+                if len(base_batch[self.point_source].graph.nodes) > 0:
+                    break
+            logger.info("Got base batch")
 
             timing_prepare_base = Timing("prepare base")
             timing_prepare_base.start()
@@ -291,7 +301,7 @@ class GetNeuronPair(BatchProvider):
         distances = np.ones(base_roi.get_shape() / voxel_size)
         for point_id, point in points_base.data.items():
             distances[
-                (Coordinate(point.location) - base_roi.get_begin()) / voxel_size
+                (Coordinate(point.location) - base_roi.get_begin()) // voxel_size
             ] = 0
         distances = distance_transform_edt(distances, sampling=voxel_size)
         gradients = np.gradient(distances, *voxel_size)
@@ -317,7 +327,16 @@ class GetNeuronPair(BatchProvider):
         If they are return the direction vector used to seperate them.
         """
         points_add = self.upstream_provider.request_batch(points_request_add)
+        if len(points_add[self.point_source].graph.nodes()) < 1:
+            return None
         voxel_size = self.spec.get_lcm_voxel_size()
+        return_roi = self._return_roi(request)
+        max_shift = (
+            (np.array(distances.shape) // 2)
+            - ((return_roi.get_shape() // voxel_size) // 2)
+            - 1
+        )
+        logger.info(f"max shift: {max_shift}")
 
         profiling_stats.merge_with(points_add.profiling_stats)
 
@@ -331,22 +350,23 @@ class GetNeuronPair(BatchProvider):
                 gradients.shape, (np.array(gradients.shape[0:3]) // 2)
             )
         )
-        gradient = gradients[tuple(np.array(gradients.shape[0:3]) // 2)]
-        gradient = gradient / np.linalg.norm(gradient)
-        logger.debug("moving along gradient: {}".format(gradient))
 
+        current_shift = np.array([0, 0, 0], dtype=float)
         for i in range(self.shift_attempts):
-            start = self.seperate_by[0] / self.seperate_by[1]
-            slider = i / (self.shift_attempts - 1)
-            fraction = start + slider * (1 - start)
+            logger.debug(f"shifting with {current_shift}")
+            # add a bit of randomness to our current shift
+            # this can help get off of local maxima
+            random = np.random.randn(3)
+            random /= abs(random).max()
+            direction = Coordinate(np.round(current_shift + random).astype(int))
 
-            logger.debug("attempting shift {} of {}".format(i, self.shift_attempts))
-            direction = Coordinate(np.array(self._get_growth()) * gradient * fraction)
+            # crop add points to the new shifted roi
             points_add_shifted = self.process(
                 points_add, -direction, request=request, batch_index=1, inplace=False
             )
-            return_roi = self._return_roi(request)
-            center = (Coordinate(gradients.shape[0:3]) // 2) * voxel_size
+
+            # calculate applicable range of distances for current shift
+            center = (Coordinate(distances.shape) // 2) * voxel_size
             radius = (return_roi.get_shape() // voxel_size) // 2 * voxel_size
             pad = (
                 Coordinate(
@@ -362,15 +382,51 @@ class GetNeuronPair(BatchProvider):
                 )
             )
             logger.debug("slices: {}".format(slices))
+
+            # check if this shift is valid, if not update current_shift
             if self._valid_pair(
                 points_add_shifted[self.point_source].graph, distances[slices]
             ):
-                logger.info("Valid shift found: {}".format(direction))
+                logger.debug(
+                    f"Valid shift found: {direction}\n"
+                    + f"Add roi: {points_add_shifted[self.point_source].spec.roi}\n"
+                )
 
                 timing_process_points.stop()
                 profiling_stats.add(timing_process_points)
                 return direction
-        logger.info("Request failed. New Request!")
+            else:
+                min_dist = float("inf")
+                coord = None
+                gradient = None
+
+                offset = (center - radius + direction) // voxel_size
+
+                # find gradient between closest 2 points
+                for point_attrs in points_add_shifted[
+                    self.point_source
+                ].graph.nodes.values():
+                    coord = tuple(
+                        (point_attrs["location"] // voxel_size + offset).astype(int)
+                    )
+                    if distances[coord] < min_dist:
+                        min_dist = distances[coord]
+                        coord = coord
+                        gradient = gradients[coord]
+
+                # shift allong gradient
+                # gradient is lowest near nodes
+                sign = np.sign(gradient)
+                gradient = (abs(gradient).max() + 0.1 - abs(gradient)) * sign
+                gradient /= abs(gradient).max()
+                logger.info(f"gradient: {gradient} at {coord} with shift {direction}")
+                if min_dist < self.seperate_by[0]:
+                    current_shift += gradient
+                elif min_dist >= self.seperate_by[1]:
+                    current_shift -= gradient
+                np.clip(current_shift, -max_shift, max_shift)
+
+        logger.info(f"Request failed at {current_shift}. New Request!")
 
         timing_process_points.stop()
         profiling_stats.add(timing_process_points)
@@ -510,6 +566,9 @@ class GetNeuronPair(BatchProvider):
         Simply checks for every pair of points, is the distance between them
         greater than the desired seperation criterion.
         """
+        if distances.min() > 0:
+            logger.debug("No base points in this shift!")
+            return False
         min_dist = float("inf")
         voxel_size = self.spec.get_lcm_voxel_size()
         for point_id, point_attrs in add_graph.nodes.items():
