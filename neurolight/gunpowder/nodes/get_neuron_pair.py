@@ -147,23 +147,38 @@ class GetNeuronPair(BatchProvider):
 
         return dps, seed
 
-    def prepare(self, request: BatchRequest, seed: int) -> Tuple[BatchRequest, int]:
+    def prepare(
+        self, request: BatchRequest, seed: int, direction: Coordinate
+    ) -> Tuple[BatchRequest, int]:
         """
         Only request everything with the given seed
         """
-        growth = self._get_growth()
-
         dps = BatchRequest(random_seed=seed)
+        voxel_size = request.get_lcm_voxel_size()
+        direction += Coordinate(np.array(direction) % np.array(voxel_size))
 
         if any([points in request for points in self.points]):
             dps[self.point_source] = copy.deepcopy(request[self.points[0]])
-            dps[self.point_source].roi = dps[self.point_source].roi.grow(growth, growth)
+            dps[self.point_source].roi = (
+                dps[self.point_source]
+                .roi.shift(direction)
+                .snap_to_grid(voxel_size, mode="closest")
+            )
         if any([array in request for array in self.arrays]):
             dps[self.array_source] = copy.deepcopy(request[self.arrays[0]])
-            dps[self.array_source].roi = dps[self.array_source].roi.grow(growth, growth)
+            dps[self.array_source].roi = (
+                dps[self.array_source]
+                .roi.shift(direction)
+                .snap_to_grid(voxel_size, mode="closest")
+            )
+
         if any([labels in request for labels in self.labels]):
             dps[self.label_source] = copy.deepcopy(request[self.labels[0]])
-            dps[self.label_source].roi = dps[self.label_source].roi.grow(growth, growth)
+            dps[self.label_source].roi = (
+                dps[self.label_source]
+                .roi.shift(direction)
+                .snap_to_grid(voxel_size, mode="closest")
+            )
 
         return dps
 
@@ -180,8 +195,8 @@ class GetNeuronPair(BatchProvider):
         timing_prepare = Timing(self, "prepare")
         timing_prepare.start()
 
-        request_base = self.prepare(request, base_seed)
-        request_add = self.prepare(request, add_seed)
+        request_base = self.prepare(request, base_seed, direction)
+        request_add = self.prepare(request, add_seed, -direction)
 
         timing_prepare.stop()
 
@@ -191,8 +206,8 @@ class GetNeuronPair(BatchProvider):
         timing_process = Timing(self, "process")
         timing_process.start()
 
-        base = self.process(base, direction, request=request, batch_index=0)
-        add = self.process(add, -direction, request=request, batch_index=1)
+        base = self.process(base, Coordinate([0, 0, 0]), request=request, batch_index=0)
+        add = self.process(add, -Coordinate([0, 0, 0]), request=request, batch_index=1)
 
         batch = self.merge_batches(base, add)
 
