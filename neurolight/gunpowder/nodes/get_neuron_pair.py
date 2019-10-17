@@ -64,12 +64,14 @@ class GetNeuronPair(BatchProvider):
         points: Tuple[PointsKey, PointsKey],
         arrays: Tuple[ArrayKey, ArrayKey],
         labels: Tuple[ArrayKey, ArrayKey],
+        nonempty_placeholder: PointsKey = None,
         seperate_by: Tuple[float, float] = (0.0, 1.0),
         shift_attempts: int = 50,
         request_attempts: int = 3,
         spec: ProviderSpec = None,
     ):
         self.point_source = point_source
+        self.nonempty_placeholder = nonempty_placeholder
         self.array_source = array_source
         self.label_source = label_source
         self.points = points
@@ -138,6 +140,8 @@ class GetNeuronPair(BatchProvider):
         dps[self.point_source].roi = dps[self.point_source].roi.grow(
             growth, growth
         )
+        if self.point_source is not None:
+            dps.place_holders[self.nonempty_placeholder] = dps[self.point_source]
         dps.place_holders[self.array_source] = copy.deepcopy(request[self.arrays[0]])
         dps.place_holders[self.array_source].roi = dps.place_holders[
             self.array_source
@@ -156,6 +160,43 @@ class GetNeuronPair(BatchProvider):
         Only request everything with the given seed
         """
         dps = BatchRequest(random_seed=seed)
+
+        if self.nonempty_placeholder is not None:
+            # Handle nonempty placeholder
+            growth = self._get_growth()
+
+            if any([points in request for points in self.points]):
+                dps.place_holders[self.nonempty_placeholder] = copy.deepcopy(
+                    request.points_specs.get(self.points[0], request[self.points[1]])
+                )
+            elif any([array in request for array in self.arrays]):
+                dps.place_holders[self.nonempty_placeholder] = copy.deepcopy(
+                    PointsSpec(
+                        roi=request.array_specs.get(
+                            self.arrays[0], request[self.arrays[1]]
+                        ).roi
+                    )
+                )
+            elif any([labels in request for labels in self.labels]):
+                dps.place_holders[self.nonempty_placeholder] = copy.deepcopy(
+                    PointsSpec(
+                        roi=request.array_specs.get(
+                            self.labels[0], request[self.labels[1]]
+                        ).roi
+                    )
+                )
+            else:
+                raise ValueError(
+                    "One of the following must be requested: {}, {}, {}".format(
+                        self.points, self.arrays, self.labels
+                    )
+                )
+
+            dps.place_holders[self.nonempty_placeholder].roi = dps.place_holders[
+                self.nonempty_placeholder
+            ].roi.grow(growth, growth)
+
+        # handle smaller requests
         voxel_size = request.get_lcm_voxel_size()
         direction += Coordinate(np.array(direction) % np.array(voxel_size))
 
