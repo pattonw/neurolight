@@ -1,4 +1,5 @@
 from pathlib import Path
+import itertools
 
 from swc_base_test import SWCBaseTest
 from neurolight.gunpowder.nodes.swc_file_source import SwcFileSource
@@ -37,6 +38,7 @@ class GetNeuronPairTest(SWCBaseTest):
 
         # read arrays
         swc_source = PointsKey("SWC_SOURCE")
+        ensure_nonempty = PointsKey("ENSURE_NONEMPTY")
         labels_source = ArrayKey("LABELS_SOURCE")
         img_source = ArrayKey("IMG_SOURCE")
         img_swc = PointsKey("IMG_SWC")
@@ -52,7 +54,12 @@ class GetNeuronPairTest(SWCBaseTest):
 
         # Get points from test swc
         swc_file_source = SwcFileSource(
-            path, [swc_source], [PointsSpec(roi=Roi((-10, -10, -10), (31, 31, 31)))]
+            path,
+            [swc_source, ensure_nonempty],
+            [
+                PointsSpec(roi=Roi((-10, -10, -10), (31, 31, 31))),
+                PointsSpec(roi=Roi((-10, -10, -10), (31, 31, 31))),
+            ],
         )
         # Create an artificial image source by rasterizing the points
         image_source = (
@@ -93,11 +100,12 @@ class GetNeuronPairTest(SWCBaseTest):
         skeleton += (
             (swc_file_source, image_source, label_source)
             + MergeProvider()
-            + RandomLocation(ensure_nonempty=swc_source, ensure_centered=True)
+            + RandomLocation(ensure_nonempty=ensure_nonempty, ensure_centered=True)
         )
 
         pipeline = skeleton + GetNeuronPair(
             point_source=swc_source,
+            nonempty_placeholder=ensure_nonempty,
             array_source=imgs,
             label_source=labels,
             points=(points_a, points_b),
@@ -128,3 +136,16 @@ class GetNeuronPairTest(SWCBaseTest):
                         for x in [points_a, points_b, img_a, img_b, labels_a, labels_b]
                     ]
                 )
+
+                min_dist = 5
+                for a_attrs, b_attrs in itertools.product(
+                    batch[points_a].graph.nodes.values(),
+                    batch[points_b].graph.nodes.values(),
+                ):
+                    min_dist = min(
+                        min_dist,
+                        np.linalg.norm(a_attrs["location"] - b_attrs["location"]),
+                    )
+
+                self.assertLessEqual(min_dist, 3)
+                self.assertGreaterEqual(min_dist, 1)

@@ -50,8 +50,6 @@ class TopologicalMatcher(BatchFilter):
         graph = copy.deepcopy(batch[self.G].graph)
         tree = copy.deepcopy(batch[self.T].graph)
 
-        profiling_stats = batch.profiling_stats
-
         logger.debug("initializing matcher")
         final_solution = SpatialGraph()
         for wcc in nx.weakly_connected_components(tree):
@@ -61,7 +59,6 @@ class TopologicalMatcher(BatchFilter):
                 subgraph,
                 match_distance_threshold=self.match_distance_threshdold,
                 node_balance=self.node_balance,
-                profiling_stats=profiling_stats,
             )
             logger.debug("optimizing!")
             try:

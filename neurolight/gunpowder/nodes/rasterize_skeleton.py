@@ -73,7 +73,7 @@ class RasterizeSkeleton(BatchFilter):
     def process(self, batch, request):
 
         points = batch.points[self.points]
-        assert len(points.data.items()) > 0, "No Swc Points in enlarged Roi."
+        # assert len(points.data.items()) > 0, "No Swc Points in enlarged Roi."
         assert isinstance(points, GraphPoints), "Rasterize skeleton needs a Graph."
 
         voxel_size = self.array_spec.voxel_size
@@ -92,7 +92,7 @@ class RasterizeSkeleton(BatchFilter):
             wccs = list(enumerate(nx.weakly_connected_components(graph)))
             if len(wccs) > len(graph.nodes) / 2:
                 logger.warning(
-                    f"{self.__name__} can get very slow for large numbers of connected "
+                    f"{self.name()} can get very slow for large numbers of connected "
                     + f"components! Your graph has {len(wccs)} connected components, "
                     + f"and {len(graph.nodes)} nodes"
                 )
@@ -117,7 +117,7 @@ class RasterizeSkeleton(BatchFilter):
                 binarized = self._rasterize_line_segment(p1, p2, binarized)
 
             overlap = np.logical_and(
-                np.logical_and(array_data > 0, array_data != i + 1), binarized
+                np.logical_and(array_data > 0, array_data != 1), binarized
             )
             array_data[binarized] = 1
             array_data[overlap] = -1

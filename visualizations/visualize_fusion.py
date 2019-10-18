@@ -26,7 +26,7 @@ logging.getLogger(neurolight.gunpowder.nodes.rasterize_skeleton.__name__).setLev
 
 
 SEP_DIST = int(sys.argv[1])
-SEPERATE_DISTANCE = [SEP_DIST * 0.7, SEP_DIST * 1.3]
+SEPERATE_DISTANCE = [SEP_DIST * 0.9, SEP_DIST * 1.1]
 
 
 class BinarizeGt(gp.BatchFilter):
@@ -101,6 +101,7 @@ raw = gp.ArrayKey("RAW")
 consensus = gp.PointsKey("CONSENSUS")
 skeletonization = gp.PointsKey("SKELETONIZATION")
 matched = gp.PointsKey("MATCHED")
+nonempty_placeholder = gp.PointsKey("NONEMPTY")
 labels = gp.ArrayKey("LABELS")
 
 # array keys for base volume
@@ -167,7 +168,7 @@ data_sources = tuple(
         GraphSource(
             filename=str(
                 Path(
-                    "/groups/mousebrainmicro/home/pattonw/Code/Packages/neurolight/skeletonization_carved-002-100.obj"
+                    "/groups/mousebrainmicro/home/pattonw/Code/Packages/neurolight/visualizations/skeletonization_carved-002-100.obj"
                 ).absolute()
             ),
             points=(skeletonization,),
@@ -177,17 +178,19 @@ data_sources = tuple(
         GraphSource(
             filename=str(
                 Path(
-                    "/groups/mousebrainmicro/home/pattonw/Code/Packages/neurolight/consensus-002.obj"
+                    "/groups/mousebrainmicro/home/pattonw/Code/Packages/neurolight/visualizations/consensus-002.obj"
                 ).absolute()
             ),
-            points=(consensus,),
+            points=(consensus, nonempty_placeholder),
             scale=voxel_size,
             transpose=(2, 1, 0),
         ),
     )
     + gp.MergeProvider()
     + gp.RandomLocation(
-        ensure_nonempty=consensus, ensure_centered=True, point_balance_radius=700
+        ensure_nonempty=nonempty_placeholder,
+        ensure_centered=True,
+        point_balance_radius=700,
     )
     + TopologicalMatcher(skeletonization, consensus, matched)
     + RasterizeSkeleton(
@@ -225,8 +228,9 @@ pipeline = (
         (raw_base, raw_add),
         (labels_base, labels_add),
         seperate_by=SEPERATE_DISTANCE,
-        shift_attempts=50,
+        shift_attempts=int(SEPERATE_DISTANCE[1]) * 2,
         request_attempts=10,
+        nonempty_placeholder=nonempty_placeholder,
     )
     + FusionAugment(
         raw_base,
@@ -256,6 +260,8 @@ pipeline = (
             labels_base: "volumes/labels_base",
             labels_add: "volumes/labels_add",
             labels_fg_bin: "volumes/labels_fg_bin",
+            matched_base: "matched_base",
+            matched_add: "matched_add",
         },
         every=1,
     )

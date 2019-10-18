@@ -26,33 +26,103 @@ logger = logging.getLogger(__name__)
 
 
 class GetNeuronPair(BatchProvider):
-    """Retrieves a pair of neurons represented by both points in an swc style
-        Point set and volumetric image data.
+    """
+        GetNeuronPair is given a point_source, array_source, and label_source. From
+        Two requests are made to each source to get two copies of each input.
+
+        Since we need to be able to specify a certain distance between the two neurons
+        this node also handles this need efficiently by first requesting only the points
+        in a larger field of view and then finding a subregions of those arrays such that
+        the minimum distance between the two sets of points is within a user defined
+        acceptable range.
 
         Args:
 
-            point_keys (:class:``Tuple[PointsKey]``):
+            point_source:
 
-                A pair of PointsKeys from which two sets of points will be taken.
-                If a single PointsKey is provided, both sets of points will be
-                taken from the same dataset
+                A Key containing a set of points. This key will be queried twice
+                and stored using the keys in `point_keys`
 
-            array_keys (:class:``Tuple[ArraySpec]``):
+            array_source:
 
-                A pair of ArrayKeys from which two sets of images will be taken.
-                If a single ArrayKey is provided, both sets of images will be
-                taken from the same dataset
+                A key containing the voxel data counterpart to the point_source.
+                Will also be queried twice and its values split between the keys
+                in `array_keys`.
 
-            outputKeys (:class:``List[Tuple[PointsKey, ArrayKey]]``):
-                The output keys in the form [(PointsKey, ArrayKey), (PointsKey, ArrayKey)].
-                Where each Pair will have matching rois
+            label_source:
 
-            seperate_by (:class:``float``, optional):
-                Distance in world units between the two center nodes.
-                It is guaranteed that no other points in two point sets will be closer than
-                this distance.
-                This distance will be approximated since the volumetric data will be shifted
-                on its grid.
+                A Key containing the voxel wise labels corresponding to the values
+                in `array_source`. Will Also be queried twice.
+
+            points:
+
+                A pair of PointsKeys into which two sets of points will be stored.
+
+            arrays:
+
+                A pair of ArrayKeys into which two sets of images will be stored.
+            
+            labels:
+
+                A pair of ArrayKeys into which two sets of labels will be stored.
+
+            nonempty_placeholder:
+
+                The need for a nonempty placeholder arises from the following problem:
+                
+                We first request larger rois to hopefully guarantee we can obtain subsets
+                that contain points sufficiently far away from each other.
+            
+                Roi A: |------------------------------------------------------------|
+                Roi B: |------------------------------------------------------------|
+
+                Disregarding the location of points for now, assume we found valid sub rois:
+
+                Roi a: |------------------|
+                Roi b:                                   |------------------|
+
+                Now we could simply request the whole Roi A and crop once we have it,
+                or we could make a smaller request. However we assume there is a random
+                location node upstream of us.
+                We generally want to ensure nonempty on the the points, which means the
+                randomness from the random location comes from randomly picking a point,
+                and adding the sufficient shift to bring the requested roi to that point.
+                Thus, regardless of what shift you apply to your roi of interest, the
+                RandomLocation node would pick the same point, and provide a shift negating
+                any change you make. The solution is to provide an placeholder, which
+                will be assigned Roi A. This means that random location will pick the same
+                point and the same shift to return you to the same location, but now you
+                can request any smaller roi relative to the larger and it will be
+                appropriately shifted.
+
+            seperate_by:
+                
+                A range of acceptable minimum distances between the two sets of points.
+                Note: 
+                1) It is only guaranteed that the points in nonempty_placeholder are
+                seperated by this distance if provided. This can greatly save on time
+                if processing points is expensive, but may result in slightly different
+                distances.
+                2) Distances may not be exactly replicable. Elastic augment for example
+                will create different transformations for different roi sizes, not only
+                different random seeds. This means that the smaller request rois may result
+                in different transforms applied on the first pass checking the distance,
+                and the second pass that returns all of your data.
+
+            shift_attempts:
+
+                The number of attempts to shift the fov's in the larger rois to get smaller
+                rois that are seperated. It may be beneficial to use some multiple of the
+                seperate distance since each shift has a step size constraint which might
+                make it difficult to seperate by a sufficient distance given too few steps
+
+            request_attempts:
+
+                It is possible that two point sets cannot be seperated by the desired distance.
+                In this case, we will keep roi A, but generate a new roi B and try again.
+                request_attempts gives the maximum number of times a new request will be made.
+
+            spec
 
         """
 
@@ -64,11 +134,10 @@ class GetNeuronPair(BatchProvider):
         points: Tuple[PointsKey, PointsKey],
         arrays: Tuple[ArrayKey, ArrayKey],
         labels: Tuple[ArrayKey, ArrayKey],
-        nonempty_placeholder: PointsKey = None,
+        nonempty_placeholder: Optional[PointsKey] = None,
         seperate_by: Tuple[float, float] = (0.0, 1.0),
         shift_attempts: int = 50,
         request_attempts: int = 3,
-        spec: ProviderSpec = None,
     ):
         self.point_source = point_source
         self.nonempty_placeholder = nonempty_placeholder
@@ -110,7 +179,7 @@ class GetNeuronPair(BatchProvider):
 
     def prepare_points(self, request: BatchRequest) -> Tuple[BatchRequest, int]:
         """
-        Only request the points, keeping track of the seed
+        Request either point_source or nonempty_placeholder
         """
 
         growth = self._get_growth()
@@ -118,16 +187,22 @@ class GetNeuronPair(BatchProvider):
 
         dps = BatchRequest(random_seed=seed)
 
+        point_key = (
+            self.point_source
+            if self.nonempty_placeholder is None
+            else self.nonempty_placeholder
+        )
+
         if any([points in request for points in self.points]):
-            dps[self.point_source] = request.points_specs.get(
+            dps[point_key] = request.points_specs.get(
                 self.points[0], request[self.points[1]]
             )
         elif any([array in request for array in self.arrays]):
-            dps[self.point_source] = PointsSpec(
+            dps[point_key] = PointsSpec(
                 roi=request.array_specs.get(self.arrays[0], request[self.arrays[1]]).roi
             )
         elif any([labels in request for labels in self.labels]):
-            dps[self.point_source] = PointsSpec(
+            dps[point_key] = PointsSpec(
                 roi=request.array_specs.get(self.labels[0], request[self.labels[1]]).roi
             )
         else:
@@ -137,11 +212,10 @@ class GetNeuronPair(BatchProvider):
                 )
             )
 
-        dps[self.point_source].roi = dps[self.point_source].roi.grow(
+        dps[point_key].roi = dps[point_key].roi.grow(
             growth, growth
         )
-        if self.point_source is not None:
-            dps.place_holders[self.nonempty_placeholder] = dps[self.point_source]
+
         dps.place_holders[self.array_source] = copy.deepcopy(request[self.arrays[0]])
         dps.place_holders[self.array_source].roi = dps.place_holders[
             self.array_source
@@ -231,6 +305,8 @@ class GetNeuronPair(BatchProvider):
         valid points are found.
         """
 
+        logger.info(f"growing request by {self._get_growth()}")
+
         base_seed, add_seed, direction, prepare_profiling_stats = self.get_valid_seeds(
             request
         )
@@ -239,7 +315,9 @@ class GetNeuronPair(BatchProvider):
         timing_prepare.start()
 
         request_base = self.prepare(request, base_seed, direction)
+        logger.debug(f"base_request shrank to {request_base[self.point_source].roi}")
         request_add = self.prepare(request, add_seed, -direction)
+        logger.debug(f"add_request shrank to {request_add[self.point_source].roi}")
 
         timing_prepare.stop()
 
@@ -251,6 +329,23 @@ class GetNeuronPair(BatchProvider):
 
         base = self.process(base, Coordinate([0, 0, 0]), request=request, batch_index=0)
         add = self.process(add, -Coordinate([0, 0, 0]), request=request, batch_index=1)
+
+        if (
+            len(add[self.point_source].graph.nodes) > 1
+            and len(base[self.point_source].graph.nodes) > 1
+        ):
+            min_dist = min(
+                [
+                    np.linalg.norm(a["location"] - b["location"])
+                    for a, b in itertools.product(
+                        base[self.point_source].graph.nodes.values(),
+                        add[self.point_source].graph.nodes.values(),
+                    )
+                ]
+            )
+            logger.info(f"Got a final min dist of {min_dist}")
+        else:
+            logger.warning("Got a final min dist of inf")
 
         batch = self.merge_batches(base, add)
 
@@ -302,15 +397,15 @@ class GetNeuronPair(BatchProvider):
                 raise ValueError("Failed to retrieve a pair of neurons!")
 
             while True:
-            points_request_base, base_seed = self.prepare_points(request)
+                points_request_base, base_seed = self.prepare_points(request)
 
                 logger.debug(
-                    f"Requesting base roi: {points_request_base[self.point_source].roi}"
+                    f"Requesting base roi: {points_request_base[self.nonempty_placeholder].roi}"
                 )
 
-            base_batch = self.upstream_provider.request_batch(points_request_base)
-            profiling_stats.merge_with(base_batch.profiling_stats)
-                if len(base_batch[self.point_source].graph.nodes) > 0:
+                base_batch = self.upstream_provider.request_batch(points_request_base)
+                profiling_stats.merge_with(base_batch.profiling_stats)
+                if len(base_batch[self.nonempty_placeholder].graph.nodes) > 0:
                     break
             logger.info("Got base batch")
 
@@ -318,11 +413,14 @@ class GetNeuronPair(BatchProvider):
             timing_prepare_base.start()
 
             distance_transform, gradients = self.prepare_base(
-                base_batch[self.point_source]
+                base_batch[self.nonempty_placeholder]
             )
 
             for _ in range(self.request_attempts):
                 points_request_add, add_seed = self.prepare_points(request)
+                logger.debug(
+                    f"Requesting add roi: {points_request_add[self.nonempty_placeholder].roi}"
+                )
                 direction = self.check_valid_requests(
                     distance_transform,
                     gradients,
@@ -331,15 +429,16 @@ class GetNeuronPair(BatchProvider):
                     profiling_stats,
                 )
                 if direction is not None:
+                    logger.info("Got add batch")
                     return base_seed, add_seed, direction, profiling_stats
                 else:
                     continue
 
     def prepare_base(self, points_base):
-        logger.debug("preparing base dist and gradients")
         base_roi = points_base.spec.roi
         voxel_size = self.spec.get_lcm_voxel_size()
         distances = np.ones(base_roi.get_shape() / voxel_size)
+        logger.info(f"preparing base dist and gradients of shape: {distances.shape}")
         for point_id, point in points_base.data.items():
             distances[
                 (Coordinate(point.location) - base_roi.get_begin()) // voxel_size
@@ -347,11 +446,11 @@ class GetNeuronPair(BatchProvider):
         distances = distance_transform_edt(distances, sampling=voxel_size)
         gradients = np.gradient(distances, *voxel_size)
         gradients = [
-            gaussian_filter(gradient, sigma=10 / np.array(voxel_size))
+            gaussian_filter(gradient, sigma=self.seperate_by[0] / np.array(voxel_size))
             for gradient in gradients
         ]
         gradients = np.stack(gradients, axis=-1)
-        logger.debug("finished preparing base dist and gradients")
+        logger.info("finished preparing base dist and gradients")
 
         return distances, gradients
 
@@ -368,7 +467,7 @@ class GetNeuronPair(BatchProvider):
         If they are return the direction vector used to seperate them.
         """
         points_add = self.upstream_provider.request_batch(points_request_add)
-        if len(points_add[self.point_source].graph.nodes()) < 1:
+        if len(points_add[self.nonempty_placeholder].graph.nodes()) < 1:
             return None
         voxel_size = self.spec.get_lcm_voxel_size()
         return_roi = self._return_roi(request)
@@ -384,7 +483,9 @@ class GetNeuronPair(BatchProvider):
         timing_process_points = Timing("process points")
         timing_process_points.start()
         logger.debug(
-            "Points add has {} points".format(len(points_add[self.point_source].data))
+            "Points add has {} points".format(
+                len(points_add[self.nonempty_placeholder].data)
+            )
         )
         logger.debug(
             "gradients shape: {}, accessing: {}".format(
@@ -422,15 +523,17 @@ class GetNeuronPair(BatchProvider):
                     (center + radius + direction + voxel_size + pad) // voxel_size,
                 )
             )
-            logger.debug("slices: {}".format(slices))
+            logger.info(f"{center}, {radius}, {direction}, {pad}")
+            logger.info("slices: {}".format(slices))
+            logger.info(f"distances: {distances.shape}")
 
             # check if this shift is valid, if not update current_shift
             if self._valid_pair(
-                points_add_shifted[self.point_source].graph, distances[slices]
+                points_add_shifted[self.nonempty_placeholder].graph, distances[slices]
             ):
                 logger.debug(
                     f"Valid shift found: {direction}\n"
-                    + f"Add roi: {points_add_shifted[self.point_source].spec.roi}\n"
+                    + f"Add roi: {points_add_shifted[self.nonempty_placeholder].spec.roi}\n"
                 )
 
                 timing_process_points.stop()
@@ -445,7 +548,7 @@ class GetNeuronPair(BatchProvider):
 
                 # find gradient between closest 2 points
                 for point_attrs in points_add_shifted[
-                    self.point_source
+                    self.nonempty_placeholder
                 ].graph.nodes.values():
                     coord = tuple(
                         (point_attrs["location"] // voxel_size + offset).astype(int)
@@ -457,37 +560,19 @@ class GetNeuronPair(BatchProvider):
 
                 # shift allong gradient
                 # gradient is lowest near nodes
-                sign = np.sign(gradient)
-                gradient = (abs(gradient).max() + 0.1 - abs(gradient)) * sign
-                gradient /= abs(gradient).max()
+                gradient /= abs(gradient).max() if abs(gradient).max() > 0 else 1
                 logger.info(f"gradient: {gradient} at {coord} with shift {direction}")
                 if min_dist < self.seperate_by[0]:
                     current_shift += gradient
                 elif min_dist >= self.seperate_by[1]:
                     current_shift -= gradient
-                np.clip(current_shift, -max_shift, max_shift)
+                current_shift = np.clip(current_shift, -max_shift, max_shift)
 
         logger.info(f"Request failed at {current_shift}. New Request!")
 
         timing_process_points.stop()
         profiling_stats.add(timing_process_points)
         return None
-
-    def random_direction(self) -> Coordinate:
-        # there should be a better way of doing this. If distances are small,
-        # the rounding may make a big difference. Rounding (1.3, 1.3, 1.3) would
-        # give a euclidean distance of ~1.7 instead of ~2.25
-        # A better solution might be to do a distance transform on an array with a centered
-        # dot and then find all potential moves that have a distance equal to delta +- 0.5
-        voxel_size = np.array(self.spec[self.array_source].voxel_size)  # should be lcm
-        random_direction = np.random.randn(len(voxel_size))
-        random_direction /= np.linalg.norm(random_direction)  # unit vector
-        random_direction *= np.max(self.seperate_by)  # physical units
-        random_direction = (
-            (np.round(random_direction / voxel_size) + 1) // 2
-        ) * voxel_size  # physical units rounded to nearest voxel size
-        random_direction = Coordinate(random_direction)
-        return random_direction
 
     def process(
         self,
@@ -502,12 +587,13 @@ class GetNeuronPair(BatchProvider):
 
         logger.debug("processing")
         points = batch.points.get(self.point_source, None)
+        placeholder = batch.points.get(self.nonempty_placeholder, None)
         array = batch.arrays.get(self.array_source, None)
         label = batch.arrays.get(self.label_source, None)
 
         # Shift and crop points and array
         points, array, label = self._shift_and_crop(
-            points,
+            points if points is not None else placeholder,
             array,
             label,
             direction=direction,
@@ -516,6 +602,8 @@ class GetNeuronPair(BatchProvider):
         )
         if points is not None:
             batch.points[self.point_source] = points
+        if placeholder is not None:
+            batch.points[self.nonempty_placeholder] = placeholder
         if array is not None:
             batch.arrays[self.array_source] = array
         if label is not None:
@@ -595,7 +683,7 @@ class GetNeuronPair(BatchProvider):
         are a certain distance apart.
         """
         voxel_size = np.array(self.spec[self.array_source].voxel_size)
-        distance = np.array((np.max(self.seperate_by),) * len(voxel_size))
+        distance = np.array((np.mean(self.seperate_by),) * len(voxel_size))
         # voxel shift is rounded up to the nearest voxel in each axis
         voxel_shift = (distance + voxel_size - 1) // voxel_size
         # expand positive and negative sides enough to contain any desired shift
