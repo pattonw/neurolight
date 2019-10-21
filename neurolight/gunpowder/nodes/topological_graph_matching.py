@@ -6,13 +6,14 @@ from gunpowder import (
     SpatialGraph,
     GraphPoints,
 )
-from neurolight.match_graph_to_tree import GraphToTreeMatcher
+from funlib.match.graph_to_tree_matcher import GraphToTreeMatcher
 import networkx as nx
 
 import copy
 import logging
 from typing import Optional, Set, Hashable
 from pathlib import Path
+import pickle
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ class TopologicalMatcher(BatchFilter):
                 matched_component = SpatialGraph()
 
                 if self.failures is not None:
-                    self.__save_failed_component(graph, tree, wcc)
+                    self.__save_failed_matching(graph, tree, wcc)
             logger.debug("solution found!")
 
             try:
@@ -84,14 +85,15 @@ class TopologicalMatcher(BatchFilter):
                 # write failing cases out to disk so that they can be tested
                 # and solved later.
                 logging.warning(
-                    "matcher tried to use a skeleton node in the matching of two seperate connected component!"
+                    "matcher tried to use a skeleton node in the "
+                    "matching of two seperate connected component!"
                 )
                 # In this case, the matcher may have assigned ambiguous ground truth and so we
                 # should not allow it to pass as if it were valid
                 final_solution = SpatialGraph()
 
                 if self.failures is not None:
-                    self.__save_failed_graph(graph, tree)
+                    self.__save_failed_matching(graph, tree)
                 break
 
         result = GraphPoints._from_graph(
@@ -100,10 +102,19 @@ class TopologicalMatcher(BatchFilter):
 
         batch[self.matched] = result
 
-    def __save_failed_component(
-        self, graph: SpatialGraph, tree: SpatialGraph, component: Set[Hashable]
+    def __save_failed_matchin(
+        self,
+        graph: SpatialGraph,
+        tree: SpatialGraph,
+        component: Optional[Set[Hashable]] = None,
     ):
-        pass
-
-    def __save_failed_graph(self, graph: SpatialGraph, tree: SpatialGraph):
-        pass
+        """
+        On matching failure, save the graph, tree and component for which the matching failed.
+        Only saves up to 100 failures. After that point it will simply stop saving them.
+        """
+        if self.failures.is_dir():
+            count = len(list(self.failures.iterdir())) < 100
+            if count >= 100:
+                return
+            data = {"graph": graph, "tree": tree, "component": component}
+            pickle.dump(data, f"{count:03}.obj")
