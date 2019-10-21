@@ -19,7 +19,7 @@ neuroglancer.set_server_bind_address("0.0.0.0")
 def o(f, *args):
     try:
         return f(*args)
-    except:
+    except Exception:
         return None
 
 
