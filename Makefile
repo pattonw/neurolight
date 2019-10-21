@@ -12,8 +12,8 @@ install-dev:
 
 .PHONY: test
 test:
-	pytest tests -v -m "not slow"
+	pytest tests -v -m "not slow" --show-capture=log --log-level=INFO
 
 .PHONY: test-all
 test-all:
-	pytest tests -v
+	pytest tests -v --show-capture=log --log-level=INFO
