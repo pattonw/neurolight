@@ -60,6 +60,7 @@ class TopologicalMatcher(BatchFilter):
                 subgraph,
                 match_distance_threshold=self.match_distance_threshdold,
                 node_balance=self.node_balance,
+                use_gurobi=True,
             )
             logger.debug("optimizing!")
             try:
@@ -75,7 +76,7 @@ class TopologicalMatcher(BatchFilter):
                 matched_component = SpatialGraph()
 
                 if self.failures is not None:
-                    self.__save_failed_matching(graph, tree, wcc)
+                    self.__save_failed_matching(graph, tree, wcc, batch_id=batch.id)
             logger.debug("solution found!")
 
             try:
@@ -93,7 +94,7 @@ class TopologicalMatcher(BatchFilter):
                 final_solution = SpatialGraph()
 
                 if self.failures is not None:
-                    self.__save_failed_matching(graph, tree)
+                    self.__save_failed_matching(graph, tree, batch_id=batch.id)
                 break
 
         result = GraphPoints._from_graph(
@@ -102,19 +103,25 @@ class TopologicalMatcher(BatchFilter):
 
         batch[self.matched] = result
 
-    def __save_failed_matchin(
+    def __save_failed_matching(
         self,
         graph: SpatialGraph,
         tree: SpatialGraph,
         component: Optional[Set[Hashable]] = None,
+        batch_id: Optional[int] = None,
     ):
         """
         On matching failure, save the graph, tree and component for which the matching failed.
         Only saves up to 100 failures. After that point it will simply stop saving them.
         """
+        if not self.failures.exists():
+            self.failures.mkdir()
         if self.failures.is_dir():
-            count = len(list(self.failures.iterdir())) < 100
-            if count >= 100:
+            count = len(list(self.failures.iterdir()))
+            if count >= 1000:
                 return
             data = {"graph": graph, "tree": tree, "component": component}
-            pickle.dump(data, f"{count:03}.obj")
+            filename = (
+                f"{count:03}.obj" if batch_id is None else f"{count:03}_{batch_id}.obj"
+            )
+            pickle.dump(data, (self.failures / filename).open("wb"))
