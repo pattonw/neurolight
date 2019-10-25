@@ -19,7 +19,7 @@ def parse_npy_graph(filename):
                 (key, array)
                 for key, array in [
                     ("node_ids", node_ids),
-                    ("locations", locations),
+                    ("location", locations),
                     ("point_type", point_type),
                     ("radius", radius),
                     ("neuron_part", neuron_part),
