@@ -8,45 +8,24 @@ import networkx as nx
 import json
 import random
 import sys
+from pathlib import Path
 
 from funlib.show.neuroglancer import add_layer
-
-f = sys.argv[1]
 
 neuroglancer.set_server_bind_address("0.0.0.0")
 
 
-def o(f, *args):
-    try:
-        return f(*args)
-    except Exception:
-        return None
-
-
-voxel_size = daisy.Coordinate([10, 3, 3])
-
-raw = o(daisy.open_ds, f, "volumes/raw")
-
-print(raw.shape)
-
-consensus = h5py.File(f).get("consensus", None)
-skeletonization = h5py.File(f).get("skeletonization", None)
-print(f"Skeletonization has shape {skeletonization.shape}")
-matched = h5py.File(f).get("matched", None)
-
-
-def build_trees_from_swc(swc_rows):
-    if swc_rows is None or len(swc_rows) == 0:
+def build_trees(edge_rows, voxel_size):
+    if edge_rows is None or len(edge_rows) == 0:
         return None
     trees = nx.DiGraph()
-    pb = []
     pbs = {
         int(node_id): node_location
         for node_id, node_location in zip(
-            tuple(swc_rows[:, 0]), tuple(swc_rows[:, 1:-1])
+            tuple(edge_rows[:, 0]), tuple(edge_rows[:, 1:-1])
         )
     }
-    for row in swc_rows:
+    for row in edge_rows:
         u = int(row[0])
         v = int(row[-1])
 
@@ -67,10 +46,9 @@ def build_trees_from_swc(swc_rows):
 
         trees.add_edge(u, v, d=np.linalg.norm(pos_u - pos_v))
     return trees
-    s.layers.append(name="trees", layer=neuroglancer.AnnotationLayer(annotations=pb))
 
 
-def add_trees(trees, node_id, name, visible=False):
+def add_trees(s, trees, node_id, name, visible=False):
     if trees is None:
         return None
     for i, cc_nodes in enumerate(nx.weakly_connected_components(trees)):
@@ -95,20 +73,25 @@ def add_trees(trees, node_id, name, visible=False):
         )
 
 
-viewer = neuroglancer.Viewer()
-with viewer.txn() as s:
-    if raw is not None:
-        add_layer(s, raw, "volume", shader="rgb", c=[0, 0, 0])
+def visualize_hdf5(hdf5_file: Path, voxel_size):
+    voxel_size = daisy.Coordinate(voxel_size)
+    dataset = h5py.File(hdf5_file)
+    volumes = list(dataset.get("volumes", {}).keys())
+    points = list(dataset.get("points", {}).keys())
 
-    node_id = itertools.count(start=1)
+    viewer = neuroglancer.Viewer()
+    with viewer.txn() as s:
+        for volume in volumes:
+            v = daisy.open_ds(str(hdf5_file.absolute()), f"volumes/{volume}")
+            print(v.roi)
+            add_layer(
+                s, daisy.open_ds(str(hdf5_file.absolute()), f"volumes/{volume}"), volume
+            )
 
-    consensus = build_trees_from_swc(consensus)
-    skeletonization = build_trees_from_swc(skeletonization)
-    matched = build_trees_from_swc(matched)
+        node_id = itertools.count(start=1)
+        for point_set in points:
+            components = build_trees(dataset["points"][point_set], voxel_size)
+            add_trees(s, components, node_id, name=point_set)
+    print(viewer)
+    input("Hit ENTER to quit!")
 
-    add_trees(consensus, node_id, name="Consensus", visible=True)
-    add_trees(skeletonization, node_id, name="Skeletonization", visible=True)
-    add_trees(matched, node_id, name="Matched", visible=True)
-
-print(viewer)
-input("Hit ENTER to quit!")
