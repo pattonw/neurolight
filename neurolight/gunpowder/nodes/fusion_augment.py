@@ -3,6 +3,7 @@ from gunpowder import Array, BatchFilter, BatchRequest, PointsSpec
 from scipy import ndimage
 
 import logging
+from copy import deepcopy
 
 logger = logging.getLogger(__name__)
 
@@ -229,9 +230,8 @@ class FusionAugment(BatchFilter):
 
         # fuse points:
         if self.points_fused in request:
-            batch.points[self.points_fused] = batch[self.points_base].merge(
-                batch[self.points_add]
-            )
+            batch.points[self.points_fused] = deepcopy(batch[self.points_base])
+            batch.points[self.points_fused].graph.merge(batch[self.points_add].graph)
 
         return batch
 
