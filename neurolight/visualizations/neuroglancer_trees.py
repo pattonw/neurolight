@@ -80,7 +80,7 @@ def visualize_trees(graphs: Dict[str, nx.DiGraph]):
         )
         node_id = itertools.count(start=1)
         for name, graph in graphs.items():
-            add_trees(s, graph, node_id, name="graph", visible=True)
+            add_trees(s, graph, node_id, name=name, visible=True)
     print(viewer)
     input("Hit ENTER to quit!")
 
