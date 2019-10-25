@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.ndimage.morphology import distance_transform_edt
+from scipy.spatial import cKDTree
 from scipy.ndimage.filters import gaussian_filter
 from gunpowder import (
     ProviderSpec,
@@ -16,11 +17,14 @@ from gunpowder import (
     PointsKey,
 )
 from gunpowder.profiling import Timing, ProfilingStats
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict
 import logging
 import time
 import copy
 import itertools
+
+import pickle
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +142,7 @@ class GetNeuronPair(BatchProvider):
         seperate_by: Tuple[float, float] = (0.0, 1.0),
         shift_attempts: int = 50,
         request_attempts: int = 3,
+        extra_keys: Optional[Dict[PointsKey, Tuple[PointsKey, PointsKey]]] = {},
     ):
         self.point_source = point_source
         self.nonempty_placeholder = nonempty_placeholder
@@ -146,6 +151,7 @@ class GetNeuronPair(BatchProvider):
         self.points = points
         self.arrays = arrays
         self.labels = labels
+        self.extra_keys = extra_keys
         self.seperate_by = seperate_by
 
         self.shift_attempts = shift_attempts
@@ -176,6 +182,9 @@ class GetNeuronPair(BatchProvider):
             self.provides(point_key, self.spec[self.point_source])
             self.provides(array_key, self.spec[self.array_source])
             self.provides(label_key, self.spec[self.label_source])
+        for source, targets in self.extra_keys.items():
+            self.provides(targets[0], self.spec[source])
+            self.provides(targets[1], self.spec[source])
 
     def prepare_points(self, request: BatchRequest) -> Tuple[BatchRequest, int]:
         """
@@ -212,9 +221,7 @@ class GetNeuronPair(BatchProvider):
                 )
             )
 
-        dps[point_key].roi = dps[point_key].roi.grow(
-            growth, growth
-        )
+        dps[point_key].roi = dps[point_key].roi.grow(growth, growth)
 
         dps.place_holders[self.array_source] = copy.deepcopy(request[self.arrays[0]])
         dps.place_holders[self.array_source].roi = dps.place_holders[
@@ -297,6 +304,14 @@ class GetNeuronPair(BatchProvider):
                 .snap_to_grid(voxel_size, mode="closest")
             )
 
+        for source, targets in self.extra_keys.items():
+            dps[source] = copy.deepcopy(request[targets[0]])
+            dps[source].roi = (
+                dps[source]
+                .roi.shift(direction)
+                .snap_to_grid(voxel_size, mode="closest")
+            )
+
         return dps
 
     def provide(self, request: BatchRequest) -> Batch:
@@ -367,6 +382,7 @@ class GetNeuronPair(BatchProvider):
             self.point_source: self.points[0],
             self.array_source: self.arrays[0],
             self.label_source: self.labels[0],
+            **{k: v[0] for k, v in self.extra_keys.items()},
         }
         for key, value in base.items():
             combined[base_map.get(key, key)] = value
@@ -375,6 +391,7 @@ class GetNeuronPair(BatchProvider):
             self.point_source: self.points[1],
             self.array_source: self.arrays[1],
             self.label_source: self.labels[1],
+            **{k: v[1] for k, v in self.extra_keys.items()},
         }
         for key, value in add.items():
             combined[add_map.get(key, key)] = value
@@ -398,11 +415,6 @@ class GetNeuronPair(BatchProvider):
 
             while True:
                 points_request_base, base_seed = self.prepare_points(request)
-
-                logger.debug(
-                    f"Requesting base roi: {points_request_base[self.nonempty_placeholder].roi}"
-                )
-
                 base_batch = self.upstream_provider.request_batch(points_request_base)
                 profiling_stats.merge_with(base_batch.profiling_stats)
                 if len(base_batch[self.nonempty_placeholder].graph.nodes) > 0:
@@ -412,21 +424,19 @@ class GetNeuronPair(BatchProvider):
             timing_prepare_base = Timing("prepare base")
             timing_prepare_base.start()
 
-            distance_transform, gradients = self.prepare_base(
-                base_batch[self.nonempty_placeholder]
-            )
+            # distance_transform, gradients = self.prepare_base(
+            #     base_batch[self.nonempty_placeholder]
+            # )
 
-            for _ in range(self.request_attempts):
+            for i in range(self.request_attempts):
                 points_request_add, add_seed = self.prepare_points(request)
-                logger.debug(
-                    f"Requesting add roi: {points_request_add[self.nonempty_placeholder].roi}"
-                )
-                direction = self.check_valid_requests(
-                    distance_transform,
-                    gradients,
-                    points_request_add,
-                    request,
-                    profiling_stats,
+                output_roi = self._return_roi(request)
+                add_batch = self.upstream_provider.request_batch(points_request_add)
+                direction = self.seperate_using_kdtrees(
+                    base_batch,
+                    add_batch,
+                    output_roi,
+                    final=(i == self.request_attempts - 1),
                 )
                 if direction is not None:
                     logger.info("Got add batch")
@@ -434,144 +444,130 @@ class GetNeuronPair(BatchProvider):
                 else:
                     continue
 
-    def prepare_base(self, points_base):
-        base_roi = points_base.spec.roi
+    
+
+    def seperate_using_kdtrees(
+        self, base_batch: Batch, add_batch: Batch, output_roi: Roi, final=False
+    ):
+        points_add = add_batch.points.get(
+            self.point_source, add_batch.points.get(self.nonempty_placeholder, None)
+        )
+        points_base = base_batch.points.get(
+            self.point_source, base_batch.points.get(self.nonempty_placeholder, None)
+        )
         voxel_size = self.spec.get_lcm_voxel_size()
-        distances = np.ones(base_roi.get_shape() / voxel_size)
-        logger.info(f"preparing base dist and gradients of shape: {distances.shape}")
-        for point_id, point in points_base.data.items():
-            distances[
-                (Coordinate(point.location) - base_roi.get_begin()) // voxel_size
-            ] = 0
-        distances = distance_transform_edt(distances, sampling=voxel_size)
-        gradients = np.gradient(distances, *voxel_size)
-        gradients = [
-            gaussian_filter(gradient, sigma=self.seperate_by[0] / np.array(voxel_size))
-            for gradient in gradients
-        ]
-        gradients = np.stack(gradients, axis=-1)
-        logger.info("finished preparing base dist and gradients")
 
-        return distances, gradients
+        if len(points_add.graph.nodes) < 1 or len(points_base.graph.nodes) < 1:
+            return Coordinate([0, 0, 0])
 
-    def check_valid_requests(
-        self,
-        distances: np.ndarray,
-        gradients: np.ndarray,
-        points_request_add: BatchRequest,
-        request: BatchRequest,
-        profiling_stats: ProfilingStats,
-    ) -> Optional[Coordinate]:
-        """
-        check if the points returned by these requests are seperable.
-        If they are return the direction vector used to seperate them.
-        """
-        points_add = self.upstream_provider.request_batch(points_request_add)
-        if len(points_add[self.nonempty_placeholder].graph.nodes()) < 1:
-            return None
-        voxel_size = self.spec.get_lcm_voxel_size()
-        return_roi = self._return_roi(request)
-        max_shift = (
-            (np.array(distances.shape) // 2)
-            - ((return_roi.get_shape() // voxel_size) // 2)
-            - 1
+        # shift add points to start at [0,0,0]
+        add_locations = np.array(
+            [
+                point["location"] - points_add.spec.roi.get_begin()
+                for point in points_add.graph.nodes.values()
+            ]
         )
-        logger.info(f"max shift: {max_shift}")
-
-        profiling_stats.merge_with(points_add.profiling_stats)
-
-        timing_process_points = Timing("process points")
-        timing_process_points.start()
-        logger.debug(
-            "Points add has {} points".format(
-                len(points_add[self.nonempty_placeholder].data)
-            )
+        add_tree = cKDTree(add_locations)
+        # shift base points to start at [0,0,0]
+        base_locations = np.array(
+            [
+                point["location"] - points_base.spec.roi.get_begin()
+                for point in points_base.graph.nodes.values()
+            ]
         )
-        logger.debug(
-            "gradients shape: {}, accessing: {}".format(
-                gradients.shape, (np.array(gradients.shape[0:3]) // 2)
+        base_tree = cKDTree(base_locations)
+
+        input_shape = points_base.spec.roi.get_shape()
+        output_shape = output_roi.get_shape()
+        input_center = input_shape / 2
+        output_center = output_shape / 2
+
+        current_shift = np.array([0, 0, 0], dtype=float)  # in voxels
+
+        radius = max(output_center)
+
+        max_shift = input_center - output_center - Coordinate([1, 1, 1])
+
+        for i in range(self.shift_attempts * 10):
+            shift_attempt = Coordinate(current_shift)
+            add_clipped_roi = Roi(
+                input_center - output_center + shift_attempt, output_shape
             )
-        )
-
-        current_shift = np.array([0, 0, 0], dtype=float)
-        for i in range(self.shift_attempts):
-            logger.debug(f"shifting with {current_shift}")
-            # add a bit of randomness to our current shift
-            # this can help get off of local maxima
-            random = np.random.randn(3)
-            random /= abs(random).max()
-            direction = Coordinate(np.round(current_shift + random).astype(int))
-
-            # crop add points to the new shifted roi
-            points_add_shifted = self.process(
-                points_add, -direction, request=request, batch_index=1, inplace=False
+            base_clipped_roi = Roi(
+                input_center - output_center - shift_attempt, output_shape
             )
 
-            # calculate applicable range of distances for current shift
-            center = (Coordinate(distances.shape) // 2) * voxel_size
-            radius = (return_roi.get_shape() // voxel_size) // 2 * voxel_size
-            pad = (
-                Coordinate(
-                    (np.array((return_roi.get_shape() // voxel_size)) % 2).tolist()
-                )
-                * voxel_size
+            # query points in trees below certain distance from shifted center
+            clipped_add_points = add_tree.query_ball_point(
+                input_center + shift_attempt, radius, p=float("inf")
             )
-            slices = tuple(
-                map(
-                    slice,
-                    (center - radius + direction) // voxel_size,
-                    (center + radius + direction + voxel_size + pad) // voxel_size,
-                )
+            clipped_base_points = base_tree.query_ball_point(
+                input_center - shift_attempt, radius, p=float("inf")
             )
-            logger.info(f"{center}, {radius}, {direction}, {pad}")
-            logger.info("slices: {}".format(slices))
-            logger.info(f"distances: {distances.shape}")
 
-            # check if this shift is valid, if not update current_shift
-            if self._valid_pair(
-                points_add_shifted[self.nonempty_placeholder].graph, distances[slices]
-            ):
-                logger.debug(
-                    f"Valid shift found: {direction}\n"
-                    + f"Add roi: {points_add_shifted[self.nonempty_placeholder].spec.roi}\n"
-                )
+            # if queried points are empty, skip
+            if len(clipped_add_points) < 1 and len(clipped_base_points) < 1:
+                logger.info(f"no points in centered roi!")
+                continue
 
-                timing_process_points.stop()
-                profiling_stats.add(timing_process_points)
-                return direction
-            else:
-                min_dist = float("inf")
-                coord = None
-                gradient = None
+            # apply twice the shift to add points
+            current_check = add_locations + shift_attempt * 2
 
-                offset = (center - radius + direction) // voxel_size
+            # get all points in base that are close to shifted add points
+            points_too_close = base_tree.query_ball_point(
+                current_check, np.mean(self.seperate_by)
+            )
 
-                # find gradient between closest 2 points
-                for point_attrs in points_add_shifted[
-                    self.nonempty_placeholder
-                ].graph.nodes.values():
-                    coord = tuple(
-                        (point_attrs["location"] // voxel_size + offset).astype(int)
-                    )
-                    if distances[coord] < min_dist:
-                        min_dist = distances[coord]
-                        coord = coord
-                        gradient = gradients[coord]
+            # calculate next shift
+            direction = np.zeros([3])
+            min_dist = float("inf")
+            count = 0
+            for node_a, neighbors in enumerate(points_too_close):
+                if node_a not in clipped_add_points or not add_clipped_roi.contains(
+                    add_locations[node_a, :]
+                ):
+                    continue
+                for neighbor in neighbors:
+                    if (
+                        neighbor not in clipped_base_points
+                        or not base_clipped_roi.contains(base_locations[neighbor, :])
+                    ):
+                        continue
 
-                # shift allong gradient
-                # gradient is lowest near nodes
-                gradient /= abs(gradient).max() if abs(gradient).max() > 0 else 1
-                logger.info(f"gradient: {gradient} at {coord} with shift {direction}")
-                if min_dist < self.seperate_by[0]:
-                    current_shift += gradient
-                elif min_dist >= self.seperate_by[1]:
-                    current_shift -= gradient
-                current_shift = np.clip(current_shift, -max_shift, max_shift)
+                    vector = current_check[node_a, :] - base_locations[neighbor, :]
+                    mag = np.linalg.norm(vector)
+                    min_dist = min(min_dist, mag)
+                    unit_vector = vector / (mag + 1)
+                    # want to move at most n units if mag is 0, or 0 units if mag is n
+                    direction += (np.max(self.seperate_by) - mag) * unit_vector
+                    count += 1
+
+            if count == 0 or self.seperate_by[0] <= min_dist <= self.seperate_by[1]:
+                return Coordinate(current_shift)
+
+            logger.debug(
+                f"min dist {min_dist} not in {self.seperate_by} "
+                f"with shift: {current_shift}"
+            )
+            direction /= count
+            direction /= voxel_size
+            if np.linalg.norm(direction) < 1e-2:
+                logger.warning(f"Moving too slow. Probably stuck!")
+                return None
+            current_shift += direction
+            np.clip(current_shift, -max_shift, max_shift, out=current_shift)
 
         logger.info(f"Request failed at {current_shift}. New Request!")
-
-        timing_process_points.stop()
-        profiling_stats.add(timing_process_points)
+        if Path("test_output").exists():
+            if not Path("test_output", "distances.obj").exists():
+                pickle.dump(
+                    base_batch, open(Path("test_output", "batch_base.obj"), "wb")
+                )
+            if not Path("test_output", "distances.obj").exists():
+                pickle.dump(add_batch, open(Path("test_output", "batch_add.obj"), "wb"))
+        if final:
+            return current_shift
+        else:
         return None
 
     def process(
@@ -586,28 +582,16 @@ class GetNeuronPair(BatchProvider):
             batch = copy.deepcopy(batch)
 
         logger.debug("processing")
-        points = batch.points.get(self.point_source, None)
-        placeholder = batch.points.get(self.nonempty_placeholder, None)
-        array = batch.arrays.get(self.array_source, None)
-        label = batch.arrays.get(self.label_source, None)
 
         # Shift and crop points and array
-        points, array, label = self._shift_and_crop(
-            points if points is not None else placeholder,
-            array,
-            label,
-            direction=direction,
-            request=request,
-            batch_index=batch_index,
-        )
-        if points is not None:
-            batch.points[self.point_source] = points
-        if placeholder is not None:
-            batch.points[self.nonempty_placeholder] = placeholder
-        if array is not None:
-            batch.arrays[self.array_source] = array
-        if label is not None:
-            batch.arrays[self.label_source] = label
+        return_roi = self._return_roi(request)
+        for source_key, point_set in batch.points.items():
+            point_set = self._shift_and_crop_points(point_set, direction, return_roi)
+            batch.points[source_key] = point_set
+
+        for source_key, array_set in batch.arrays.items():
+            array_set = self._shift_and_crop_array(array_set, direction, return_roi)
+            batch.arrays[source_key] = array_set
 
         return batch
 
@@ -704,12 +688,7 @@ class GetNeuronPair(BatchProvider):
             if distances[Coordinate(point_attrs["location"] // voxel_size)] < min_dist:
                 min_dist = distances[Coordinate(point_attrs["location"] // voxel_size)]
         if min_dist < self.seperate_by[0] or min_dist > self.seperate_by[1]:
-            logger.debug(
-                (
-                    "expected a minimum distance between the two neurons "
-                    + "to be in the range ({}, {}), however saw a distance of {}"
-                ).format(self.seperate_by[0], self.seperate_by[1], min_dist)
-            )
+            logger.info(f"min dist {min_dist} not in range {self.seperate_by}")
             return False
         else:
             logger.info(f"Saw min dist of {min_dist}!")
