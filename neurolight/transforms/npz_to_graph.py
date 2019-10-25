@@ -33,6 +33,6 @@ def parse_npy_graph(filename):
     graph = nx.DiGraph()
     graph.add_edges_from(edge_list)
     graph.add_nodes_from(
-        [(row[0], {k: v for k, v in zip(keys, row[1:])}) for row in zip(*data)]
+        [(row[0], {k: v for k, v in zip(keys[1:], row[1:])}) for row in zip(*data)]
     )
     return graph

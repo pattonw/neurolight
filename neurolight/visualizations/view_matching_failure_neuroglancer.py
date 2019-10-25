@@ -1,11 +1,9 @@
-import daisy
 import neuroglancer
 import numpy as np
 import itertools
 import networkx as nx
 import random
 from pathlib import Path
-import pickle
 
 from neurolight.transforms.npz_to_graph import parse_npy_graph
 
@@ -29,8 +27,8 @@ def build_trees(edge_rows, voxel_size):
         if u == -1 or v == -1:
             continue
 
-        pos_u = daisy.Coordinate(tuple(pbs[u])) / voxel_size
-        pos_v = daisy.Coordinate(tuple(pbs[v])) / voxel_size
+        pos_u = np.array(tuple(pbs[u])) / voxel_size
+        pos_v = np.array(tuple(pbs[v])) / voxel_size
 
         if u not in trees.nodes:
             trees.add_node(u, pos=pos_u)
@@ -73,7 +71,6 @@ def add_trees(s, trees, node_id, name, visible=False):
 def visualize_match(example: Path):
     graph = parse_npy_graph(example / "graph.npz")
     tree = parse_npy_graph(example / "tree.npz")
-    component = obj.get("component")
 
     viewer = neuroglancer.Viewer()
     with viewer.txn() as s:
@@ -83,11 +80,7 @@ def visualize_match(example: Path):
             )
         )
         node_id = itertools.count(start=1)
-        if component is not None:
-            tree = tree.subgraph(component)
-            add_trees(s, tree, node_id, name="component", visible=True)
-        else:
-            add_trees(s, tree, node_id, name="tree", visible=True)
+        add_trees(s, tree, node_id, name="tree", visible=True)
         add_trees(s, graph, node_id, name="graph", visible=True)
     print(viewer)
     input("Hit ENTER to quit!")

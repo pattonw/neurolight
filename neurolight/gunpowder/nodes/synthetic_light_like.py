@@ -75,6 +75,8 @@ class SyntheticLightLike(BatchProvider):
                     break
             trees.append(tree)
 
+        # logger.info("{} trees got, expected {}".format(len(trees), self.n_obj))
+
         trees_graph = nx.disjoint_union_all(trees)
 
         points = {
