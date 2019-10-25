@@ -1,9 +1,10 @@
 import neuroglancer
 import numpy as np
-import itertools
 import networkx as nx
+
+import itertools
 import random
-from pathlib import Path
+from typing import Dict
 
 from neurolight.transforms.npz_to_graph import parse_npy_graph
 
@@ -68,9 +69,7 @@ def add_trees(s, trees, node_id, name, visible=False):
         )
 
 
-def visualize_match(example: Path):
-    graph = parse_npy_graph(example / "graph.npz")
-    tree = parse_npy_graph(example / "tree.npz")
+def visualize_trees(graphs: Dict[str, nx.DiGraph]):
 
     viewer = neuroglancer.Viewer()
     with viewer.txn() as s:
@@ -80,8 +79,8 @@ def visualize_match(example: Path):
             )
         )
         node_id = itertools.count(start=1)
-        add_trees(s, tree, node_id, name="tree", visible=True)
-        add_trees(s, graph, node_id, name="graph", visible=True)
+        for name, graph in graphs.items():
+            add_trees(s, graph, node_id, name="graph", visible=True)
     print(viewer)
     input("Hit ENTER to quit!")
 
