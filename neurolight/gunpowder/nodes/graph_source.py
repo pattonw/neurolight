@@ -10,6 +10,7 @@ from gunpowder.profiling import Timing
 
 import numpy as np
 from scipy.spatial.ckdtree import cKDTree, cKDTreeNode
+from tqdm import tqdm
 
 from pathlib import Path
 from typing import List, Dict, Tuple
@@ -140,6 +141,7 @@ class GraphSource(BatchProvider):
         return batch
 
     def _read_points(self) -> None:
+        logger.info("starting to read points")
         filepath = Path(self.filename)
         # handle missing file case
         if not filepath.exists():
@@ -154,12 +156,14 @@ class GraphSource(BatchProvider):
             self._read_graph(filepath)
         elif filepath.is_dir():
             # read from directory
-            for graph_file in filepath.iterdir():
+            for graph_file in tqdm(filepath.iterdir()):
                 if graph_file.name.endswith(".obj"):
                     self._read_graph(graph_file)
 
+        logger.info("finished reading points, now processing")
         self._process_locations()
         self._graph_to_kdtree()
+        logger.info("finished processing points")
 
     def _process_locations(self):
         """
@@ -176,9 +180,10 @@ class GraphSource(BatchProvider):
         origin = self._graph.graph["origin"]
         spacing = self._graph.graph["spacing"]
         for node, attrs in self._graph.nodes.items():
-            attrs["location"] = (((attrs["location"] - origin) / spacing).take(
-                self.transpose
-            ) * self.scale).astype(np.float32)
+            attrs["location"] = (
+                ((attrs["location"] - origin) / spacing).take(self.transpose)
+                * self.scale
+            ).astype(np.float32)
 
     def _graph_to_kdtree(self) -> None:
         # add node_ids to coordinates to support overlapping nodes in cKDTree
