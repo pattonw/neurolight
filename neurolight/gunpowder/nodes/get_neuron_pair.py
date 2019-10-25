@@ -65,7 +65,7 @@ class GetNeuronPair(BatchProvider):
             arrays:
 
                 A pair of ArrayKeys into which two sets of images will be stored.
-            
+
             labels:
 
                 A pair of ArrayKeys into which two sets of labels will be stored.
@@ -73,10 +73,10 @@ class GetNeuronPair(BatchProvider):
             nonempty_placeholder:
 
                 The need for a nonempty placeholder arises from the following problem:
-                
+
                 We first request larger rois to hopefully guarantee we can obtain subsets
                 that contain points sufficiently far away from each other.
-            
+
                 Roi A: |------------------------------------------------------------|
                 Roi B: |------------------------------------------------------------|
 
@@ -100,9 +100,9 @@ class GetNeuronPair(BatchProvider):
                 appropriately shifted.
 
             seperate_by:
-                
+
                 A range of acceptable minimum distances between the two sets of points.
-                Note: 
+                Note:
                 1) It is only guaranteed that the points in nonempty_placeholder are
                 seperated by this distance if provided. This can greatly save on time
                 if processing points is expensive, but may result in slightly different
@@ -444,8 +444,6 @@ class GetNeuronPair(BatchProvider):
                 else:
                     continue
 
-    
-
     def seperate_using_kdtrees(
         self, base_batch: Batch, add_batch: Batch, output_roi: Roi, final=False
     ):
@@ -568,7 +566,7 @@ class GetNeuronPair(BatchProvider):
         if final:
             return current_shift
         else:
-        return None
+            return None
 
     def process(
         self,
