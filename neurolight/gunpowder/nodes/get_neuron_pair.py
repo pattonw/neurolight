@@ -17,7 +17,7 @@ from gunpowder import (
     PointsKey,
 )
 from gunpowder.profiling import Timing, ProfilingStats
-from typing import Tuple, Optional, Dict
+from typing import Tuple, Optional, Dict, Union
 import logging
 import time
 import copy
@@ -25,6 +25,8 @@ import itertools
 
 import pickle
 from pathlib import Path
+
+DataKey = Union[PointsKey, ArrayKey]
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +144,7 @@ class GetNeuronPair(BatchProvider):
         seperate_by: Tuple[float, float] = (0.0, 1.0),
         shift_attempts: int = 50,
         request_attempts: int = 3,
-        extra_keys: Optional[Dict[PointsKey, Tuple[PointsKey, PointsKey]]] = {},
+        extra_keys: Optional[Dict[DataKey, Tuple[DataKey, DataKey]]] = {},
     ):
         self.point_source = point_source
         self.nonempty_placeholder = nonempty_placeholder
@@ -329,9 +331,9 @@ class GetNeuronPair(BatchProvider):
         timing_prepare = Timing(self, "prepare")
         timing_prepare.start()
 
-        request_base = self.prepare(request, base_seed, direction)
+        request_base = self.prepare(request, base_seed, -direction)
         logger.debug(f"base_request shrank to {request_base[self.point_source].roi}")
-        request_add = self.prepare(request, add_seed, -direction)
+        request_add = self.prepare(request, add_seed, direction)
         logger.debug(f"add_request shrank to {request_add[self.point_source].roi}")
 
         timing_prepare.stop()
@@ -439,7 +441,6 @@ class GetNeuronPair(BatchProvider):
                     final=(i == self.request_attempts - 1),
                 )
                 if direction is not None:
-                    logger.info("Got add batch")
                     return base_seed, add_seed, direction, profiling_stats
                 else:
                     continue
@@ -453,7 +454,6 @@ class GetNeuronPair(BatchProvider):
         points_base = base_batch.points.get(
             self.point_source, base_batch.points.get(self.nonempty_placeholder, None)
         )
-        voxel_size = self.spec.get_lcm_voxel_size()
 
         if len(points_add.graph.nodes) < 1 or len(points_base.graph.nodes) < 1:
             return Coordinate([0, 0, 0])
@@ -477,30 +477,30 @@ class GetNeuronPair(BatchProvider):
 
         input_shape = points_base.spec.roi.get_shape()
         output_shape = output_roi.get_shape()
-        input_center = input_shape / 2
-        output_center = output_shape / 2
+        input_radius = input_shape / 2
+        output_radius = output_shape / 2
 
         current_shift = np.array([0, 0, 0], dtype=float)  # in voxels
 
-        radius = max(output_center)
+        radius = max(output_radius)
 
-        max_shift = input_center - output_center - Coordinate([1, 1, 1])
+        max_shift = input_radius - output_radius - Coordinate([1, 1, 1])
 
         for i in range(self.shift_attempts * 10):
             shift_attempt = Coordinate(current_shift)
             add_clipped_roi = Roi(
-                input_center - output_center + shift_attempt, output_shape
+                input_radius - output_radius + shift_attempt, output_shape
             )
             base_clipped_roi = Roi(
-                input_center - output_center - shift_attempt, output_shape
+                input_radius - output_radius - shift_attempt, output_shape
             )
 
             # query points in trees below certain distance from shifted center
             clipped_add_points = add_tree.query_ball_point(
-                input_center + shift_attempt, radius, p=float("inf")
+                input_radius + shift_attempt, radius, p=float("inf")
             )
             clipped_base_points = base_tree.query_ball_point(
-                input_center - shift_attempt, radius, p=float("inf")
+                input_radius - shift_attempt, radius, p=float("inf")
             )
 
             # if queried points are empty, skip
@@ -509,7 +509,7 @@ class GetNeuronPair(BatchProvider):
                 continue
 
             # apply twice the shift to add points
-            current_check = add_locations + shift_attempt * 2
+            current_check = add_locations - shift_attempt * 2
 
             # get all points in base that are close to shifted add points
             points_too_close = base_tree.query_ball_point(
@@ -532,7 +532,9 @@ class GetNeuronPair(BatchProvider):
                     ):
                         continue
 
-                    vector = current_check[node_a, :] - base_locations[neighbor, :]
+                    vector = (
+                        add_locations[node_a, :] - add_clipped_roi.get_begin()
+                    ) - (base_locations[neighbor, :] - base_clipped_roi.get_begin())
                     mag = np.linalg.norm(vector)
                     min_dist = min(min_dist, mag)
                     unit_vector = vector / (mag + 1)
@@ -541,18 +543,17 @@ class GetNeuronPair(BatchProvider):
                     count += 1
 
             if count == 0 or self.seperate_by[0] <= min_dist <= self.seperate_by[1]:
-                return Coordinate(current_shift)
+                return shift_attempt
 
             logger.debug(
                 f"min dist {min_dist} not in {self.seperate_by} "
                 f"with shift: {current_shift}"
             )
             direction /= count
-            direction /= voxel_size
             if np.linalg.norm(direction) < 1e-2:
                 logger.warning(f"Moving too slow. Probably stuck!")
                 return None
-            current_shift += direction
+            current_shift += direction + (np.random.random(3) - 0.5)
             np.clip(current_shift, -max_shift, max_shift, out=current_shift)
 
         logger.info(f"Request failed at {current_shift}. New Request!")

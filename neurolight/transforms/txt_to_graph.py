@@ -21,7 +21,7 @@ def txt_to_pickle(filename: Path, transform_path: Path, output_location: Path = 
     file_ext = name_parts[-1]
     assert file_ext == "txt", "This function is intended for "
 
-    graph = parse_txt(filename)
+    graph = parse_txt(filename, transform_path)
 
     nx.write_gpickle(graph, output_location)
 

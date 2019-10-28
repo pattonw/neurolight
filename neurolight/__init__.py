@@ -12,8 +12,6 @@ from .gunpowder import (
     TopologicalMatcher,
 )
 
-from .match_graph_to_tree import match_graph_to_tree
-
 __all__ = [
     "RasterizeSkeleton",
     "FusionAugment",
@@ -24,7 +22,6 @@ __all__ = [
     "GrowLabels",
     "SyntheticLightLike",
     "BinarizeLabels",
-    "match_graph_to_tree",
     "GraphSource",
     "TopologicalMatcher",
 ]

@@ -28,9 +28,10 @@ samples = (
     # "2018-04-25",
     # "2018-05-23",
     # "2018-06-14",
-    "2018-07-02",
-    "2018-08-01",
-    # "2018-10-01",
+    # "2018-07-02",
+    # "2018-08-01",
+    "2018-10-01",
+    "2018-12-01",
 )
 
 for sample in tqdm(samples, "Samples: "):
@@ -41,7 +42,9 @@ for sample in tqdm(samples, "Samples: "):
     assert transform.exists(), f"Sample {sample} has no transform.txt at {transform}!"
 
     neurons = [
-        sub_file.name for sub_file in sample_tracings.iterdir() if sub_file.is_dir()
+        sub_file.name
+        for sub_file in sample_tracings.iterdir()
+        if sub_file.is_dir() and (sub_file / "consensus.swc").exists()
     ]
 
     sample_target = target / sample
