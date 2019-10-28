@@ -21,7 +21,6 @@ def parse_npy_graph(filename):
     human_placed = a["human_placed"]
     t2 = time.time()
     graph = nx.DiGraph()
-    graph.add_edges_from(edge_list)
     graph.add_nodes_from(
         [
             (
@@ -37,6 +36,7 @@ def parse_npy_graph(filename):
             for i in range(len(node_ids))
         ]
     )
+    graph.add_edges_from(edge_list)
     return graph, t2 - t1
 
 
