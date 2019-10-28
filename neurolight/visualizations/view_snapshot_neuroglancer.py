@@ -85,13 +85,16 @@ def visualize_hdf5(hdf5_file: Path, voxel_size):
             v = daisy.open_ds(str(hdf5_file.absolute()), f"volumes/{volume}")
             print(v.roi)
             add_layer(
-                s, daisy.open_ds(str(hdf5_file.absolute()), f"volumes/{volume}"), volume
+                s,
+                daisy.open_ds(str(hdf5_file.absolute()), f"volumes/{volume}"),
+                volume,
+                visible=False,
             )
 
         node_id = itertools.count(start=1)
         for point_set in points:
             components = build_trees(dataset["points"][point_set], voxel_size)
-            add_trees(s, components, node_id, name=point_set)
+            add_trees(s, components, node_id, name=point_set, visible=True)
     print(viewer)
     input("Hit ENTER to quit!")
 
