@@ -570,12 +570,7 @@ class GetNeuronPair(BatchProvider):
             return None
 
     def process(
-        self,
-        batch: Batch,
-        direction: Coordinate,
-        request: BatchRequest,
-        batch_index: int,
-        inplace=True,
+        self, batch: Batch, direction: Coordinate, request: BatchRequest, inplace=True
     ) -> Batch:
         if not inplace:
             batch = copy.deepcopy(batch)
@@ -594,27 +589,11 @@ class GetNeuronPair(BatchProvider):
 
         return batch
 
-    def _shift_and_crop(
-        self,
-        points: Optional[Points],
-        array: Optional[Array],
-        labels: Optional[Array],
-        direction: Coordinate,
-        request: BatchRequest,
-        batch_index: int,
-    ) -> Tuple[Points, Optional[Array], Optional[Array]]:
-
-        roi = self._return_roi(request)
-        if points is not None:
-            points = self._shift_and_crop_points(points, direction, roi)
-        if array is not None:
-            array = self._shift_and_crop_array(array, direction, roi)
-        if labels is not None:
-            labels = self._shift_and_crop_array(labels, direction, roi)
-
-        return points, array, labels
-
     def _return_roi(self, request):
+        """
+        Get the required output roi. Fails if multiple different roi are requested
+        TODO: this assumption doesn't seem necessary
+        """
         potential_requests = list(
             itertools.chain(self.points, self.arrays, self.labels)
         )
@@ -673,22 +652,3 @@ class GetNeuronPair(BatchProvider):
         half_shift = (voxel_shift + 1) // 2
         return Coordinate(half_shift * 2 * voxel_size)
 
-    def _valid_pair(self, add_graph, distances):
-        """
-        Simply checks for every pair of points, is the distance between them
-        greater than the desired seperation criterion.
-        """
-        if distances.min() > 0:
-            logger.debug("No base points in this shift!")
-            return False
-        min_dist = float("inf")
-        voxel_size = self.spec.get_lcm_voxel_size()
-        for point_id, point_attrs in add_graph.nodes.items():
-            if distances[Coordinate(point_attrs["location"] // voxel_size)] < min_dist:
-                min_dist = distances[Coordinate(point_attrs["location"] // voxel_size)]
-        if min_dist < self.seperate_by[0] or min_dist > self.seperate_by[1]:
-            logger.info(f"min dist {min_dist} not in range {self.seperate_by}")
-            return False
-        else:
-            logger.info(f"Saw min dist of {min_dist}!")
-            return True
