@@ -7,6 +7,7 @@ from gunpowder import (
     GraphPoints,
 )
 from funlib.match.graph_to_tree_matcher import GraphToTreeMatcher
+from funlib.match.preprocess import mouselight_preprocessing
 import networkx as nx
 
 import copy
@@ -49,56 +50,32 @@ class TopologicalMatcher(BatchFilter):
     def process(self, batch: Batch, request: BatchRequest):
 
         graph = copy.deepcopy(batch[self.G].graph)
+        graph = mouselight_preprocessing(graph, 50)
         tree = copy.deepcopy(batch[self.T].graph)
 
         logger.debug("initializing matcher")
-        final_solution = SpatialGraph()
-        for wcc in nx.weakly_connected_components(tree):
-            subgraph = tree.subgraph(wcc)
-            matcher = GraphToTreeMatcher(
-                graph,
-                subgraph,
-                match_distance_threshold=self.match_distance_threshdold,
-                node_balance=self.node_balance,
-                use_gurobi=True,
-            )
-            logger.debug("optimizing!")
-            try:
-                solution = matcher.solve()
-                matched_component = matcher.create_tree(solution)
-                logger.info("Solution found!")
-            except ValueError:
-                logger.warning(
-                    "Failed to find a solution for a connected component of T!"
-                )
-                # Losing out on a connected component does not lead to any ambiguous data,
-                # thus we can simply ignore this connected component
-                matched_component = SpatialGraph()
 
-                if self.failures is not None:
-                    self.__save_failed_matching(graph, tree, wcc, batch_id=batch.id)
-            logger.debug("solution found!")
+        matcher = GraphToTreeMatcher(
+            graph,
+            tree,
+            match_distance_threshold=self.match_distance_threshdold,
+            node_balance=self.node_balance,
+            use_gurobi=True,
+        )
+        logger.debug("optimizing!")
+        try:
+            solution = matcher.solve()
+            matched = matcher.create_tree(solution)
+            logger.info("Solution found!")
+        except ValueError:
+            logger.warning("Failed to find a solution for T!")
+            matched = SpatialGraph()
 
-            try:
-                final_solution = nx.union(final_solution, matched_component)
-            except nx.exception.NetworkXError:
-                # Not sure what is causing this. It would be nice to have a way to
-                # write failing cases out to disk so that they can be tested
-                # and solved later.
-                logging.warning(
-                    "matcher tried to use a skeleton node in the "
-                    "matching of two seperate connected component!"
-                )
-                # In this case, the matcher may have assigned ambiguous ground truth and so we
-                # should not allow it to pass as if it were valid
-                final_solution = SpatialGraph()
-
-                if self.failures is not None:
-                    self.__save_failed_matching(graph, tree, batch_id=batch.id)
-                break
+            if self.failures is not None:
+                self.__save_failed_matching(graph, tree, batch_id=batch.id)
 
         result = GraphPoints._from_graph(
-            final_solution, copy.deepcopy(batch[self.T].spec)
+            matched, copy.deepcopy(batch[self.T].spec)
         )
 
         batch[self.matched] = result
