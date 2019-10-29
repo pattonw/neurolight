@@ -1,4 +1,5 @@
 import numpy as np
+import networkx as nx
 from scipy.ndimage.morphology import distance_transform_edt
 from scipy.spatial import cKDTree
 from scipy.ndimage.filters import gaussian_filter
@@ -17,12 +18,12 @@ from gunpowder import (
     PointsKey,
 )
 from gunpowder.profiling import Timing, ProfilingStats
+
 from typing import Tuple, Optional, Dict, Union
 import logging
 import time
 import copy
 import itertools
-
 import pickle
 from pathlib import Path
 
@@ -333,22 +334,30 @@ class GetNeuronPair(BatchProvider):
 
         request_base = self.prepare(request, base_seed, -direction)
         logger.debug(f"base_request shrank to {request_base[self.point_source].roi}")
-        request_add = self.prepare(request, add_seed, direction)
-        logger.debug(f"add_request shrank to {request_add[self.point_source].roi}")
+        if add_seed is not None:
+            request_add = self.prepare(request, add_seed, direction)
+            logger.debug(f"add_request shrank to {request_add[self.point_source].roi}")
+        else:
+            request_add = None
+            logger.debug(f"No add_request needed!")
 
         timing_prepare.stop()
 
         base = self.upstream_provider.request_batch(request_base)
-        add = self.upstream_provider.request_batch(request_add)
+        if request_add is not None:
+            add = self.upstream_provider.request_batch(request_add)
+        else:
+            add = self._empty_copy(base)
 
         timing_process = Timing(self, "process")
         timing_process.start()
 
-        base = self.process(base, Coordinate([0, 0, 0]), request=request, batch_index=0)
-        add = self.process(add, -Coordinate([0, 0, 0]), request=request, batch_index=1)
+        base = self.process(base, Coordinate([0, 0, 0]), request=request)
+        add = self.process(add, -Coordinate([0, 0, 0]), request=request)
 
         if (
-            len(add[self.point_source].graph.nodes) > 1
+            request_add is not None
+            and len(add[self.point_source].graph.nodes) > 1
             and len(base[self.point_source].graph.nodes) > 1
         ):
             min_dist = min(
@@ -361,7 +370,7 @@ class GetNeuronPair(BatchProvider):
                 ]
             )
             logger.info(f"Got a final min dist of {min_dist}")
-        else:
+        elif request_add is not None:
             logger.warning("Got a final min dist of inf")
 
         batch = self.merge_batches(base, add)
@@ -374,6 +383,14 @@ class GetNeuronPair(BatchProvider):
         batch.profiling_stats.add(timing_process)
 
         return batch
+
+    def _empty_copy(self, base: Batch):
+        add = Batch()
+        for key, array in base.arrays.items():
+            add[key] = Array(np.zeros_like(array.data), spec=copy.deepcopy(array.spec))
+        for key, points in base.points.items():
+            add[key] = GraphPoints({}, spec=copy.deepcopy(points.spec))
+        return add
 
     def merge_batches(self, base: Batch, add: Batch) -> Batch:
         combined = Batch()
@@ -412,7 +429,7 @@ class GetNeuronPair(BatchProvider):
         k = 0
         while True:
             k += 1
-            if k > 10:
+            if k > self.request_attempts:
                 raise ValueError("Failed to retrieve a pair of neurons!")
 
             while True:
@@ -420,15 +437,21 @@ class GetNeuronPair(BatchProvider):
                 base_batch = self.upstream_provider.request_batch(points_request_base)
                 profiling_stats.merge_with(base_batch.profiling_stats)
                 if len(base_batch[self.nonempty_placeholder].graph.nodes) > 0:
+                    # Can happen if there are processing steps between random location and here.
                     break
             logger.info("Got base batch")
 
-            timing_prepare_base = Timing("prepare base")
-            timing_prepare_base.start()
-
-            # distance_transform, gradients = self.prepare_base(
-            #     base_batch[self.nonempty_placeholder]
-            # )
+            if (
+                len(
+                    list(
+                        nx.weakly_connected_components(
+                            base_batch[self.nonempty_placeholder].graph
+                        )
+                    )
+                )
+                > 2
+            ):
+                return base_seed, None, Coordinate(0, 0, 0), profiling_stats
 
             for i in range(self.request_attempts):
                 points_request_add, add_seed = self.prepare_points(request)
