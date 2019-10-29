@@ -30,11 +30,11 @@ samples = (
     # "2018-06-14",
     # "2018-07-02",
     # "2018-08-01",
-    "2018-10-01",
+    # "2018-10-01",
     "2018-12-01",
 )
 
-for sample in tqdm(samples, "Samples: "):
+for sample in samples:
     sample_tracings = tracing_source / sample
     assert sample_tracings.is_dir(), f"{sample_tracings} is not a directory!"
 
@@ -53,6 +53,11 @@ for sample in tqdm(samples, "Samples: "):
 
     # read consensus / dendrite swc's into objects
     for neuron in tqdm(neurons, "Neurons: "):
+        consensus_target_dir = sample_target / "consensus_tracings"
+        consensus_target = consensus_target_dir / f"{neuron}.obj"
+        if consensus_target.exists():
+            continue
+        
         consensus = sample_tracings / neuron / "consensus.swc"
         assert (
             consensus.exists()
@@ -62,11 +67,9 @@ for sample in tqdm(samples, "Samples: "):
             dendrite.exists()
         ), f"Neuron {neuron} in Sample {sample} has no dendrite.swc at {dendrite}!"
 
-        consensus_target_dir = sample_target / "consensus_tracings"
         if not consensus_target_dir.exists():
             consensus_target_dir.mkdir()
 
-        consensus_target = consensus_target_dir / f"{neuron}.obj"
         if not consensus_target.exists():
             swc_to_pickle(consensus, dendrite, transform, consensus_target)
 
