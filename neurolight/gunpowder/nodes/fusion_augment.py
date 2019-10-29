@@ -153,7 +153,8 @@ class FusionAugment(BatchFilter):
         if self.scale_add_volume:
             raw_base_median = np.median(raw_base_array)
             raw_add_median = np.median(raw_add_array)
-            raw_add_array = raw_add_array - raw_add_median + raw_base_median
+            diff = raw_base_median - raw_add_median
+            raw_add_array = raw_add_array + diff
 
         # fuse labels
         fused_labels_array = self._relabel(labels_base_array)
@@ -189,7 +190,7 @@ class FusionAugment(BatchFilter):
                 output=soft_mask,
                 mode="nearest",
             )
-            soft_mask /= np.max(soft_mask)
+            soft_mask /= np.clip(np.max(soft_mask), 1e-5, float("inf"))
             soft_mask = np.clip((soft_mask * 2), 0, 1)
             if self.soft_mask is not None:
                 batch.arrays[self.soft_mask] = Array(soft_mask, spec=raw_base_spec)
@@ -236,6 +237,9 @@ class FusionAugment(BatchFilter):
         return batch
 
     def _relabel(self, a):
+        """
+        map n labels from arbitrary values to range 1-n
+        """
 
         labels = list(np.unique(a))
         if 0 in labels:
