@@ -308,12 +308,13 @@ class GetNeuronPair(BatchProvider):
             )
 
         for source, targets in self.extra_keys.items():
-            dps[source] = copy.deepcopy(request[targets[0]])
-            dps[source].roi = (
-                dps[source]
-                .roi.shift(direction)
-                .snap_to_grid(voxel_size, mode="closest")
-            )
+            if targets[0] in request:
+                dps[source] = copy.deepcopy(request[targets[0]])
+                dps[source].roi = (
+                    dps[source]
+                    .roi.shift(direction)
+                    .snap_to_grid(voxel_size, mode="closest")
+                )
 
         return dps
 
@@ -558,8 +559,8 @@ class GetNeuronPair(BatchProvider):
                         continue
 
                     vector = (
-                        add_locations[node_a, :] - add_clipped_roi.get_begin()
-                    ) - (base_locations[neighbor, :] - base_clipped_roi.get_begin())
+                        base_locations[neighbor, :] - base_clipped_roi.get_begin()
+                    ) - (add_locations[node_a, :] - add_clipped_roi.get_begin())
                     mag = np.linalg.norm(vector)
                     min_dist = min(min_dist, mag)
                     unit_vector = vector / (mag + 1)
