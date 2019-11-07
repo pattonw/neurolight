@@ -441,17 +441,18 @@ class GetNeuronPair(BatchProvider):
                     break
             logger.info("Got base batch")
 
-            if (
-                len(
-                    list(
-                        nx.weakly_connected_components(
-                            base_batch[self.nonempty_placeholder].graph
-                        )
+            wccs = list(
+                nx.weakly_connected_components(
+                    base_batch[self.nonempty_placeholder].graph.crop(
+                        roi=self._return_roi(request), copy=True
                     )
                 )
-                > 2
-            ):
-                return base_seed, None, Coordinate(0, 0, 0), profiling_stats
+            )
+            if len(wccs) > 2:
+                logger.info(
+                    f"Skipping add batch since we see {len(list(wccs))} connected components"
+                )
+                return base_seed, None, Coordinate([0, 0, 0]), profiling_stats
 
             for i in range(self.request_attempts):
                 points_request_add, add_seed = self.prepare_points(request)
@@ -464,6 +465,7 @@ class GetNeuronPair(BatchProvider):
                     final=(i == self.request_attempts - 1),
                 )
                 if direction is not None:
+                    logger.info("Got add batch")
                     return base_seed, add_seed, direction, profiling_stats
                 else:
                     continue
