@@ -1,5 +1,5 @@
 #from distutils.core import setup
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
         name='neurolight',
@@ -9,8 +9,5 @@ setup(
         author='Lisa Mais',
         author_email='Lisa.Mais@mdc-berlin.de',
         license='MIT',
-        packages=[
-            'neurolight',
-            'neurolight.gunpowder',
-        ]
+        packages=find_packages()
 )
