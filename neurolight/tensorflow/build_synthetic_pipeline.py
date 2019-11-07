@@ -33,7 +33,7 @@ class LabelToFloat32(gp.BatchFilter):
         batch[self.array] = gp.Array(intensity_data, spec)
 
 
-def train(n_iterations, setup_config, tensor_names, TENSOR_NAMES):
+def train(n_iterations, setup_config, mknet_tensor_names, loss_tensor_names):
 
     # Network hyperparams
     INPUT_SHAPE = setup_config["INPUT_SHAPE"]
@@ -139,26 +139,26 @@ def train(n_iterations, setup_config, tensor_names, TENSOR_NAMES):
         + gp.PreCache(cache_size=CACHE_SIZE, num_workers=NUM_WORKERS)
         + gp.tensorflow.Train(
             "train_net",
-            optimizer=create_custom_loss(tensor_names, setup_config),
+            optimizer=create_custom_loss(mknet_tensor_names, setup_config),
             loss=None,
-            inputs={tensor_names["raw"]: raw, tensor_names["gt_labels"]: labels},
+            inputs={mknet_tensor_names["raw"]: raw, mknet_tensor_names["gt_labels"]: labels},
             outputs={
-                tensor_names["embedding"]: embedding,
-                tensor_names["fg"]: fg,
+                mknet_tensor_names["embedding"]: embedding,
+                mknet_tensor_names["fg"]: fg,
                 "strided_slice_1:0": maxima,
                 "gt_fg:0": gt_fg,
-                TENSOR_NAMES["emst"]: emst,
-                TENSOR_NAMES["edges_u"]: edges_u,
-                TENSOR_NAMES["edges_v"]: edges_v,
-                TENSOR_NAMES["ratio_pos"]: ratio_pos,
-                TENSOR_NAMES["ratio_neg"]: ratio_neg,
-                TENSOR_NAMES["dist"]: dist,
-                TENSOR_NAMES["num_pos_pairs"]: num_pos_pairs,
-                TENSOR_NAMES["num_neg_pairs"]: num_neg_pairs,
+                loss_tensor_names["emst"]: emst,
+                loss_tensor_names["edges_u"]: edges_u,
+                loss_tensor_names["edges_v"]: edges_v,
+                loss_tensor_names["ratio_pos"]: ratio_pos,
+                loss_tensor_names["ratio_neg"]: ratio_neg,
+                loss_tensor_names["dist"]: dist,
+                loss_tensor_names["num_pos_pairs"]: num_pos_pairs,
+                loss_tensor_names["num_neg_pairs"]: num_neg_pairs,
             },
             gradients={
-                tensor_names["embedding"]: gradient_embedding,
-                tensor_names["fg"]: gradient_fg,
+                mknet_tensor_names["embedding"]: gradient_embedding,
+                mknet_tensor_names["fg"]: gradient_fg,
             },
             save_every=CHECKPOINT_EVERY,
             summary="Merge/MergeSummary:0",
