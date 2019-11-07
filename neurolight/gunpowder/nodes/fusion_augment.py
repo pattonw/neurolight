@@ -232,7 +232,9 @@ class FusionAugment(BatchFilter):
         # fuse points:
         if self.points_fused in request:
             batch.points[self.points_fused] = deepcopy(batch[self.points_base])
-            batch.points[self.points_fused].graph.merge(batch[self.points_add].graph)
+            batch.points[self.points_fused]._graph = batch.points[
+                self.points_base
+            ].graph.merge(batch[self.points_add].graph)
 
         return batch
 
