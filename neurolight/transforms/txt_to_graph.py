@@ -6,7 +6,7 @@ import logging
 
 from tqdm import tqdm
 
-from typing import Tuple
+from typing import Tuple, Generator, List
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,26 @@ def parse_txt(filename: Path, transform_path: Path) -> nx.Graph:
     graph.graph["spacing"] = spacing
 
     # parse file
+    for node_id, x, y, z, neighbors in node_gen(filename, transform_path):
+        location = voxel_to_micron_coords(np.array(x, y, z))
+        graph.add_node(int(node_id), location=location)
+        for v in neighbors:
+            graph.add_edge(int(node_id), int(v))
+
+    return graph
+
+
+def node_gen(filename: Path, transform_path: Path, origin=None, spacing=None):
+    """
+    original skeletonizations are stored in .txt files of the form:
+    node-index, x, y, z, neighbor-1-node_index, neighbor-2-node-index, ...
+    """
+    # swc's are directed
+
+    if origin is None or spacing is None:
+        origin, spacing = load_transform(transform_path)
+
+    # parse file
     with filename.open() as o_f:
         for line in tqdm(o_f.read().splitlines()):
             row = line.strip().split()
@@ -85,8 +105,5 @@ def parse_txt(filename: Path, transform_path: Path) -> nx.Graph:
             location = voxel_to_micron_coords(
                 np.array([int(x), int(y), int(z)]) - 1, origin, spacing
             )
-            graph.add_node(int(node_id), location=location)
-            for v in neighbors:
-                graph.add_edge(int(node_id), int(v))
-
-    return graph
+            x, y, z = location.tolist()
+            yield (node_id, x, y, z, list(neighbors))

@@ -25,7 +25,13 @@ logger = logging.getLogger(__name__)
 
 
 def swc_to_pickle(
-    axon: Path, dendrite: Path, transform: Path, output_file: Path = None
+    axon: Path,
+    dendrite: Path,
+    transform: Path,
+    output_file: Path = None,
+    offset=None,
+    resolution=None,
+    transpose=[0, 1, 2],
 ):
     name_parts = axon.name.split(".")
     file_ext = name_parts[-1]
@@ -33,21 +39,32 @@ def swc_to_pickle(
         file_ext == "swc"
     ), f"This function is inteded to work on swc files, not {file_ext} files"
 
-    consensus_graph = parse_consensus(axon, dendrite, transform)
+    if offset is None and resolution is None:
+        offset, resolution = load_transform(transform)
+
+    consensus_graph = parse_consensus(
+        axon, dendrite, transform, offset, resolution, transpose
+    )
     nx.write_gpickle(consensus_graph, output_file)
 
 
-def parse_consensus(axon: Path, dendrite: Path, transform: Path):
-    origin, spacing = load_transform(transform)
+def parse_consensus(
+    axon: Path,
+    dendrite: Path,
+    transform: Path,
+    offset=np.array([0, 0, 0]),
+    resolution=np.array([1, 1, 1]),
+    transpose=[0, 1, 2],
+):
 
-    axon_graph = parse_swc(axon, origin, spacing)
+    axon_graph = parse_swc(axon, transform, offset, resolution, transpose)
     assert nx.is_arborescence(axon_graph), "Axon graph is not an arborescence!"
-    dendrite_graph = parse_swc(dendrite, origin, spacing)
+    dendrite_graph = parse_swc(dendrite, transform, offset, resolution, transpose)
     assert nx.is_arborescence(dendrite_graph), "Dendrite graph is not an arborescence!"
 
     consensus_graph = merge_graphs(axon_graph, dendrite_graph)
-    consensus_graph.graph["spacing"] = spacing
-    consensus_graph.graph["origin"] = origin
+    consensus_graph.graph["spacing"] = resolution
+    consensus_graph.graph["origin"] = offset
     return consensus_graph
 
 
@@ -109,12 +126,33 @@ def micron_to_voxel_coords(
     return np.round((coord - origin) / spacing).astype(int)
 
 
-def parse_swc(filename: Path, origin: np.ndarray, spacing: np.ndarray) -> nx.DiGraph:
+def parse_swc(
+    filename: Path,
+    transform: Path,
+    offset=np.array([0, 0, 0]),
+    resolution=np.array([1, 1, 1]),
+    transpose=[0, 1, 2],
+) -> nx.DiGraph:
     # swc's are directed
     graph = nx.DiGraph()
 
+    # parse file
+    for node_id, vx, vy, vz, r, pt, hp, parent_id in node_gen(filename, transform):
+        location = ((np.array([vx, vy, vz]) + offset) * resolution).take(transpose)
+        graph.add_node(
+            node_id, location=location, radius=r, point_type=pt, human_placed=hp
+        )
+
+        if parent_id >= 0:
+            graph.add_edge(parent_id, node_id)
+    return graph
+
+
+def node_gen(filename: Path, transform_path: Path):
     # initialize file specific variables
     header = True
+    origin, spacing = load_transform(transform_path)
+
     offset = np.array([0, 0, 0])
     resolution = np.array([1, 1, 1])
 
@@ -137,25 +175,18 @@ def parse_swc(filename: Path, origin: np.ndarray, spacing: np.ndarray) -> nx.DiG
             if len(row) != 7:
                 raise ValueError("SWC has a malformed line: {}".format(line))
 
-            # extract data from row (point_id, type, x, y, z, radius, parent_id)
-            assert int(row[0]) not in graph.nodes, "Duplicate point {} found!".format(
-                int(row[0])
-            )
             node_id, node_type, x, y, z, radius, parent_id = row
-            location = (np.array([float(x) for x in row[2:5]]) + offset) * resolution
-            graph.add_node(
-                int(node_id),
-                location=location,
-                radius=float(row[5]),
-                point_type=int(row[1]),
-                human_placed=int(row[1]) == 43,
-            )
-            v, u = int(row[0]), int(row[6])
+            location = (np.array([float(c) for c in (x, y, z)]) + offset) * resolution
+            voxel_location = micron_to_voxel_coords(location, origin, spacing)
 
-            assert (u, v) not in graph.edges, "Duplicate edge {} found!".format((u, v))
-            if u != v and u is not None and v is not None and u >= 0 and v >= 0:
-                graph.add_edge(u, v)
-        return graph
+            x, y, z = voxel_location.tolist()
+            node_id, parent_id = int(row[0]), int(row[6])
+
+            r = float(row[5])
+            pt = int(row[1])
+            hp = int(row[1]) == 43
+
+            yield (node_id, x, y, z, r, pt, hp, parent_id)
 
 
 def _search_swc_header(line: str, key: str, default: np.ndarray) -> np.ndarray:
