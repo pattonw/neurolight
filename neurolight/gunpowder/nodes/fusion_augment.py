@@ -78,6 +78,7 @@ class FusionAugment(BatchFilter):
         points_fused,
         blend_mode="labels_mask",
         blend_smoothness=3,
+        gaussian_smooth_mode="nearest",
         num_blended_objects=0,
         scale_add_volume=True,
         soft_mask=None,
@@ -97,6 +98,7 @@ class FusionAugment(BatchFilter):
         self.points_fused = points_fused
         self.blend_mode = blend_mode
         self.blend_smoothness = blend_smoothness
+        self.gaussian_smooth_mode = gaussian_smooth_mode
         self.num_blended_objects = num_blended_objects
         self.scale_add_volume = scale_add_volume
         self.soft_mask = soft_mask
@@ -188,7 +190,7 @@ class FusionAugment(BatchFilter):
                 add_mask.astype("float32"),
                 sigma=self.blend_smoothness / np.array(raw_base_spec.voxel_size),
                 output=soft_mask,
-                mode="nearest",
+                mode=self.gaussian_smooth_mode,
             )
             soft_mask /= np.clip(np.max(soft_mask), 1e-5, float("inf"))
             soft_mask = np.clip((soft_mask * 2), 0, 1)
