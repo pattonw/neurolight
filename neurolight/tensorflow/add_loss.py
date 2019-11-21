@@ -21,6 +21,7 @@ num_neg_pairs_name = "PyFuncStateless_1:4"
 summaries_name = "Merge/MergeSummary:0"
 maxima = "reduced_maxima:0"
 gt_fg = "gt_fg:0"
+fg_pred = "fg_pred:0"
 
 loss_tensor_names = {
     "emst": emst_name,
@@ -34,6 +35,7 @@ loss_tensor_names = {
     "summaries": summaries_name,
     "maxima": maxima,
     "gt_fg": gt_fg,
+    "fg_pred": fg_pred,
 }
 
 
@@ -55,7 +57,8 @@ def create_custom_loss(mknet_tensor_names: Dict[str, str], config: Dict[str, Any
         embedding = graph.get_tensor_by_name(mknet_tensor_names["embedding"])
 
         # h, w
-        fg = graph.get_tensor_by_name(mknet_tensor_names["fg"])
+        fg_logits = graph.get_tensor_by_name(mknet_tensor_names["fg"])
+        fg_pred = tf.sigmoid(fg_logits, name="fg_pred")
 
         # h, w
         gt_labels = graph.get_tensor_by_name(mknet_tensor_names["gt_labels"])
@@ -66,7 +69,7 @@ def create_custom_loss(mknet_tensor_names: Dict[str, str], config: Dict[str, Any
         # h, w
 
         _, maxima = max_detection(
-            tf.reshape(fg, (1, *output_shape, 1)),
+            tf.reshape(fg_pred, (1, *output_shape, 1)),
             window_size=(1, *max_filter_size),
             threshold=maxima_threshold,
         )
@@ -77,11 +80,11 @@ def create_custom_loss(mknet_tensor_names: Dict[str, str], config: Dict[str, Any
         embedding_dims = len(embedding_shape)
         if embedding_dims == 2:
             # 1, k, h, w
-            embedding = tf.reshape(embedding, (1,) + tuple(embedding.get_shape().as_list()))
-            # k, 1, h, w
-            embedding = tf.transpose(
-                embedding, perm=[1, 0, 2, 3]
+            embedding = tf.reshape(
+                embedding, (1,) + tuple(embedding.get_shape().as_list())
             )
+            # k, 1, h, w
+            embedding = tf.transpose(embedding, perm=[1, 0, 2, 3])
         elif embedding_dims == 3:
             pass
 
@@ -123,8 +126,12 @@ def create_custom_loss(mknet_tensor_names: Dict[str, str], config: Dict[str, Any
         assert edges_u.name == edges_u_name, f"{edges_u.name} != {edges_u_name}"
         assert edges_v.name == edges_v_name, f"{edges_v.name} != {edges_v_name}"
 
-        fg_loss = tf.losses.mean_squared_error(gt_fg, fg)
+        loss_weights = graph.get_tensor_by_name(mknet_tensor_names["loss_weights"])
+        fg_loss = tf.losses.sigmoid_cross_entropy(
+            gt_fg, fg_logits, weights=loss_weights
+        )
 
+        # loss = um_loss + fg_loss
         loss = um_loss + fg_loss
 
         tf.summary.scalar("um_loss", um_loss)
