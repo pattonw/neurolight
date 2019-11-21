@@ -19,7 +19,7 @@ def txt_to_pickle(filename: Path, transform_path: Path, output_location: Path = 
     name_parts = filename.name.split(".")
     name = ".".join(name_parts[:-1])
     file_ext = name_parts[-1]
-    assert file_ext == "txt", "This function is intended for "
+    assert file_ext == "txt", "This function is intended for .txt files"
 
     graph = parse_txt(filename, transform_path)
 
@@ -103,7 +103,7 @@ def node_gen(filename: Path, transform_path: Path, origin=None, spacing=None):
 
             node_id, x, y, z, *neighbors = row
             location = voxel_to_micron_coords(
-                np.array([int(x), int(y), int(z)]) - 1, origin, spacing
+                np.array([float(x), float(y), float(z)]) - 1, origin, spacing
             )
             x, y, z = location.tolist()
             yield (node_id, x, y, z, list(neighbors))

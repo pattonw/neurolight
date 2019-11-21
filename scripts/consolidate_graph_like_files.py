@@ -22,6 +22,7 @@ tracing_source = Path("/groups/mousebrainmicro/mousebrainmicro/tracing_complete"
 axon_source_template = "{node_id}/consensus.swc"
 dendrite_source_template = "{node_id}/dendrite.swc"
 skeletonization_source_template = "/groups/mousebrainmicro/mousebrainmicro/cluster/Reconstructions/{sample}/skeleton-graph.txt"
+rescaled_skeletonization_source_template = "/groups/mousebrainmicro/mousebrainmicro/cluster/Reconstructions/{sample}/skeleton-graph-converted-from-0p25-um.txt"
 transform_source_template = "/nrs/mouselight/SAMPLES/{sample}/transform.txt"
 
 # data targets
@@ -46,14 +47,12 @@ samples = (
 
 
 def ingest_skeletonization(
-    sample: str, skeletonization_file: Path, transform_file: Path
+    sample: str, skeletonization_file: Path, transform_file: Path, url: str
 ):
     """
     Storing data in MongoDB using psuedo world coords (1,.3,.3) microns rather than the
     slightly off floats found in the transform.txt file.
     """
-    # checkout robomongo
-    url = "mongodb://linajeaAdmin:FeOOHnH2O@funke-mongodb4/admin?replicaSet=rsLinajea"
 
     mongo_graph_provider = daisy.persistence.MongoDbGraphProvider(
         f"mouselight-{sample}-skeletonization", url, directed=False, mode="w"
@@ -118,13 +117,11 @@ def ingest_skeletonization(
     )
 
 
-def ingest_consensus(sample: str, consensus_dir: Path, transform_file: Path):
+def ingest_consensus(sample: str, consensus_dir: Path, transform_file: Path, url:str):
     """
     Storing data in MongoDB using psuedo world coords (1,.3,.3) microns rather than the
     slightly off floats found in the transform.txt file.
     """
-    # checkout robomongo
-    url = "mongodb://linajeaAdmin:FeOOHnH2O@funke-mongodb4/admin?replicaSet=rsLinajea"
 
     mongo_graph_provider = daisy.persistence.MongoDbGraphProvider(
         f"mouselight-{sample}-consensus", url, directed=True, mode="w"
@@ -190,17 +187,12 @@ for sample in tqdm(samples, "Samples: "):
     assert transform.exists(), f"Sample {sample} has no transform.txt at {transform}!"
 
     # read skeletonization and move it
-    skeletonization = Path(skeletonization_source_template.format(sample=sample))
+    skeletonization = Path(rescaled_skeletonization_source_template.format(sample=sample))
     assert (
         skeletonization.exists()
     ), f"Sample {sample} has no skeleton-graph.txt at {skeletonization}"
     
-    if sample == "2018-07-02":
-        ingest_consensus(sample, sample_tracings, transform)
-    else:
-        continue
     logger.info(f"Starting sample {sample}!")
-    continue
 
     # ingest_consensus(sample, sample_tracings, transform)
     # skeletonizations for samples 2018-10-01 and 2018-12-01 need to be reuploaded
