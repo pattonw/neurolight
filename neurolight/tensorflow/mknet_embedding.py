@@ -13,8 +13,6 @@ def mknet(config: Dict[str, Any], output_path: Path = Path()):
     embedding_dims = config["EMBEDDING_DIMS"]
     num_fmaps_embedding = config["NUM_FMAPS_EMBEDDING"]
     fmap_inc_factors_embedding = config["FMAP_INC_FACTORS_EMBEDDING"]
-    num_fmaps_foreground = config["NUM_FMAPS_FOREGROUND"]
-    fmap_inc_factors_foreground = config["FMAP_INC_FACTORS_FOREGROUND"]
     downsample_factors = config["DOWNSAMPLE_FACTORS"]
     kernel_size_up = config["KERNEL_SIZE_UP"]
 
@@ -26,15 +24,6 @@ def mknet(config: Dict[str, Any], output_path: Path = Path()):
             raw_batched,
             num_fmaps=num_fmaps_embedding,
             fmap_inc_factors=fmap_inc_factors_embedding,
-            downsample_factors=downsample_factors,
-            kernel_size_up=kernel_size_up,
-            constant_upsample=True,
-        )
-    with tf.variable_scope("fg"):
-        fg_unet = unet(
-            raw_batched,
-            num_fmaps=num_fmaps_foreground,
-            fmap_inc_factors=fmap_inc_factors_foreground,
             downsample_factors=downsample_factors,
             kernel_size_up=kernel_size_up,
             constant_upsample=True,
@@ -51,13 +40,6 @@ def mknet(config: Dict[str, Any], output_path: Path = Path()):
     embedding_norms = tf.norm(embedding_batched[0], axis=1, keep_dims=True)
     embedding_scaled = embedding_batched[0] / embedding_norms
 
-    # fg_batched = conv_pass(
-    #     fg_unet[0], kernel_sizes=[1], num_fmaps=1, activation="sigmoid", name="fg"
-    # )
-    fg_batched = conv_pass(
-        fg_unet[0], kernel_sizes=[1], num_fmaps=1, activation=None, name="fg"
-    )
-
     output_shape_batched = embedding_scaled.get_shape().as_list()
     output_shape = tuple(
         output_shape_batched[2:]
@@ -68,17 +50,8 @@ def mknet(config: Dict[str, Any], output_path: Path = Path()):
     ), "output shapes don't match"
 
     embedding = tf.reshape(embedding_scaled, (embedding_dims,) + output_shape)
-    fg = tf.reshape(fg_batched[0], output_shape)
-    gt_labels = tf.placeholder(tf.int64, shape=output_shape, name="gt_labels")
-    loss_weights = tf.placeholder(tf.float32, shape=output_shape, name="loss_weights")
 
-    tf.train.export_meta_graph(filename=output_path / "train_net.meta")
-    names = {
-        "raw": raw.name,
-        "embedding": embedding.name,
-        "fg": fg.name,
-        "gt_labels": gt_labels.name,
-        "loss_weights": loss_weights.name,
-    }
+    tf.train.export_meta_graph(filename=output_path / "train_net_embedding.meta")
+    names = {"raw": raw.name, "embedding": embedding.name}
     with (output_path / "tensor_names.json").open("w") as f:
         json.dump(names, f)

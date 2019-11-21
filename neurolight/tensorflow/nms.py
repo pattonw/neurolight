@@ -44,6 +44,7 @@ def max_detection(soft_mask, window_size: List, threshold: float):
     # Fix doubles
     # Check the necessary window size and adapt for isotropic vs unisotropic nms:
     double_suppresion_window = [1, *[1 if dim == 1 else 3 for dim in w_dims], 1]
+    # add 1 to all local maxima
     sm_maxima = tf.add(tf.cast(maxima, tf.float32), soft_mask)
 
     # sm_maxima smoothed over large window
