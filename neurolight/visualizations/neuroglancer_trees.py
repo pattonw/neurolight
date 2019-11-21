@@ -34,11 +34,11 @@ def build_trees(edge_rows, voxel_size):
         if u not in trees.nodes:
             trees.add_node(u, pos=pos_u)
         else:
-            assert trees.nodes[u]["location"] == pos_u
+            assert trees.nodes[u]["location"] == pos_u, "locations don't match"
         if v not in trees.nodes:
             trees.add_node(v, pos=pos_v)
         else:
-            assert trees.nodes[v]["location"] == pos_v
+            assert trees.nodes[v]["location"] == pos_v, "locations don't match"
 
         trees.add_edge(u, v, d=np.linalg.norm(pos_u - pos_v))
     return trees
@@ -47,6 +47,7 @@ def build_trees(edge_rows, voxel_size):
 def add_trees(s, trees, node_id, name, visible=False):
     if trees is None:
         return None
+    trees = nx.to_directed(trees)
     for i, cc_nodes in enumerate(nx.weakly_connected_components(trees)):
         cc = trees.subgraph(cc_nodes)
         mst = []

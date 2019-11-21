@@ -9,6 +9,7 @@ import json
 import random
 import sys
 from pathlib import Path
+from scipy.ndimage.filters import maximum_filter
 
 from funlib.show.neuroglancer import add_layer
 
@@ -38,11 +39,11 @@ def build_trees(edge_rows, voxel_size):
         if u not in trees.nodes:
             trees.add_node(u, pos=pos_u)
         else:
-            assert trees.nodes[u]["pos"] == pos_u
+            assert trees.nodes[u]["pos"] == pos_u, "locations don't match"
         if v not in trees.nodes:
             trees.add_node(v, pos=pos_v)
         else:
-            assert trees.nodes[v]["pos"] == pos_v
+            assert trees.nodes[v]["pos"] == pos_v, "locations don't match"
 
         trees.add_edge(u, v, d=np.linalg.norm(pos_u - pos_v))
     return trees
@@ -60,11 +61,11 @@ def build_trees_from_mst(
         if edge[0] not in trees.nodes:
             trees.add_node(edge[0], pos=pos_u)
         else:
-            assert trees.nodes[edge[0]]["pos"] == pos_u
+            assert trees.nodes[edge[0]]["pos"] == pos_u, "locations don't match"
         if edge[1] not in trees.nodes:
             trees.add_node(edge[1], pos=pos_v)
         else:
-            assert trees.nodes[edge[1]]["pos"] == pos_v
+            assert trees.nodes[edge[1]]["pos"] == pos_v, "locations don't match"
         trees.add_edge(edge[0], edge[1], d=edge[2])
     return trees
 
@@ -97,7 +98,7 @@ def add_trees(s, trees, node_id, name, visible=False):
         )
 
 
-def visualize_hdf5(hdf5_file: Path, voxel_size, mst=False):
+def visualize_hdf5(hdf5_file: Path, voxel_size, mst=False, maxima_for = None):
     voxel_size = daisy.Coordinate(voxel_size)
     dataset = h5py.File(hdf5_file)
     volumes = list(dataset.get("volumes", {}).keys())
@@ -107,6 +108,15 @@ def visualize_hdf5(hdf5_file: Path, voxel_size, mst=False):
     with viewer.txn() as s:
         for volume in volumes:
             v = daisy.open_ds(str(hdf5_file.absolute()), f"volumes/{volume}")
+            if volume == maxima_for:
+                v.materialize()
+                max_filtered = maximum_filter(v.data, (3, 10, 10))
+                maxima = np.logical_and(max_filtered == v.data, v.data > 0.01)
+                m = daisy.Array(maxima, v.roi, v.voxel_size)
+                add_layer(s, m, f"{volume}-maxima")
+            if volume == "embedding":
+                v.materialize()
+                v.data = (v.data + 1) / 2
             add_layer(s, v, volume, visible=False)
 
         node_id = itertools.count(start=1)
