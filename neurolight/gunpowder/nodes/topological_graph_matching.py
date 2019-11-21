@@ -6,8 +6,7 @@ from gunpowder import (
     SpatialGraph,
     GraphPoints,
 )
-from funlib.match.graph_to_tree_matcher import GraphToTreeMatcher
-from funlib.match.preprocess import mouselight_preprocessing
+from funlib.match.helper_functions import match
 import networkx as nx
 
 import copy
@@ -15,6 +14,9 @@ import logging
 from typing import Optional, Set, Hashable
 from pathlib import Path
 import pickle
+
+from neurolight.match.costs import get_costs
+from neurolight.match.preprocess import mouselight_preprocessing
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,8 @@ class TopologicalMatcher(BatchFilter):
         failures: Optional[Path] = None,
         try_complete: bool = True,
         use_gurobi: bool = True,
+        location_attr: str = "location",
+        penalty_attr: str = "penalty",
     ):
 
         self.G = G
@@ -42,6 +46,9 @@ class TopologicalMatcher(BatchFilter):
         self.failures = failures
         self.try_complete = try_complete
         self.use_gurobi = use_gurobi
+
+        self.location_attr
+        self.penalty_attr
 
     def setup(self):
         self.enable_autoskip()
@@ -59,18 +66,13 @@ class TopologicalMatcher(BatchFilter):
         mouselight_preprocessing(graph, self.max_gap_crossing)
         tree = copy.deepcopy(batch[self.T].graph)
 
-        try:
-            if self.try_complete:
-                matched = self.__solve_tree(graph, tree)
-            else:
-                raise ValueError("Skip initial solve!")
-        except ValueError:
-            try:
-                matched = self.__solve_piecewise(graph, tree)
-            except Exception:
-                logger.warning("Failed to find a solution for T!")
-                self.__save_failed_matching(graph, tree, failure_type=3)
-                matched = SpatialGraph()
+        success = False
+        if self.try_complete:
+            matched, success = self.__solve_tree(graph, tree)
+            if not success:
+                logger.debug("failed to match a full tree")
+        if not success:
+            matched, success = self.__solve_piecewise(graph, tree)
 
         result = GraphPoints._from_graph(matched, copy.deepcopy(batch[self.T].spec))
 
@@ -78,27 +80,37 @@ class TopologicalMatcher(BatchFilter):
 
     def __solve_tree(self, graph, tree):
 
+        if len(graph.nodes) < 1 or len(tree.nodes) < 1:
+            return SpatialGraph()
         logger.debug("initializing matcher")
-        matcher = GraphToTreeMatcher(
+        node_costs, edge_costs = get_costs(
             graph,
             tree,
-            match_distance_threshold=self.match_distance_threshdold,
+            location_attr=self.location_attr,
+            penalty_attr=self.penalty_attr,
+            node_match_threshold=self.match_distance_threshdold,
+            edge_match_threshold=self.match_distance_threshdold,
             node_balance=self.node_balance,
-            use_gurobi=self.use_gurobi,
         )
-        logger.debug("optimizing!")
-        solution = matcher.solve()
-        matched = matcher.create_tree(solution)
-        logger.info("Solution found!")
+        success = True
+        try:
+            matched = match(
+                graph, tree, node_match_costs=node_costs, edge_edge_costs=edge_costs
+            )
+        except ValueError as e:
+            logger.debug(e)
+            self.__save_failed_matching(graph, tree)
+            matched = nx.DiGraph()
+            success = False
 
-        return matched
+        return matched, success
 
     def __solve_piecewise(self, graph, tree):
         """
         If the matching cannot be done as a whole, attempt to do it piecewise.
         This has several advantages and disadvantages.
-        
-        Advantages: 
+
+        Advantages:
             If there are many components, will at least get a partial
                 solution even if one component is un-matchable.
         Disadvantages:
@@ -116,44 +128,36 @@ class TopologicalMatcher(BatchFilter):
         wccs = list(nx.weakly_connected_components(tree))
         for i, wcc in enumerate(wccs):
             component = tree.subgraph(wcc)
-            try:
-                comp_matched = self.__solve_tree(graph, component)
+
+            comp_matched, success = self.__solve_tree(graph, component)
+            if success:
                 matched_components.append(comp_matched)
 
                 # keep track of which nodes were used
                 for node in comp_matched.nodes:
                     mapped_components = node_component_map.setdefault(node, [])
-                    if tuple(mapped_components) in invalid_sets:
-                        invalid_sets.remove()
                     mapped_components += [i]
                     if len(mapped_components) > 1:
                         # These are sets of components in T that reuse the same node
                         # in G. They can be matched, and probably would be successfully
                         # matched if they had knowledge of each other due to preprocessing.
                         invalid_sets.add(tuple(mapped_components))
-            except ValueError:
-                # These are components of T that cannot be matched in G
-                self.__save_failed_matching(graph, tree, wcc, failure_type=0)
+            else:
+                logger.debug("Failed to match a component!")
 
         valid_component_count = len(matched_components)
-        logger.info(
+        logger.debug(
             f"Found a solution for {len(matched_components)} of {len(wccs)} components!"
         )
         for invalid_set in invalid_sets:
             component_group = set(x for ind in invalid_set for x in wccs[ind])
             group_subgraph = tree.subgraph(component_group)
-            try:
-                matched = self.__solve_tree(graph, group_subgraph)
-            except ValueError:
-                # Not sure what went wrong here! Individually these components passed.
-                # Graph preprocessing must not have been good enough to handle this
-                # case.
-                self.__save_failed_matching(
-                    graph, tree, component_group, failure_type=1
-                )
-                matched = SpatialGraph()
-            matched_components.append(matched)
-        logger.info(
+            matched, success = self.__solve_tree(graph, group_subgraph)
+            if success:
+                matched_components.append(matched)
+            else:
+                logger.debug("Failed to match a component group")
+        logger.debug(
             f"Found a solution for {len(matched_components) - valid_component_count} "
             f"of {len(invalid_sets)} component groups!"
         )
