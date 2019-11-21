@@ -141,6 +141,7 @@ class GetNeuronPair(BatchProvider):
         points: Tuple[PointsKey, PointsKey],
         arrays: Tuple[ArrayKey, ArrayKey],
         labels: Tuple[ArrayKey, ArrayKey],
+        output_shape: Coordinate,
         nonempty_placeholder: Optional[PointsKey] = None,
         seperate_by: Tuple[float, float] = (0.0, 1.0),
         shift_attempts: int = 50,
@@ -151,6 +152,7 @@ class GetNeuronPair(BatchProvider):
         self.nonempty_placeholder = nonempty_placeholder
         self.array_source = array_source
         self.label_source = label_source
+        self.output_shape = output_shape
         self.points = points
         self.arrays = arrays
         self.labels = labels
@@ -324,64 +326,93 @@ class GetNeuronPair(BatchProvider):
         valid points are found.
         """
 
-        logger.info(f"growing request by {self._get_growth()}")
+        logger.debug(f"growing request by {self._get_growth()}")
 
-        base_seed, add_seed, direction, prepare_profiling_stats = self.get_valid_seeds(
-            request
-        )
+        has_component = False
+        while not has_component:
 
-        timing_prepare = Timing(self, "prepare")
-        timing_prepare.start()
-
-        request_base = self.prepare(request, base_seed, -direction)
-        logger.debug(f"base_request shrank to {request_base[self.point_source].roi}")
-        if add_seed is not None:
-            request_add = self.prepare(request, add_seed, direction)
-            logger.debug(f"add_request shrank to {request_add[self.point_source].roi}")
-        else:
-            request_add = None
-            logger.debug(f"No add_request needed!")
-
-        timing_prepare.stop()
-
-        base = self.upstream_provider.request_batch(request_base)
-        if request_add is not None:
-            add = self.upstream_provider.request_batch(request_add)
-        else:
-            add = self._empty_copy(base)
-
-        timing_process = Timing(self, "process")
-        timing_process.start()
-
-        base = self.process(base, Coordinate([0, 0, 0]), request=request)
-        add = self.process(add, -Coordinate([0, 0, 0]), request=request)
-
-        if (
-            request_add is not None
-            and len(add[self.point_source].graph.nodes) > 1
-            and len(base[self.point_source].graph.nodes) > 1
-        ):
-            min_dist = min(
-                [
-                    np.linalg.norm(a["location"] - b["location"])
-                    for a, b in itertools.product(
-                        base[self.point_source].graph.nodes.values(),
-                        add[self.point_source].graph.nodes.values(),
-                    )
-                ]
+            base_seed, add_seed, direction, prepare_profiling_stats = self.get_valid_seeds(
+                request
             )
-            logger.info(f"Got a final min dist of {min_dist}")
-        elif request_add is not None:
-            logger.warning("Got a final min dist of inf")
 
-        batch = self.merge_batches(base, add)
+            timing_prepare = Timing(self, "prepare")
+            timing_prepare.start()
 
-        logger.debug("get neuron pair got {}".format(batch))
+            request_base = self.prepare(request, base_seed, -direction)
+            logger.debug(
+                f"base_request shrank to {request_base[self.point_source].roi}"
+            )
+            if add_seed is not None:
+                request_add = self.prepare(request, add_seed, direction)
+                logger.debug(
+                    f"add_request shrank to {request_add[self.point_source].roi}"
+                )
+            else:
+                request_add = None
+                logger.debug(f"No add_request needed!")
 
-        timing_process.stop()
-        batch.profiling_stats.merge_with(prepare_profiling_stats)
-        batch.profiling_stats.add(timing_prepare)
-        batch.profiling_stats.add(timing_process)
+            timing_prepare.stop()
+
+            base = self.upstream_provider.request_batch(request_base)
+            if request_add is not None:
+                add = self.upstream_provider.request_batch(request_add)
+            else:
+                add = self._empty_copy(base)
+
+            wccs_base = list(
+                nx.weakly_connected_components(
+                    base[self.point_source].graph.crop(
+                        roi=self._centered_output_roi(base[self.point_source].spec.roi),
+                        copy=True,
+                    )
+                )
+            )
+            wccs_add = list(
+                nx.weakly_connected_components(
+                    add[self.point_source].graph.crop(
+                        roi=self._centered_output_roi(add[self.point_source].spec.roi),
+                        copy=True,
+                    )
+                )
+            )
+            if len(wccs_add) + len(wccs_base) < 1:
+                logger.debug("Failed batch, redo!")
+                continue
+
+            has_component = True
+
+            timing_process = Timing(self, "process")
+            timing_process.start()
+
+            base = self.process(base, Coordinate([0, 0, 0]), request=request)
+            add = self.process(add, -Coordinate([0, 0, 0]), request=request)
+
+            if (
+                request_add is not None
+                and len(add[self.point_source].graph.nodes) > 1
+                and len(base[self.point_source].graph.nodes) > 1
+            ):
+                min_dist = min(
+                    [
+                        np.linalg.norm(a["location"] - b["location"])
+                        for a, b in itertools.product(
+                            base[self.point_source].graph.nodes.values(),
+                            add[self.point_source].graph.nodes.values(),
+                        )
+                    ]
+                )
+                logger.debug(f"Got a final min dist of {min_dist}")
+            elif request_add is not None:
+                logger.debug("Got a final min dist of inf")
+
+            batch = self.merge_batches(base, add)
+
+            logger.debug("get neuron pair got {}".format(batch))
+
+            timing_process.stop()
+            batch.profiling_stats.merge_with(prepare_profiling_stats)
+            batch.profiling_stats.add(timing_prepare)
+            batch.profiling_stats.add(timing_process)
 
         return batch
 
@@ -440,17 +471,20 @@ class GetNeuronPair(BatchProvider):
                 if len(base_batch[self.nonempty_placeholder].graph.nodes) > 0:
                     # Can happen if there are processing steps between random location and here.
                     break
-            logger.info("Got base batch")
+            logger.debug("Got base batch")
 
             wccs = list(
                 nx.weakly_connected_components(
                     base_batch[self.nonempty_placeholder].graph.crop(
-                        roi=self._return_roi(request), copy=True
+                        roi=self._centered_output_roi(
+                            base_batch[self.nonempty_placeholder].spec.roi
+                        ),
+                        copy=True,
                     )
                 )
             )
             if len(wccs) > 2:
-                logger.info(
+                logger.debug(
                     f"Skipping add batch since we see {len(list(wccs))} connected components"
                 )
                 return base_seed, None, Coordinate([0, 0, 0]), profiling_stats
@@ -466,7 +500,7 @@ class GetNeuronPair(BatchProvider):
                     final=(i == self.request_attempts - 1),
                 )
                 if direction is not None:
-                    logger.info("Got add batch")
+                    logger.debug("Got add batch")
                     return base_seed, add_seed, direction, profiling_stats
                 else:
                     continue
@@ -531,7 +565,7 @@ class GetNeuronPair(BatchProvider):
 
             # if queried points are empty, skip
             if len(clipped_add_points) < 1 and len(clipped_base_points) < 1:
-                logger.info(f"no points in centered roi!")
+                logger.debug(f"no points in centered roi!")
                 continue
 
             # apply twice the shift to add points
@@ -577,12 +611,12 @@ class GetNeuronPair(BatchProvider):
             )
             direction /= count
             if np.linalg.norm(direction) < 1e-2:
-                logger.warning(f"Moving too slow. Probably stuck!")
+                logger.debug(f"Moving too slow. Probably stuck!")
                 return None
             current_shift += direction + (np.random.random(3) - 0.5)
             np.clip(current_shift, -max_shift, max_shift, out=current_shift)
 
-        logger.info(f"Request failed at {current_shift}. New Request!")
+        logger.debug(f"Request failed at {current_shift}. New Request!")
         if Path("test_output").exists():
             if not Path("test_output", "distances.obj").exists():
                 pickle.dump(
@@ -632,6 +666,10 @@ class GetNeuronPair(BatchProvider):
                     + "the same roi, but we see {} and {}"
                 ).format(roi_a, roi_b)
         return rois[0]
+
+    def _centered_output_roi(self, input_roi):
+        start = input_roi.get_center() - self.output_shape / 2
+        return Roi(start, self.output_shape)
 
     def _extract_roi(self, larger, smaller, direction):
         center = larger.get_offset() + larger.get_shape() // 2
