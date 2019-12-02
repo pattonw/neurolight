@@ -47,12 +47,12 @@ class TopologicalMatcher(BatchFilter):
         self.try_complete = try_complete
         self.use_gurobi = use_gurobi
 
-        self.location_attr
-        self.penalty_attr
+        self.location_attr = location_attr
+        self.penalty_attr = penalty_attr
 
     def setup(self):
         self.enable_autoskip()
-        self.provides(self.matched, self.spec[self.T])
+        self.provides(self.matched, copy.deepcopy(self.spec[self.T]))
 
     def prepare(self, request: BatchRequest) -> BatchRequest:
         deps = BatchRequest()
@@ -62,7 +62,7 @@ class TopologicalMatcher(BatchFilter):
 
     def process(self, batch: Batch, request: BatchRequest):
 
-        graph = copy.deepcopy(batch[self.G].graph)
+        graph = copy.deepcopy(batch[self.G].graph).to_undirected()
         mouselight_preprocessing(graph, self.max_gap_crossing)
         tree = copy.deepcopy(batch[self.T].graph)
 
@@ -95,7 +95,7 @@ class TopologicalMatcher(BatchFilter):
         success = True
         try:
             matched = match(
-                graph, tree, node_match_costs=node_costs, edge_edge_costs=edge_costs
+                graph, tree, node_match_costs=node_costs, edge_match_costs=edge_costs
             )
         except ValueError as e:
             logger.debug(e)
@@ -161,6 +161,8 @@ class TopologicalMatcher(BatchFilter):
             f"Found a solution for {len(matched_components) - valid_component_count} "
             f"of {len(invalid_sets)} component groups!"
         )
+        if len(matched_components) == 0:
+            return nx.DiGraph(), False
         try:
             complete = nx.disjoint_union_all(matched_components)
         except Exception:
@@ -168,12 +170,12 @@ class TopologicalMatcher(BatchFilter):
             # that failed when components were run individually, and was very
             # close to a third component, s.t. when running the two components
             # of the crossover together, it forced one of them to use a node
-            # that was already in use. At this point I'm just going to throw
+            # that was already in use by the third. At this point I'm just going to throw
             # away that data rather than keep running more matchings.
-            # If this becomes a problem, consider a recursive/iterative program.
+            # If this becomes a problem, consider a recursive/iterative solution.
             complete = nx.disjoint_union_all(matched_components[: len(wccs)])
             self.__save_failed_matching(graph, tree, failure_type=2)
-        return complete
+        return complete, True
 
     def __save_failed_matching(
         self,
@@ -187,16 +189,15 @@ class TopologicalMatcher(BatchFilter):
         On matching failure, save the graph, tree and component for which the matching failed.
         Only saves up to 100 failures. After that point it will simply stop saving them.
         """
+        if self.failures is None:
+            return
         if not self.failures.exists():
             self.failures.mkdir()
         if self.failures.is_dir():
             count = len(list(self.failures.iterdir()))
             if count >= 1000:
                 return
-            data = {"graph": graph, "tree": tree, "component": component}
-            filename = (
-                f"{count:03}_{failure_type}.obj"
-                if batch_id is None
-                else f"{count:03}_{batch_id}_{failure_type}.obj"
-            )
-            pickle.dump(data, (self.failures / filename).open("wb"))
+            failure_dir = self.failures / f"{count:03}"
+            failure_dir.mkdir(exist_ok=True)
+            pickle.dump(graph, (failure_dir / "graph.obj").open("wb"))
+            pickle.dump(tree, (failure_dir / "tree.obj").open("wb"))
