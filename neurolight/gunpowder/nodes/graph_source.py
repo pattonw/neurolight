@@ -177,8 +177,14 @@ class GraphSource(BatchProvider):
         to calcualte the voxel coordinate, which can then be multiplied by
         the approximate voxel size to get psuedo world coordinates for each point.
         """
-        origin = self._graph.graph["origin"]
-        spacing = self._graph.graph["spacing"]
+        origin = self._graph.graph.get("origin")
+        if origin is None:
+            origin = np.array([0, 0, 0])
+            logger.warning(f"Origin not provided by graph! Using: {origin}")
+        spacing = self._graph.graph.get("spacing")
+        if spacing is None:
+            spacing = np.array([1, 1, 1])
+            logger.warning(f"Spacing not provided by graph! Using: {spacing}")
         for node, attrs in self._graph.nodes.items():
             attrs["location"] = (
                 ((attrs["location"] - origin) / spacing).take(self.transpose)
