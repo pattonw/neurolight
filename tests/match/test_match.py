@@ -4,11 +4,21 @@ import pytest
 
 from neurolight.match.costs import get_costs
 from neurolight.match.preprocess import mouselight_preprocessing
-from funlib.match.helper_functions import match
+from neurolight.gunpowder.nodes.topological_graph_matching import TopologicalMatcher
+from neurolight.gunpowder.nodes.graph_source import GraphSource
 from funlib.match.helper_functions import check_gurobi_license
 
+from gunpowder import (
+    MergeProvider,
+    BatchRequest,
+    Roi,
+    Coordinate,
+    PointsSpec,
+    PointsKey,
+    build,
+)
+
 from pathlib import Path
-import pickle
 
 
 def skip_gurobi_if_no_license():
@@ -63,27 +73,38 @@ def test_realistic_valid_examples(example, use_gurobi):
     penalty_attr = "penalty"
     location_attr = "location"
     example_dir = Path(__file__).parent / "mouselight_examples" / "valid" / example
-    skeletonization = pickle.load((example_dir / "graph.obj").open("rb"))
-    mouselight_preprocessing(
-        skeletonization,
-        max_dist=48,
-        voxel_size=[10, 3, 3],
-        penalty_attr=penalty_attr,
-        location_attr=location_attr,
-    )
-    consensus = pickle.load((example_dir / "tree.obj").open("rb"))
 
-    node_costs, edge_costs = get_costs(
-        skeletonization,
-        consensus,
-        location_attr="location",
-        penalty_attr="penalty",
-        node_match_threshold=76,
-        edge_match_threshold=76,
-        node_balance=10,
+    consensus = PointsKey("CONSENSUS")
+    skeletonization = PointsKey("SKELETONIZATION")
+    matched = PointsKey("MATCHED")
+
+    inf_roi = Roi(Coordinate((None,) * 3), Coordinate((None,) * 3))
+
+    request = BatchRequest()
+    request[matched] = PointsSpec(roi=inf_roi)
+
+    pipeline = (
+        (
+            GraphSource(example_dir / "graph.obj", [skeletonization]),
+            GraphSource(example_dir / "tree.obj", [consensus]),
+        )
+        + MergeProvider()
+        + TopologicalMatcher(
+            skeletonization,
+            consensus,
+            matched,
+            76,
+            48,
+            use_gurobi=use_gurobi,
+            location_attr=location_attr,
+            penalty_attr=penalty_attr,
+        )
     )
 
-    match(skeletonization, consensus, node_costs, edge_costs, use_gurobi=use_gurobi)
+    with build(pipeline):
+        batch = pipeline.request_batch(request)
+        assert matched in batch
+        assert len(batch[matched].graph.nodes()) > 0
 
 
 invalid_examples = [
@@ -100,28 +121,38 @@ def test_realistic_invalid_examples(example, use_gurobi):
     penalty_attr = "penalty"
     location_attr = "location"
     example_dir = Path(__file__).parent / "mouselight_examples" / "invalid" / example
-    skeletonization = pickle.load((example_dir / "graph.obj").open("rb"))
-    mouselight_preprocessing(
-        skeletonization,
-        max_dist=48,
-        voxel_size=[10, 3, 3],
-        penalty_attr=penalty_attr,
-        location_attr=location_attr,
-    )
-    consensus = pickle.load((example_dir / "tree.obj").open("rb"))
 
-    node_costs, edge_costs = get_costs(
-        skeletonization,
-        consensus,
-        location_attr=location_attr,
-        penalty_attr=penalty_attr,
-        node_match_threshold=76,
-        edge_match_threshold=76,
-        node_balance=10,
+    consensus = PointsKey("CONSENSUS")
+    skeletonization = PointsKey("SKELETONIZATION")
+    matched = PointsKey("MATCHED")
+
+    inf_roi = Roi(Coordinate((None,) * 3), Coordinate((None,) * 3))
+
+    request = BatchRequest()
+    request[matched] = PointsSpec(roi=inf_roi)
+
+    pipeline = (
+        (
+            GraphSource(example_dir / "graph.obj", [skeletonization]),
+            GraphSource(example_dir / "tree.obj", [consensus]),
+        )
+        + MergeProvider()
+        + TopologicalMatcher(
+            skeletonization,
+            consensus,
+            matched,
+            76,
+            48,
+            use_gurobi=use_gurobi,
+            location_attr=location_attr,
+            penalty_attr=penalty_attr,
+        )
     )
 
-    with pytest.raises(ValueError, match=r"Optimal solution \*NOT\* found"):
-        match(skeletonization, consensus, node_costs, edge_costs, use_gurobi=use_gurobi)
+    with build(pipeline):
+        batch = pipeline.request_batch(request)
+        assert matched in batch
+        assert len(batch[matched].graph.nodes()) == 0
 
 
 def test_preprocessing():
