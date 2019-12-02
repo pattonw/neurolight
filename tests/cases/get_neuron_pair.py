@@ -52,6 +52,9 @@ class GetNeuronPairTest(SWCBaseTest):
         labels_a = ArrayKey("LABELS_A")
         labels_b = ArrayKey("LABELS_B")
 
+        data_shape = 5
+        output_shape = Coordinate((data_shape, data_shape, data_shape))
+
         # Get points from test swc
         swc_file_source = SwcFileSource(
             path,
@@ -114,18 +117,17 @@ class GetNeuronPairTest(SWCBaseTest):
             seperate_by=(1, 3),
             shift_attempts=100,
             request_attempts=10,
+            output_shape=output_shape,
         )
 
         request = BatchRequest()
 
-        data_shape = 5
-
-        request.add(points_a, Coordinate((data_shape, data_shape, data_shape)))
-        request.add(points_b, Coordinate((data_shape, data_shape, data_shape)))
-        request.add(img_a, Coordinate((data_shape, data_shape, data_shape)))
-        request.add(img_b, Coordinate((data_shape, data_shape, data_shape)))
-        request.add(labels_a, Coordinate((data_shape, data_shape, data_shape)))
-        request.add(labels_b, Coordinate((data_shape, data_shape, data_shape)))
+        request.add(points_a, output_shape)
+        request.add(points_b, output_shape)
+        request.add(img_a, output_shape)
+        request.add(img_b, output_shape)
+        request.add(labels_a, output_shape)
+        request.add(labels_b, output_shape)
 
         with build(pipeline):
             for i in range(10):

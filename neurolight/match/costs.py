@@ -63,7 +63,12 @@ def get_costs(
             penalty = graph.edges[graph_e].get(penalty_attr, 0) + tree.edges[
                 tree_e
             ].get(penalty_attr, 0)
-            edge_matchings.append((graph_e, tree_e, edge_cost(distance, penalty)))
+            match_cost = edge_cost(distance, penalty)
+            edge_matchings.append((graph_e, tree_e, match_cost))
+
+            if not isinstance(graph, nx.DiGraph):
+                graph_e_inv = (graph_e[1], graph_e[0])
+                edge_matchings.append((graph_e_inv, tree_e, match_cost))
 
     return node_matchings, edge_matchings
 
@@ -85,11 +90,9 @@ def initialize_rtree(tree, location_attr):
 
 def initialize_kdtrees(graph: nx.Graph, tree: nx.DiGraph, location_attr: str):
     tree_kd_ids, tree_node_attrs = [list(x) for x in zip(*tree.nodes.items())]
-    print(tree_node_attrs)
     tree_kd = cKDTree([attrs[location_attr] for attrs in tree_node_attrs])
 
     graph_kd_ids, graph_node_attrs = [list(x) for x in zip(*graph.nodes.items())]
-    print(graph_kd_ids, graph_node_attrs)
     graph_kd = cKDTree([attrs[location_attr] for attrs in graph_node_attrs])
 
     return graph_kd, graph_kd_ids, tree_kd, tree_kd_ids
@@ -127,6 +130,10 @@ def tree_edge_query(
 def edge_dist(
     u_loc: np.ndarray, v_loc: np.ndarray, x_loc: np.ndarray, y_loc: np.ndarray
 ) -> float:
+    """
+    psuedo avg distance of a line to another line.
+    calculated as the average distance of the end points (u, v) to the line (x, y).
+    """
     distance = (
         point_to_edge_dist(u_loc, x_loc, y_loc)
         + point_to_edge_dist(v_loc, x_loc, y_loc)
@@ -147,4 +154,18 @@ def point_to_edge_dist(
 
 
 def edge_cost(distance, penalty) -> float:
-    return distance + penalty
+    """
+    Distance is normalized by line length
+        This means it is probably much smaller for large lines than small lines
+        Especially since added lines are often aligned with the consensus
+    Penalty is the line length normalized by min(voxel size) to get
+        an overestimate of how many skeletonized edges it would replace
+
+    formula:
+        distance + (distance + penalty) * (penalty)
+
+    Motivation: 
+        distance: base cost for all edges with or without penalty
+        (penalty + distance) * penalty:  
+    """
+    return distance * (penalty ** 3 + 1)
