@@ -81,7 +81,7 @@ class TopologicalMatcher(BatchFilter):
     def __solve_tree(self, graph, tree):
 
         if len(graph.nodes) < 1 or len(tree.nodes) < 1:
-            return SpatialGraph()
+            return SpatialGraph(), False
         logger.debug("initializing matcher")
         node_costs, edge_costs = get_costs(
             graph,
