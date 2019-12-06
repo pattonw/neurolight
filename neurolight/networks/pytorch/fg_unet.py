@@ -2,7 +2,7 @@ import torch
 from funlib.learn.torch.models import UNet, ConvPass
 
 
-class ForegroundUnet(torch.nn.Model):
+class ForegroundUnet(torch.nn.Module):
     def __init__(self, config):
         super(ForegroundUnet, self).__init__()
 
