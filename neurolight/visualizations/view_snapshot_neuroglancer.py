@@ -98,7 +98,7 @@ def add_trees(s, trees, node_id, name, visible=False):
         )
 
 
-def visualize_hdf5(hdf5_file: Path, voxel_size, mst=False, maxima_for = None):
+def visualize_hdf5(hdf5_file: Path, voxel_size, mst=False, maxima_for=None):
     voxel_size = daisy.Coordinate(voxel_size)
     dataset = h5py.File(hdf5_file)
     volumes = list(dataset.get("volumes", {}).keys())
@@ -146,3 +146,18 @@ def visualize_hdf5(hdf5_file: Path, voxel_size, mst=False, maxima_for = None):
     print(viewer)
     input("Hit ENTER to quit!")
 
+
+def visualize_npy(npy_file: Path, voxel_size):
+    voxel_size = daisy.Coordinate(voxel_size)
+
+    viewer = neuroglancer.Viewer()
+    with viewer.txn() as s:
+        v = np.load(npy_file)
+        m = daisy.Array(
+            v,
+            daisy.Roi(daisy.Coordinate([0, 0, 0]), daisy.Coordinate(v.shape)),
+            daisy.Coordinate([1, 1, 1]),
+        )
+        add_layer(s, m, f"npy array")
+    print(viewer)
+    input("Hit ENTER to quit!")
