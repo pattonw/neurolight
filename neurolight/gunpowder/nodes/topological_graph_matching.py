@@ -127,7 +127,16 @@ class TopologicalMatcher(BatchFilter):
         invalid_sets = set()
         wccs = list(nx.weakly_connected_components(tree))
         for i, wcc in enumerate(wccs):
-            component = tree.subgraph(wcc)
+            component = nx.DiGraph()
+            component.add_nodes_from((n, tree.nodes[n]) for n in wcc)
+            component.add_edges_from(
+                (n, nbr, d)
+                for n, nbrs in tree.adj.items()
+                if n in wcc
+                for nbr, d in nbrs.items()
+                if nbr in wcc
+            )
+            component.graph.update(tree.graph)
 
             comp_matched, success = self.__solve_tree(graph, component)
             if success:
