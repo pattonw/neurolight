@@ -122,6 +122,9 @@ class RasterizeSkeleton(BatchFilter):
             array_data[binarized] = 1
             array_data[overlap] = -1
 
+        logger.debug(f"Input graph had {len(graph.nodes)} nodes!")
+        logger.debug(f"Output array contains {sum(array_data != 0)} non_empty pixels")
+
         array = Array(
             data=array_data,
             spec=ArraySpec(
