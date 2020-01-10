@@ -65,6 +65,7 @@ valid_examples = [
 ]
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("example", valid_examples)
 @pytest.mark.parametrize(
     "use_gurobi", [pytest.param(True, marks=skip_gurobi_if_no_license()), False]
@@ -113,6 +114,7 @@ invalid_examples = [
 ]
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("example", invalid_examples)
 @pytest.mark.parametrize(
     "use_gurobi", [pytest.param(True, marks=skip_gurobi_if_no_license()), False]

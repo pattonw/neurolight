@@ -10,7 +10,7 @@ def test_simple():
     nms = NMS([2, 2], 0)
     maxima = nms(raw)
     expected_maxima = torch.Tensor(
-        [[[[0, 0, 0, 0], [0, 6, 0, 8], [0, 0, 0, 0], [0, 14, 0, 16]]]]
+        [[[[0, 0, 0, 0], [0, 1, 0, 1], [0, 0, 0, 0], [0, 1, 0, 1]]]]
     )
     assert torch.all(torch.eq(maxima, expected_maxima))
 
@@ -22,7 +22,7 @@ def test_threshold():
     nms = NMS([2, 2], 10)
     maxima = nms(raw)
     expected_maxima = torch.Tensor(
-        [[[[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 14, 0, 16]]]]
+        [[[[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 1, 0, 1]]]]
     )
     assert torch.all(torch.eq(maxima, expected_maxima))
 
@@ -32,7 +32,7 @@ def test_uniform():
     nms = NMS([2, 2], 0)
     maxima = nms(raw)
     expected_maxima = torch.Tensor(
-        [[[[1, 0, 1, 0], [0, 0, 0, 0], [2, 0, 2, 0], [0, 0, 0, 0]]]]
+        [[[[1, 0, 1, 0], [0, 0, 0, 0], [1, 0, 1, 0], [0, 0, 0, 0]]]]
     )
     assert torch.all(torch.eq(maxima, expected_maxima))
 
@@ -53,16 +53,7 @@ def test_coprime_window_input_size():
     nms = NMS([2, 2], 0)
     maxima = nms(raw)
     expected_maxima = torch.Tensor(
-        [
-            [
-                [
-                    [0, 0, 0, 0, 0],
-                    [0, 7, 0, 9, 10],
-                    [0, 0, 0, 0, 0],
-                    [0, 17, 0, 19, 20],
-                ]
-            ]
-        ]
+        [[[[0, 0, 0, 0, 0], [0, 1, 0, 1, 1], [0, 0, 0, 0, 0], [0, 1, 0, 1, 1]]]]
     )
     print(maxima)
     assert torch.all(torch.eq(maxima, expected_maxima))

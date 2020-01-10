@@ -3,7 +3,7 @@ import torch
 from neurolight.networks.pytorch.fg_unet import ForegroundUnet
 
 
-def test_emb_unet():
+def test_fg_unet():
     config = {
         "NETWORK_NAME": "fg_net",
         "INPUT_SHAPE": [80, 256, 256],
@@ -18,11 +18,12 @@ def test_emb_unet():
             [[3, 3, 3], [3, 3, 3]],
         ],
         "VOXEL_SIZE": [1, 1, 1],
+        "ACTIVATION": "ReLU"
     }
     denoiser = ForegroundUnet(config)
 
     raw = torch.rand(1, 2, 80, 256, 256)
-    foreground = denoiser(raw)
+    foreground, logits = denoiser(raw)
     assert foreground.shape == (1, 1, 32, 120, 120)
     assert foreground.min() > 0
     assert foreground.max() < 1
