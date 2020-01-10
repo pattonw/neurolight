@@ -1,7 +1,12 @@
 import gunpowder as gp
 import numpy as np
+import networkx as nx
 
 import copy
+from typing import Optional
+import logging
+
+logger = logging.getLogger(__file__)
 
 
 class BinarizeGt(gp.BatchFilter):
@@ -11,20 +16,22 @@ class BinarizeGt(gp.BatchFilter):
         self.gt_binary = gt_binary
 
     def setup(self):
-
+        self.enable_autoskip()
         spec = self.spec[self.gt].copy()
         spec.dtype = np.uint8
         self.provides(self.gt_binary, spec)
 
     def prepare(self, request):
-        pass
+        deps = gp.BatchRequest()
+        deps[self.gt] = request[self.gt_binary].copy()
+        return deps
 
     def process(self, batch, request):
 
         spec = batch[self.gt].spec.copy()
-        spec.dtype = np.int32
+        spec.dtype = np.uint8
 
-        binarized = gp.Array(data=(batch[self.gt].data > 0).astype(np.int32), spec=spec)
+        binarized = gp.Array(data=(batch[self.gt].data > 0).astype(np.uint8), spec=spec)
 
         batch[self.gt_binary] = binarized
 
@@ -68,9 +75,17 @@ class Crop(gp.BatchFilter):
 
 
 class RejectIfEmpty(gp.BatchFilter):
-    def __init__(self, ensure_nonempty: gp.ArrayKey, request_limit: int = 100):
+    def __init__(
+        self,
+        ensure_nonempty,
+        centroid_size: Optional[gp.Coordinate] = None,
+        request_limit: int = 20,
+        num_components: int = 3,
+    ):
         self.ensure_nonempty = ensure_nonempty
         self.request_limit = request_limit
+        self.centroid_size = centroid_size
+        self.num_components = num_components
 
     def setup(self):
         self.enable_autoskip()
@@ -82,17 +97,94 @@ class RejectIfEmpty(gp.BatchFilter):
         return copy.deepcopy(request)
 
     def process(self, batch, request):
-
         k = 0
-        found_valid = False
-        while (
-            not found_valid
-            and k < self.request_limit
-            and self.ensure_nonempty in request
-        ):
-            batch = self.get_upstream_provider().request_batch(request)
-            if len(batch[self.ensure_nonempty].graph.nodes) > 0:
-                found_valid = True
+        while self._isempty(batch[self.ensure_nonempty]) and k < self.request_limit:
             k += 1
+            if k == self.request_limit:
+                raise RuntimeError(
+                    f"Failed to obtain a batch with {self.ensure_nonempty} non empty"
+                )
+            temp_batch = self.get_upstream_provider().request_batch(request)
+            self._replace_batch(batch, temp_batch)
+
+        if isinstance(self.ensure_nonempty, gp.PointsKey):
+            logger.debug(
+                f"{self.ensure_nonempty} has {len(batch[self.ensure_nonempty].data)} nodes"
+            )
+
+    def _replace_batch(self, batch, replacement):
+        for key, val in replacement.items():
+            batch[key] = val
+
+        batch.profiling_stats.merge_with(replacement.profiling_stats)
+        if replacement.loss is not None:
+            batch.loss = replacement.loss
+        if replacement.iteration is not None:
+            batch.iteration = replacement.iteration
+
+    def _isempty(self, dataset):
+        full_roi = dataset.spec.roi
+        size = full_roi.get_shape()
+        small_roi = full_roi.copy()
+        if self.centroid_size is not None:
+            diff = self.centroid_size - size
+            diff = diff / gp.Coordinate([2] * len(diff))
+            small_roi = small_roi.grow(diff, diff)
+
+        dataset = dataset.crop(small_roi, copy=True)
+
+        if isinstance(dataset, gp.Array):
+            values = np.unique(dataset.data)
+            return len(values) <= self.num_components
+        if isinstance(dataset, gp.Points):
+            return len(list(nx.weakly_connected_components(dataset.graph))) < self.num_components
+
+
+class ThresholdMask(gp.BatchFilter):
+    def __init__(self, array, mask, threshold):
+        self.array = array
+        self.mask = mask
+        self.threshold = threshold
+
+    def setup(self):
+        mask_spec = copy.deepcopy(self.spec[self.array])
+        mask_spec.dtype = np.uint32
+        self.provides(self.mask, mask_spec)
+        self.enable_autoskip()
+
+    def prepare(self, request):
+        deps = gp.BatchRequest()
+        deps[self.array] = copy.deepcopy(request[self.mask])
+        return deps
+
+    def process(self, batch, request):
+        mask = (batch[self.array].data > self.threshold).astype(np.uint32)
+        mask_spec = copy.deepcopy(batch[self.array].spec)
+        mask_spec.dtype = np.uint32
+        batch[self.mask] = gp.Array(mask, mask_spec)
+
+        return batch
+
+
+class Mask(gp.BatchFilter):
+    def __init__(self, array, mask):
+        self.array = array
+        self.mask = mask
+
+    def setup(self):
+        array_spec = self.spec[self.array].copy()
+        self.updates(self.mask, array_spec)
+        self.enable_autoskip()
+
+    def prepare(self, request):
+        deps = gp.BatchRequest()
+        deps[self.array] = request[self.array].copy()
+        deps[self.mask] = request[self.mask].copy()
+        return deps
+
+    def process(self, batch, request):
+        mask = batch[self.mask]
+        array = batch[self.array]
+        array.data[mask.data == 0] = 0
 
         return batch
