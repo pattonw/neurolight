@@ -284,21 +284,19 @@ class GetNeuronPair(BatchProvider):
 
         # handle smaller requests
         voxel_size = request.get_lcm_voxel_size()
-        direction += Coordinate(np.array(direction) % np.array(voxel_size))
+        direction -= Coordinate(np.array(direction) % np.array(voxel_size))
 
         if any([points in request for points in self.points]):
             dps[self.point_source] = copy.deepcopy(request[self.points[0]])
             dps[self.point_source].roi = (
                 dps[self.point_source]
                 .roi.shift(direction)
-                .snap_to_grid(voxel_size, mode="closest")
             )
         if any([array in request for array in self.arrays]):
             dps[self.array_source] = copy.deepcopy(request[self.arrays[0]])
             dps[self.array_source].roi = (
                 dps[self.array_source]
                 .roi.shift(direction)
-                .snap_to_grid(voxel_size, mode="closest")
             )
 
         if any([labels in request for labels in self.labels]):
@@ -306,7 +304,6 @@ class GetNeuronPair(BatchProvider):
             dps[self.label_source].roi = (
                 dps[self.label_source]
                 .roi.shift(direction)
-                .snap_to_grid(voxel_size, mode="closest")
             )
 
         for source, targets in self.extra_keys.items():
@@ -315,7 +312,6 @@ class GetNeuronPair(BatchProvider):
                 dps[source].roi = (
                     dps[source]
                     .roi.shift(direction)
-                    .snap_to_grid(voxel_size, mode="closest")
                 )
 
         return dps
