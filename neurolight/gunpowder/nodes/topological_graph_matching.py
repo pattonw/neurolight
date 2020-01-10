@@ -160,7 +160,16 @@ class TopologicalMatcher(BatchFilter):
         )
         for invalid_set in invalid_sets:
             component_group = set(x for ind in invalid_set for x in wccs[ind])
-            group_subgraph = tree.subgraph(component_group)
+            group_subgraph = nx.DiGraph()
+            group_subgraph.add_nodes_from((n, tree.nodes[n]) for n in component_group)
+            group_subgraph.add_edges_from(
+                (n, nbr, d)
+                for n, nbrs in tree.adj.items()
+                if n in component_group
+                for nbr, d in nbrs.items()
+                if nbr in component_group
+            )
+            group_subgraph.graph.update(tree.graph)
             matched, success = self.__solve_tree(graph, group_subgraph)
             if success:
                 matched_components.append(matched)
