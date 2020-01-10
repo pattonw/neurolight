@@ -31,9 +31,11 @@ class GrowLabels(BatchFilter):
         overlap_value: int = -1,
         radii: List[float] = None,
         radius=None,
+        output=None,
     ):
 
         self.array = array
+        self.output = output
         self.overlap_value = overlap_value
         if radii is not None:
             self.radii = radii
@@ -49,12 +51,18 @@ class GrowLabels(BatchFilter):
     def setup(self):
         self.enable_autoskip()
 
-        self.updates(self.array, self.spec[self.array])
+        if self.output is not None:
+            self.provides(self.output, self.spec[self.array].copy())
+        else:
+            self.updates(self.array, self.spec[self.array].copy())
 
     def prepare(self, request: BatchRequest):
         deps = BatchRequest()
 
-        deps[self.array] = request[self.array]
+        if self.output is not None:
+            deps[self.array] = request[self.output].copy()
+        else:
+            deps[self.array] = request[self.array].copy()
 
         return deps
 
@@ -78,4 +86,7 @@ class GrowLabels(BatchFilter):
 
         expanded = Array(data=expanded, spec=spec)
 
-        batch.arrays[self.array] = expanded
+        if self.output is not None:
+            batch.arrays[self.output] = expanded
+        else:
+            batch.arrays[self.array] = expanded
