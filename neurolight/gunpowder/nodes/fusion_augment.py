@@ -1,5 +1,5 @@
 import numpy as np
-from gunpowder import Array, BatchFilter, BatchRequest, PointsSpec
+from gunpowder import Array, BatchFilter, BatchRequest, PointsSpec, ArraySpec
 from scipy import ndimage
 
 import logging
@@ -195,21 +195,31 @@ class FusionAugment(BatchFilter):
             soft_mask /= np.clip(np.max(soft_mask), 1e-5, float("inf"))
             soft_mask = np.clip((soft_mask * 2), 0, 1)
             if self.soft_mask is not None:
-                batch.arrays[self.soft_mask] = Array(soft_mask, spec=raw_base_spec)
+                batch.arrays[self.soft_mask] = Array(
+                    soft_mask,
+                    spec=ArraySpec(
+                        roi=raw_base_spec.roi, voxel_size=raw_base_spec.voxel_size
+                    ),
+                )
             if self.masked_base is not None:
                 batch.arrays[self.masked_base] = Array(
-                    raw_base_array * (soft_mask > 0.25), spec=raw_base_spec
+                    raw_base_array * (soft_mask > 0.25), spec=raw_base_spec.copy()
                 )
             if self.masked_add is not None:
                 batch.arrays[self.masked_add] = Array(
-                    raw_add_array * soft_mask, spec=raw_base_spec
+                    raw_add_array * soft_mask,
+                    spec=ArraySpec(
+                        roi=raw_base_spec.roi, voxel_size=raw_base_spec.voxel_size
+                    ),
                 )
             if self.mask_maxed is not None:
                 batch.arrays[self.mask_maxed] = Array(
                     np.maximum(
                         raw_base_array * (soft_mask > 0.25), raw_add_array * soft_mask
                     ),
-                    spec=raw_base_spec,
+                    spec=ArraySpec(
+                        roi=raw_base_spec.roi, voxel_size=raw_base_spec.voxel_size
+                    ),
                 )
 
             raw_fused_array = np.maximum(soft_mask * raw_add_array, raw_base_array)
@@ -219,7 +229,6 @@ class FusionAugment(BatchFilter):
 
         # load specs
         labels_add_spec = batch[self.labels_add].spec.copy()
-        labels_fused_spec = request[self.labels_fused].copy()
         raw_base_spec = batch[self.raw_base].spec.copy()
 
         # return raw and labels for "fused" volume
@@ -254,7 +263,10 @@ class FusionAugment(BatchFilter):
         old_values = np.asarray(labels)
         new_values = np.arange(1, len(labels) + 1, dtype=old_values.dtype)
 
-        values_map = np.arange(int(a.max() + 1), dtype=new_values.dtype)
+        try:
+            values_map = np.arange(int(a.max() + 1), dtype=new_values.dtype)
+        except ValueError as e:
+            raise ValueError(f"{e}, arange length: {int(a.max() + 1)}")
         values_map[old_values] = new_values
 
         return values_map[a.copy()]
