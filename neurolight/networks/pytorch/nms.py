@@ -14,7 +14,7 @@ class NMS(torch.nn.Module):
     nms.
     """
 
-    def __init__(self, window_size: List[float], threshold: float):
+    def __init__(self, window_size: List[int], threshold: float):
         super(NMS, self).__init__()
 
         self.window_size = window_size
@@ -45,10 +45,11 @@ class NMS(torch.nn.Module):
 
         down_1, indices = self.down_1(raw)
         maxima = self.up_1(down_1, indices)
-        zeros = torch.zeros(*maxima.shape)
+        zeros = torch.zeros(*maxima.shape, device=raw.device)
         thresholded_maxima = torch.where(maxima > self.threshold, maxima, zeros)
+        maxima_mask = thresholded_maxima == raw
 
-        return self.__crop(thresholded_maxima, original_shape)
+        return self.__crop(maxima_mask, original_shape)
 
     def __crop(self, maxima, original_shape):
         return maxima[tuple(map(slice, [0 for x in original_shape], original_shape))]
