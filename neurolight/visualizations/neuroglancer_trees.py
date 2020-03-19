@@ -48,12 +48,35 @@ def add_trees(s, trees, node_id, name, visible=False):
     if trees is None:
         return None
     trees = nx.to_directed(trees)
-    for i, cc_nodes in enumerate(nx.weakly_connected_components(trees)):
-        cc = trees.subgraph(cc_nodes)
+    ccs = list(nx.weakly_connected_components(trees))
+    if len(ccs) < 10:
+        for i, cc_nodes in enumerate(nx.weakly_connected_components(trees)):
+            cc = trees.subgraph(cc_nodes)
+            mst = []
+            for u, v in cc.edges():
+                pos_u = np.array(cc.nodes[u]["location"]) + 0.5
+                pos_v = np.array(cc.nodes[v]["location"]) + 0.5
+                mst.append(
+                    neuroglancer.LineAnnotation(
+                        point_a=pos_u[::-1], point_b=pos_v[::-1], id=next(node_id)
+                    )
+                )
+
+            s.layers.append(
+                name="{}_{}".format(name, i),
+                layer=neuroglancer.AnnotationLayer(annotations=mst),
+                annotationColor="#{:02X}{:02X}{:02X}".format(
+                    random.randint(0, 255),
+                    random.randint(0, 255),
+                    random.randint(0, 255),
+                ),
+                visible=visible,
+            )
+    else:
         mst = []
-        for u, v in cc.edges():
-            pos_u = np.array(cc.nodes[u]["location"]) + 0.5
-            pos_v = np.array(cc.nodes[v]["location"]) + 0.5
+        for u, v in trees.edges():
+            pos_u = np.array(trees.nodes[u]["location"]) + 0.5
+            pos_v = np.array(trees.nodes[v]["location"]) + 0.5
             mst.append(
                 neuroglancer.LineAnnotation(
                     point_a=pos_u[::-1], point_b=pos_v[::-1], id=next(node_id)
@@ -61,7 +84,7 @@ def add_trees(s, trees, node_id, name, visible=False):
             )
 
         s.layers.append(
-            name="{}_{}".format(name, i),
+            name="{}".format(name),
             layer=neuroglancer.AnnotationLayer(annotations=mst),
             annotationColor="#{:02X}{:02X}{:02X}".format(
                 random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)
