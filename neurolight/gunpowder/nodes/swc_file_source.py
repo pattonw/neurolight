@@ -7,14 +7,14 @@ from gunpowder.roi import Roi
 from gunpowder.points_spec import PointsSpec
 from gunpowder.batch import Batch
 from gunpowder.profiling import Timing
-
 import numpy as np
 from scipy.spatial.ckdtree import cKDTree, cKDTreeNode
+
+from neurolight.transforms.swc_to_graph import parse_swc_no_transform
 
 from pathlib import Path
 from typing import List, Dict, Tuple
 import logging
-import copy
 import networkx as nx
 
 logger = logging.getLogger(__name__)
@@ -250,52 +250,25 @@ class SwcFileSource(BatchProvider):
         first ``ndims`` are used. If negative, all but the last ``-ndims`` are
         used.
         """
-        # initialize file specific variables
-        header = True
-        offset = np.array([0, 0, 0])
-        resolution = np.array([1, 1, 1])
+        tree = parse_swc_no_transform(
+            filename,
+            resolution=[self.scale[i] for i in self.transpose],
+            transpose=self.transpose,
+        )
 
-        # parse file
-        with filename.open() as o_f:
-            points = {}
-            edges = set()
-            for line in o_f.read().splitlines():
-                if header and line.startswith("#"):
-                    # Search header comments for variables
-                    offset = self._search_swc_header(line, "offset", offset)
-                    resolution = self._search_swc_header(line, "resolution", resolution)
-                    continue
-                elif line.startswith("#"):
-                    # comments not in header get skipped
-                    continue
-                elif header:
-                    # first line without a comment marks end of header
-                    header = False
+        assert len(list(nx.weakly_connected_components(tree))) == 1
 
-                row = line.strip().split()
-                if len(row) != 7:
-                    raise ValueError("SWC has a malformed line: {}".format(line))
+        points = {}
 
-                # extract data from row (point_id, type, x, y, z, radius, parent_id)
-                assert int(row[0]) not in points, "Duplicate point {} found!".format(
-                    int(row[0])
-                )
-                points[int(row[0])] = GraphPoint(
-                    point_type=int(row[1]),
-                    location=np.array(
-                        (
-                            (np.array([float(x) for x in row[2:5]]) + offset)
-                            * resolution
-                            * self.scale
-                        ).take(self.transpose)
-                    ),
-                    radius=float(row[5]),
-                )
-                v, u = int(row[0]), int(row[6])
-                assert (u, v) not in edges, "Duplicate edge {} found!".format((u, v))
-                if u != v and u is not None and v is not None and u >= 0 and v >= 0:
-                    edges.add((u, v))
-            self._add_points_to_source(points, edges)
+        for node, attrs in tree.nodes.items():
+            points[node] = GraphPoint(
+                point_type=attrs["point_type"],
+                location=attrs["location"],
+                radius=attrs["radius"],
+            )
+        self._add_points_to_source(points, set(tree.edges))
+
+        return len(list(nx.weakly_connected_components(tree)))
 
     def _search_swc_header(
         self, line: str, key: str, default: np.ndarray
