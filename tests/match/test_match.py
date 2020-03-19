@@ -6,7 +6,8 @@ from neurolight.match.costs import get_costs
 from neurolight.match.preprocess import mouselight_preprocessing
 from neurolight.gunpowder.nodes.topological_graph_matching import TopologicalMatcher
 from neurolight.gunpowder.nodes.graph_source import GraphSource
-from funlib.match.helper_functions import check_gurobi_license
+
+# from funlib.match.helper_functions import check_gurobi_license
 
 from gunpowder import (
     MergeProvider,
@@ -22,7 +23,7 @@ from pathlib import Path
 
 
 def skip_gurobi_if_no_license():
-    success = check_gurobi_license()
+    success = False
     return pytest.mark.skipif(not success, reason="Requires Gurobi License")
 
 
@@ -78,11 +79,14 @@ def test_realistic_valid_examples(example, use_gurobi):
     consensus = PointsKey("CONSENSUS")
     skeletonization = PointsKey("SKELETONIZATION")
     matched = PointsKey("MATCHED")
+    matched_with_fallback = PointsKey("MATCHED_WITH_FALLBACK")
 
     inf_roi = Roi(Coordinate((None,) * 3), Coordinate((None,) * 3))
 
     request = BatchRequest()
     request[matched] = PointsSpec(roi=inf_roi)
+    request[matched_with_fallback] = PointsSpec(roi=inf_roi)
+    request[consensus] = PointsSpec(roi=inf_roi)
 
     pipeline = (
         (
@@ -94,18 +98,37 @@ def test_realistic_valid_examples(example, use_gurobi):
             skeletonization,
             consensus,
             matched,
-            76,
-            48,
+            expected_edge_len=10,
+            match_distance_threshold=76,
+            max_gap_crossing=48,
             use_gurobi=use_gurobi,
             location_attr=location_attr,
             penalty_attr=penalty_attr,
+        )
+        + TopologicalMatcher(
+            skeletonization,
+            consensus,
+            matched_with_fallback,
+            expected_edge_len=10,
+            match_distance_threshold=76,
+            max_gap_crossing=48,
+            use_gurobi=use_gurobi,
+            location_attr=location_attr,
+            penalty_attr=penalty_attr,
+            with_fallback=True,
         )
     )
 
     with build(pipeline):
         batch = pipeline.request_batch(request)
-        assert matched in batch
-        assert len(batch[matched].graph.nodes()) > 0
+        consensus_ccs = list(nx.weakly_connected_components(batch[consensus].graph))
+        consensus_with_fallback_ccs = list(
+            nx.weakly_connected_components(batch[consensus].graph)
+        )
+        matched_ccs = list(nx.weakly_connected_components(batch[matched].graph))
+
+        assert len(matched_ccs) == len(consensus_ccs)
+        assert set().union(*consensus_ccs) == set().union(*consensus_with_fallback_ccs)
 
 
 invalid_examples = [
@@ -127,11 +150,13 @@ def test_realistic_invalid_examples(example, use_gurobi):
     consensus = PointsKey("CONSENSUS")
     skeletonization = PointsKey("SKELETONIZATION")
     matched = PointsKey("MATCHED")
+    matched_with_fallback = PointsKey("MATCHED_WITH_FALLBACK")
 
     inf_roi = Roi(Coordinate((None,) * 3), Coordinate((None,) * 3))
 
     request = BatchRequest()
     request[matched] = PointsSpec(roi=inf_roi)
+    request[matched_with_fallback] = PointsSpec(roi=inf_roi)
 
     pipeline = (
         (
@@ -143,11 +168,24 @@ def test_realistic_invalid_examples(example, use_gurobi):
             skeletonization,
             consensus,
             matched,
-            76,
-            48,
+            expected_edge_len=10,
+            match_distance_threshold=76,
+            max_gap_crossing=48,
             use_gurobi=use_gurobi,
             location_attr=location_attr,
             penalty_attr=penalty_attr,
+        )
+        + TopologicalMatcher(
+            skeletonization,
+            consensus,
+            matched_with_fallback,
+            expected_edge_len=10,
+            match_distance_threshold=76,
+            max_gap_crossing=48,
+            use_gurobi=use_gurobi,
+            location_attr=location_attr,
+            penalty_attr=penalty_attr,
+            with_fallback=True,
         )
     )
 
@@ -155,22 +193,24 @@ def test_realistic_invalid_examples(example, use_gurobi):
         batch = pipeline.request_batch(request)
         assert matched in batch
         assert len(batch[matched].graph.nodes()) == 0
+        assert len(batch[matched_with_fallback].graph.nodes()) > 0
 
 
 def test_preprocessing():
-    voxel_size = [1, 1, 1]
     location_attr = "location"
     penalty_attr = "penalty"
     skeleton, consensus = build_graphs(location_attr)
+
     mouselight_preprocessing(
-        skeleton,
-        1.5,
-        voxel_size=voxel_size,
+        graph=skeleton,
+        max_dist=1.5,
+        expected_edge_len=1,
         location_attr=location_attr,
         penalty_attr=penalty_attr,
     )
 
-    expected_added_edges = [(("a", "b"), 1)]
+    # 2 * (edge_len / expected_edge_len)**2
+    expected_added_edges = [(("a", "b"), 2)]
 
     for edge, penalty in expected_added_edges:
         assert skeleton.edges()[edge][penalty_attr] == pytest.approx(penalty)
@@ -178,12 +218,12 @@ def test_preprocessing():
     mouselight_preprocessing(
         skeleton,
         2.5,
-        voxel_size=voxel_size,
+        expected_edge_len=1,
         location_attr=location_attr,
         penalty_attr=penalty_attr,
     )
 
-    expected_added_edges = [(("c", "e"), 2)]
+    expected_added_edges = [(("c", "e"), 8)]
 
     for edge, penalty in expected_added_edges:
         assert skeleton.edges()[edge][penalty_attr] == pytest.approx(penalty)
@@ -200,13 +240,14 @@ def test_get_costs():
     node_balance = 2
 
     node_matchings, edge_matchings = get_costs(
-        skeleton,
-        consensus,
-        location_attr,
-        penalty_attr,
-        node_match_threshold,
-        edge_match_threshold,
-        node_balance,
+        graph=skeleton,
+        tree=consensus,
+        location_attr=location_attr,
+        penalty_attr=penalty_attr,
+        node_match_threshold=node_match_threshold,
+        edge_match_threshold=edge_match_threshold,
+        expected_edge_len=1,
+        node_balance=node_balance,
     )
 
     expected_node_distances = {
@@ -228,10 +269,12 @@ def test_get_costs():
     }
 
     for skeleton_node, tree_node, cost in node_matchings:
-        assert expected_node_distances[skeleton_node][
-            tree_node
-        ] * node_balance == pytest.approx(cost)
+        assert expected_node_distances[skeleton_node].get(
+            tree_node, 0
+        ) / node_match_threshold * node_balance == pytest.approx(cost)
 
     for skeleton_edge, tree_edge, cost in edge_matchings:
-        assert expected_edge_distances[skeleton_edge][tree_edge] == pytest.approx(cost)
+        assert expected_edge_distances[skeleton_edge][
+            tree_edge
+        ] / edge_match_threshold == pytest.approx(cost)
 
