@@ -8,7 +8,7 @@ from gunpowder.coordinate import Coordinate
 from gunpowder.ext import torch
 import numpy as np
 
-from typing import Dict, Union
+from typing import Dict, Union, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class TrainEmbedding(Train):
         mask: ArrayKey,
         input_size: Coordinate,
         output_size: Coordinate,
-        gradients=None,
+        gradients: Optional[Dict[Union[int, str], ArrayKey]] = None,
         array_specs: Dict[str, ArraySpec] = None,
         checkpoint_basename: str = "model",
         save_every: int = 2000,
