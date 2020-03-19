@@ -5,6 +5,7 @@ from gunpowder.points import PointsKey
 from gunpowder.torch import Predict
 import numpy as np
 import torch
+import daisy
 
 from neurolight.gunpowder.nodes import (
     TopologicalMatcher,
@@ -16,6 +17,7 @@ from neurolight.gunpowder.nodes import (
     FusionAugment,
     RejectIfEmpty,
     NonMaxSuppression,
+    FilterComponents,
 )
 from neurolight.gunpowder.contrib.nodes import AddDistance, TanhSaturate
 
@@ -35,15 +37,44 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple, Union
 import math
 import logging
+import pickle
+
+logger = logging.getLogger(__file__)
 
 
-def get_training_inputs(setup_config, get_data_sources=None):
+class RandomLocations(gp.RandomLocation):
+    def __init__(self, *args, **kwargs):
+        self.loc = kwargs.pop("loc")
+        super(RandomLocations, self).__init__(*args, **kwargs)
+
+    def setup(self):
+        super(RandomLocations, self).setup()
+        self.provides(self.loc, gp.ArraySpec(nonspatial=True))
+
+    def prepare(self, request):
+        deps = super(RandomLocations, self).prepare(request)
+        if self.loc in deps:
+            del deps[self.loc]
+        return deps
+
+    def process(self, batch, request):
+        batch[self.loc] = gp.Array(
+            np.array(batch.get_total_roi().get_center()),
+            spec=gp.ArraySpec(nonspatial=True),
+        )
+        super(RandomLocations, self).process(batch, request)
+
+
+def get_training_inputs(setup_config, get_data_sources=None, locations=True):
     input_shape = gp.Coordinate(setup_config["INPUT_SHAPE"])
     voxel_size = gp.Coordinate(setup_config["VOXEL_SIZE"])
-    if setup_config["TRAIN_FOREGROUND"] or setup_config["TRAIN_EMBEDDING"]:
+    if setup_config["DATA"] == "train":
         samples = setup_config["TRAIN_SAMPLES"]
-    else:
+    elif setup_config["DATA"] == "validation":
+        samples = setup_config["VALIDATION_SAMPLES"]
+    elif setup_config["DATA"] == "test":
         samples = setup_config["TEST_SAMPLES"]
+    logger.info(f"Using samples {samples} to generate data")
 
     input_size = input_shape * voxel_size
 
@@ -56,9 +87,8 @@ def get_training_inputs(setup_config, get_data_sources=None):
             labels,
             consensus,
             nonempty_placeholder,
-            skeletonization,
             matched,
-        ) = get_mouselight_data_sources(setup_config, samples)
+        ) = get_mouselight_data_sources(setup_config, samples, locations=True)
     else:
         (
             data_sources,
@@ -66,7 +96,6 @@ def get_training_inputs(setup_config, get_data_sources=None):
             labels,
             consensus,
             nonempty_placeholder,
-            skeletonization,
             matched,
         ) = get_data_sources(setup_config)
 
@@ -79,12 +108,10 @@ def get_training_inputs(setup_config, get_data_sources=None):
             raw_base,
             labels_base,
             matched_base,
-            skeletonization_base,
             consensus_base,
             raw_add,
             labels_add,
             matched_add,
-            skeletonization_add,
             consensus_add,
             soft_mask,
             masked_base,
@@ -97,7 +124,6 @@ def get_training_inputs(setup_config, get_data_sources=None):
             labels,
             matched,
             nonempty_placeholder,
-            skeletonization,
             consensus,
         )
 
@@ -111,18 +137,6 @@ def get_training_inputs(setup_config, get_data_sources=None):
             (matched_add, input_size, "points/matched_add", logging.DEBUG),
             (consensus_base, input_size, "points/consensus_base", logging.DEBUG),
             (consensus_add, input_size, "points/consensus_add", logging.DEBUG),
-            (
-                skeletonization_base,
-                input_size,
-                "points/skeletonization_base",
-                logging.DEBUG,
-            ),
-            (
-                skeletonization_add,
-                input_size,
-                "points/skeletonization_add",
-                logging.DEBUG,
-            ),
         ]
 
         datasets += [
@@ -134,12 +148,6 @@ def get_training_inputs(setup_config, get_data_sources=None):
         ]
     else:
 
-        datasets += [
-            # match debugging data
-            (skeletonization, input_size, "points/skeletonization", logging.DEBUG),
-            (consensus, input_size, "points/consensus", logging.DEBUG),
-        ]
-
         pipeline = data_sources
 
     datasets += [
@@ -149,23 +157,24 @@ def get_training_inputs(setup_config, get_data_sources=None):
         (matched, input_size, "points/matched", logging.INFO),
     ]
 
-    pipeline = guarantee_nonempty(pipeline, setup_config, matched)
+    if setup_config["GUARANTEE_NONEMPTY"]:
+        pipeline = guarantee_nonempty(pipeline, setup_config, matched)
 
     return pipeline, datasets, raw, labels, matched
 
 
 def get_mouselight_data_sources(
-    setup_config: Dict[str, Any], source_samples: List[str]
+    setup_config: Dict[str, Any], source_samples: List[str], locations=False
 ):
     # Source Paths and accessibility
     raw_n5 = setup_config["RAW_N5"]
     mongo_url = setup_config["MONGO_URL"]
     samples_path = Path(setup_config["SAMPLES_PATH"])
 
+    specified_locations = setup_config.get("SPECIFIED_LOCATIONS")
+
     # Graph matching parameters
     point_balance_radius = setup_config["POINT_BALANCE_RADIUS"]
-    gap_crossing_dist = setup_config["GAP_CROSSING_DIST"]
-    match_distance_threshold = setup_config["MATCH_DISTANCE_THRESHOLD"]
     matching_failures_dir = setup_config["MATCHING_FAILURES_DIR"]
     matching_failures_dir = (
         matching_failures_dir
@@ -181,7 +190,6 @@ def get_mouselight_data_sources(
     # Note: These are intended to be requested with size input_size
     raw = ArrayKey("RAW")
     consensus = gp.PointsKey("CONSENSUS")
-    skeletonization = gp.PointsKey("SKELETONIZATION")
     matched = gp.PointsKey("MATCHED")
     nonempty_placeholder = gp.PointsKey("NONEMPTY")
     labels = ArrayKey("LABELS")
@@ -190,6 +198,38 @@ def get_mouselight_data_sources(
         ensure_nonempty = nonempty_placeholder
     else:
         ensure_nonempty = consensus
+
+    node_offset = {
+        sample.name: (
+            daisy.persistence.MongoDbGraphProvider(
+                f"mouselight-{sample.name}-skeletonization", mongo_url
+            ).num_nodes(None)
+            + 1
+        )
+        for sample in samples_path.iterdir()
+        if sample.name in source_samples
+    }
+
+    if specified_locations is not None:
+        centers = pickle.load(open(specified_locations, "rb"))
+        random = gp.SpecifiedLocation
+        kwargs = {"locations": centers, "choose_randomly": True}
+        logger.info(f"Using specified locations from {specified_locations}")
+    elif not locations:
+        random = gp.RandomLocation
+        kwargs = {
+            "ensure_nonempty": ensure_nonempty,
+            "ensure_centered": True,
+            "point_balance_radius": point_balance_radius * micron_scale,
+        }
+    else:
+        random = RandomLocations
+        kwargs = {
+            "ensure_nonempty": ensure_nonempty,
+            "ensure_centered": True,
+            "point_balance_radius": point_balance_radius * micron_scale,
+            "loc": gp.ArrayKey("RANDOM_LOCATION"),
+        }
 
     data_sources = (
         tuple(
@@ -212,30 +252,17 @@ def get_mouselight_data_sources(
                     edge_attrs=[],
                 ),
                 gp.DaisyGraphProvider(
-                    f"mouselight-{sample.name}-skeletonization",
+                    f"mouselight-{sample.name}-matched",
                     mongo_url,
-                    points=[skeletonization],
-                    directed=False,
+                    points=[matched],
+                    directed=True,
                     node_attrs=[],
                     edge_attrs=[],
                 ),
             )
             + gp.MergeProvider()
-            + gp.RandomLocation(
-                ensure_nonempty=ensure_nonempty,
-                ensure_centered=True,
-                point_balance_radius=point_balance_radius * micron_scale,
-            )
-            + TopologicalMatcher(
-                skeletonization,
-                consensus,
-                matched,
-                failures=matching_failures_dir,
-                match_distance_threshold=match_distance_threshold * micron_scale,
-                max_gap_crossing=gap_crossing_dist * micron_scale,
-                try_complete=False,
-                use_gurobi=True,
-            )
+            + random(**kwargs)
+            + FilterComponents(matched, node_offset[sample.name])
             + RasterizeSkeleton(
                 points=matched,
                 array=labels,
@@ -249,15 +276,7 @@ def get_mouselight_data_sources(
         + gp.RandomProvider()
     )
 
-    return (
-        data_sources,
-        raw,
-        labels,
-        consensus,
-        nonempty_placeholder,
-        skeletonization,
-        matched,
-    )
+    return (data_sources, raw, labels, consensus, nonempty_placeholder, matched)
 
 
 def get_snapshot_source(setup_config: Dict[str, Any], source_samples: List[str]):
@@ -306,7 +325,6 @@ def get_neuron_pair(
     labels: ArrayKey,
     matched: PointsKey,
     nonempty_placeholder: PointsKey,
-    skeletonization: PointsKey,
     consensus: PointsKey,
 ):
 
@@ -332,14 +350,12 @@ def get_neuron_pair(
     raw_base = ArrayKey("RAW_BASE")
     labels_base = ArrayKey("LABELS_BASE")
     matched_base = gp.PointsKey("MATCHED_BASE")
-    skeletonization_base = gp.PointsKey("SKELETONIZATION_BASE")
     consensus_base = gp.PointsKey("CONSENSUS_BASE")
 
     # array keys for add volume
     raw_add = ArrayKey("RAW_ADD")
     labels_add = ArrayKey("LABELS_ADD")
     matched_add = gp.PointsKey("MATCHED_ADD")
-    skeletonization_add = gp.PointsKey("SKELETONIZATION_ADD")
     consensus_add = gp.PointsKey("CONSENSUS_ADD")
 
     # debug array keys
@@ -362,10 +378,7 @@ def get_neuron_pair(
             shift_attempts=shift_attempts,
             request_attempts=request_attempts,
             nonempty_placeholder=nonempty_placeholder,
-            extra_keys={
-                skeletonization: (skeletonization_base, skeletonization_add),
-                consensus: (consensus_base, consensus_add),
-            },
+            extra_keys={consensus: (consensus_base, consensus_add)},
         )
         + FusionAugment(
             raw_base,
@@ -396,12 +409,10 @@ def get_neuron_pair(
         raw_base,
         labels_base,
         matched_base,
-        skeletonization_base,
         consensus_base,
         raw_add,
         labels_add,
         matched_add,
-        skeletonization_add,
         consensus_add,
         soft_mask,
         masked_base,
@@ -525,7 +536,7 @@ def add_foreground_prediction(pipeline, setup_config, raw):
         checkpoint=checkpoint,
         inputs={"raw": raw},
         outputs={0: fg_pred},
-        device="cpu",
+        device="cuda",
     )
 
     return pipeline, fg_pred
