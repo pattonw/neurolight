@@ -136,8 +136,12 @@ def parse_swc(
     # swc's are directed
     graph = nx.DiGraph()
 
+    origin, spacing = load_transform(transform)
+
     # parse file
-    for node_id, vx, vy, vz, r, pt, hp, parent_id in node_gen(filename, transform):
+    for node_id, vx, vy, vz, r, pt, hp, parent_id in node_gen(
+        filename, origin, spacing
+    ):
         location = ((np.array([vx, vy, vz]) + offset) * resolution).take(transpose)
         graph.add_node(
             node_id, location=location, radius=r, point_type=pt, human_placed=hp
@@ -148,10 +152,30 @@ def parse_swc(
     return graph
 
 
-def node_gen(filename: Path, transform_path: Path):
+def parse_swc_no_transform(
+    filename: Path,
+    offset=np.array([0, 0, 0]),
+    resolution=np.array([1, 1, 1]),
+    transpose=[0, 1, 2],
+) -> nx.DiGraph:
+    # swc's are directed
+    graph = nx.DiGraph()
+
+    # parse file
+    for node_id, vx, vy, vz, r, pt, hp, parent_id in node_gen(filename):
+        location = ((np.array([vx, vy, vz]) + offset) * resolution).take(transpose)
+        graph.add_node(
+            node_id, location=location, radius=r, point_type=pt, human_placed=hp
+        )
+
+        if parent_id >= 0:
+            graph.add_edge(parent_id, node_id)
+    return graph
+
+
+def node_gen(filename: Path, origin=np.array([0, 0, 0]), spacing=np.array([1, 1, 1])):
     # initialize file specific variables
     header = True
-    origin, spacing = load_transform(transform_path)
 
     offset = np.array([0, 0, 0])
     resolution = np.array([1, 1, 1])
