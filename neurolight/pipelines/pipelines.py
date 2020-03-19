@@ -24,12 +24,27 @@ import logging
 def data_gen_pipeline(setup_config):
     pipeline, datasets, raw, labels, matched = get_training_inputs(setup_config)
 
+    if setup_config["SNAPSHOT_EVERY"] > 0:
+
+        pipeline = add_snapshot(pipeline, setup_config, datasets)
+
     if setup_config["NUM_WORKERS"] > 1:
         pipeline = add_caching(pipeline, setup_config)
+
+    return pipeline, datasets, raw, labels, matched
+
+
+def data_gen_pipeline_locations(setup_config):
+    pipeline, datasets, raw, labels, matched = get_training_inputs(
+        setup_config, locations=True
+    )
 
     if setup_config["SNAPSHOT_EVERY"] > 0:
 
         pipeline = add_snapshot(pipeline, setup_config, datasets)
+
+    if setup_config["NUM_WORKERS"] > 1:
+        pipeline = add_caching(pipeline, setup_config)
 
     return pipeline, datasets, raw, labels, matched
 
@@ -88,6 +103,9 @@ def foreground_pipeline(setup_config, get_data_sources=None):
 
         outputs = (raw, fg_pred)
 
+    if setup_config["PROFILE_EVERY"] > 0:
+        pipeline += gp.PrintProfilingStats(every=int(setup_config["PROFILE_EVERY"]))
+
     if setup_config["SNAPSHOT_EVERY"] > 0:
 
         pipeline = add_snapshot(pipeline, setup_config, snapshot_datasets)
@@ -108,6 +126,9 @@ def embedding_pipeline(setup_config, get_data_sources=None):
 
     pipeline = add_data_augmentation(pipeline, raw)
 
+    if setup_config["NUM_WORKERS"] > 1:
+        pipeline = add_caching(pipeline, setup_config)
+
     pipeline, fg_pred = add_foreground_prediction(pipeline, setup_config, raw)
 
     pipeline, maxima = add_non_max_suppression(pipeline, setup_config, fg_pred)
@@ -116,9 +137,6 @@ def embedding_pipeline(setup_config, get_data_sources=None):
         (fg_pred, output_size, "volumes/fg_pred", logging.INFO),
         (maxima, output_size, "volumes/fg_maxima", logging.INFO),
     ]
-
-    if setup_config["NUM_WORKERS"] > 1:
-        pipeline = add_caching(pipeline, setup_config)
 
     if setup_config["TRAIN_EMBEDDING"]:
 
@@ -150,5 +168,8 @@ def embedding_pipeline(setup_config, get_data_sources=None):
 
     if setup_config["SNAPSHOT_EVERY"] > 0:
         pipeline = add_snapshot(pipeline, setup_config, snapshot_datasets)
+
+    if setup_config["PROFILE_EVERY"] > 0:
+        pipeline += gp.PrintProfilingStats(every=int(setup_config["PROFILE_EVERY"]))
 
     return (pipeline,) + outputs
