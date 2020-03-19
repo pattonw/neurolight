@@ -15,8 +15,7 @@ from typing import Optional, Set, Hashable
 from pathlib import Path
 import pickle
 
-from neurolight.match.costs import get_costs
-from neurolight.match.preprocess import mouselight_preprocessing
+from neurolight.match import get_costs, mouselight_preprocessing, add_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +26,7 @@ class TopologicalMatcher(BatchFilter):
         G: PointsKey,
         T: PointsKey,
         matched: PointsKey,
+        expected_edge_len: float,
         match_distance_threshold: float = 100,
         max_gap_crossing: float = 50,
         node_balance: float = 10,
@@ -35,16 +35,20 @@ class TopologicalMatcher(BatchFilter):
         use_gurobi: bool = True,
         location_attr: str = "location",
         penalty_attr: str = "penalty",
+        with_fallback: bool = False,
     ):
 
         self.G = G
         self.T = T
         self.matched = matched
+        self.expected_edge_len = expected_edge_len
         self.match_distance_threshdold = match_distance_threshold
         self.max_gap_crossing = max_gap_crossing
         self.node_balance = node_balance
         self.failures = failures
         self.try_complete = try_complete
+
+        self.with_fallback = with_fallback
         self.use_gurobi = use_gurobi
 
         self.location_attr = location_attr
@@ -63,8 +67,21 @@ class TopologicalMatcher(BatchFilter):
     def process(self, batch: Batch, request: BatchRequest):
 
         graph = copy.deepcopy(batch[self.G].graph).to_undirected()
-        mouselight_preprocessing(graph, self.max_gap_crossing)
+        mouselight_preprocessing(
+            graph, self.max_gap_crossing, expected_edge_len=self.expected_edge_len
+        )
         tree = copy.deepcopy(batch[self.T].graph)
+
+        if self.with_fallback:
+            add_fallback(
+                graph,
+                tree,
+                node_offset=max(graph.nodes) + 1,
+                max_new_edge=self.max_gap_crossing,
+                expected_edge_len=self.expected_edge_len,
+                penalty_attr=self.penalty_attr,
+                location_attr=self.location_attr,
+            )
 
         success = False
         if self.try_complete:
@@ -83,14 +100,15 @@ class TopologicalMatcher(BatchFilter):
         if len(graph.nodes) < 1 or len(tree.nodes) < 1:
             return SpatialGraph(), False
         logger.debug("initializing matcher")
+
         node_costs, edge_costs = get_costs(
             graph,
             tree,
+            expected_edge_len=self.expected_edge_len,
             location_attr=self.location_attr,
             penalty_attr=self.penalty_attr,
             node_match_threshold=self.match_distance_threshdold,
             edge_match_threshold=self.match_distance_threshdold,
-            node_balance=self.node_balance,
         )
         success = True
         try:
