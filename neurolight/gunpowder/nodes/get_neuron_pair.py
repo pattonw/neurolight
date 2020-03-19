@@ -335,14 +335,8 @@ class GetNeuronPair(BatchProvider):
             timing_prepare.start()
 
             request_base = self.prepare(request, base_seed, -direction)
-            logger.debug(
-                f"base_request shrank to {request_base[self.point_source].roi}"
-            )
             if add_seed is not None:
                 request_add = self.prepare(request, add_seed, direction)
-                logger.debug(
-                    f"add_request shrank to {request_add[self.point_source].roi}"
-                )
             else:
                 request_add = None
                 logger.debug(f"No add_request needed!")
@@ -355,26 +349,6 @@ class GetNeuronPair(BatchProvider):
             else:
                 add = self._empty_copy(base)
 
-            wccs_base = list(
-                nx.weakly_connected_components(
-                    base[self.point_source].graph.crop(
-                        roi=self._centered_output_roi(base[self.point_source].spec.roi),
-                        copy=True,
-                    )
-                )
-            )
-            wccs_add = list(
-                nx.weakly_connected_components(
-                    add[self.point_source].graph.crop(
-                        roi=self._centered_output_roi(add[self.point_source].spec.roi),
-                        copy=True,
-                    )
-                )
-            )
-            if len(wccs_add) + len(wccs_base) < 1:
-                logger.debug("Failed batch, redo!")
-                continue
-
             has_component = True
 
             timing_process = Timing(self, "process")
@@ -383,27 +357,7 @@ class GetNeuronPair(BatchProvider):
             base = self.process(base, Coordinate([0, 0, 0]), request=request)
             add = self.process(add, -Coordinate([0, 0, 0]), request=request)
 
-            if (
-                request_add is not None
-                and len(add[self.point_source].graph.nodes) > 1
-                and len(base[self.point_source].graph.nodes) > 1
-            ):
-                min_dist = min(
-                    [
-                        np.linalg.norm(a["location"] - b["location"])
-                        for a, b in itertools.product(
-                            base[self.point_source].graph.nodes.values(),
-                            add[self.point_source].graph.nodes.values(),
-                        )
-                    ]
-                )
-                logger.debug(f"Got a final min dist of {min_dist}")
-            elif request_add is not None:
-                logger.debug("Got a final min dist of inf")
-
             batch = self.merge_batches(base, add)
-
-            logger.debug("get neuron pair got {}".format(batch))
 
             timing_process.stop()
             batch.profiling_stats.merge_with(prepare_profiling_stats)
