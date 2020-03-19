@@ -25,7 +25,7 @@
     "NUM_ITERATIONS": 1,
     "CACHE_SIZE": 1,
     "NUM_WORKERS": 1,
-    "SNAPSHOT_EVERY": 1,
+    "SNAPSHOT_EVERY": 0,
     "CHECKPOINT_EVERY": 10000,
     "PROFILE_EVERY": 1,
     "SHIFT_ATTEMPTS": 1000,
@@ -37,8 +37,9 @@
     "BLEND_SMOOTHNESS": 3,
     "MAX_LABEL_DIST": 10,
     "RAW_N5": "fluorescence-near-consensus.n5",
-    "TRAIN_SAMPLES": ["2018-07-02"],
-    "TEST_SAMPLES": ["2018-08-01", "2018-10-01", "2018-12-01"],
+    "TRAIN_SAMPLES": ["2018-07-02", "2018-12-01"],
+    "TEST_SAMPLES": ["2018-08-01"],
+    "VALIDATION_SAMPLES": ["2018-10-01"],
     "SNAPSHOT_FILE_NAME": "snapshot_{iteration}.hdf",
     "FOREGROUND_NET_NAME": "fg_net",
     "EMBEDDING_NET_NAME": "emb_net",
@@ -54,5 +55,8 @@
     "CONSTRAINED": true,
     "ACTIVATION": "ReLU",
     "NUM_COMPONENTS": 1,
-    "NORMALIZE_EMBEDDINGS": true
+    "NORMALIZE_EMBEDDINGS": true,
+    "DATA": "train",
+    "GUARANTEE_NONEMPTY": true,
+    "SAMPLES_PATH": "/nrs/funke/mouselight"
 }
