@@ -1,8 +1,10 @@
 from gunpowder.graph_points import GraphPoint
 
+from neurolight.transforms.swc_to_graph import parse_swc
 from .swc_file_source import SwcFileSource
 
 import numpy as np
+import networkx as nx
 
 from pathlib import Path
 import logging
@@ -51,67 +53,36 @@ class MouselightSwcFileSource(SwcFileSource):
         first ``ndims`` are used. If negative, all but the last ``-ndims`` are
         used.
         """
-        # initialize file specific variables
-        header = True
-        offset = np.array([0, 0, 0])
+        if "cube" in filename.name:
+            return 0
 
-        assert self.transform_file.exists(), "Missing transform.txt file: {}".format(
-            str(self.transform_file.absolute())
+        tree = parse_swc(
+            filename,
+            self.transform_file,
+            resolution=[self.scale[i] for i in self.transpose],
+            transpose=self.transpose,
         )
-        origin, spacing = load_transform(self.transform_file)
 
-        # parse file
-        with filename.open() as o_f:
-            points = {}
-            edges = set()
-            for line in o_f.read().splitlines():
-                if header and line.startswith("#"):
-                    # Search header comments for variables
-                    offset = self._search_swc_header(line, "offset", offset)
-                    continue
-                elif line.startswith("#"):
-                    # comments not in header get skipped
-                    continue
-                elif header:
-                    # first line without a comment marks end of header
-                    header = False
+        assert len(list(nx.weakly_connected_components(tree))) == 1
 
-                row = line.strip().split()
-                if len(row) != 7:
-                    raise ValueError("SWC has a malformed line: {}".format(line))
+        points = {}
 
-                # extract data from row (point_id, type, x, y, z, radius, parent_id)
-                assert int(row[0]) not in points, "Duplicate point {} found!".format(
-                    int(row[0])
+        for node, attrs in tree.nodes.items():
+            if not self.ignore_human_nodes or attrs["human_placed"]:
+                points[node] = GraphPoint(
+                    point_type=attrs["point_type"],
+                    location=attrs["location"],
+                    radius=attrs["radius"],
                 )
-                if not self.ignore_human_nodes or int(row[1]) != 43:
-                    points[int(row[0])] = GraphPoint(
-                        point_type=int(row[1]),
-                        location=np.array(
-                            (
-                                (
-                                    np.array([float(x) for x in row[2:5]])
-                                    + offset
-                                    - origin
-                                )
-                                / spacing
-                            ).take(self.transpose)
-                            * self.scale,
-                            dtype=float,
-                        ),
-                        radius=float(row[5]),
-                    )
-                    v, u = int(row[0]), int(row[6])
-                    assert (u, v) not in edges, "Duplicate edge {} found!".format(
-                        (u, v)
-                    )
-                    if u != v and u is not None and v is not None and u >= 0 and v >= 0:
-                        edges.add((u, v))
-            
-            human_edges = set()
-            if self.ignore_human_nodes:
-                for u, v in edges:
-                    if u not in points or v not in points:
-                        human_edges.add((u, v))
-            self._add_points_to_source(points, edges - human_edges)
-            
+
+        human_edges = set()
+        if self.ignore_human_nodes:
+            for u, v in tree.edges:
+                if u not in points or v not in points:
+                    human_edges.add((u, v))
+        edges = set((u, v) for (u, v) in tree.edges)
+        if not self.directed:
+            edges = edges | set((v, u) for u, v in tree.edges())
+        self._add_points_to_source(points, set(tree.edges) - human_edges)
+
+        return len(list(nx.weakly_connected_components(tree)))
