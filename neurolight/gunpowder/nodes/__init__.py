@@ -9,6 +9,15 @@ from .synthetic_light_like import SyntheticLightLike
 from .binarize_labels import BinarizeLabels
 from .graph_source import GraphSource
 from .topological_graph_matching import TopologicalMatcher
+from .nms import NonMaxSuppression
+from .helpers import (
+    Crop,
+    BinarizeGt,
+    RejectIfEmpty,
+    ThresholdMask,
+    Mask,
+    FilterComponents,
+)
 
 __all__ = [
     "RasterizeSkeleton",
@@ -22,4 +31,10 @@ __all__ = [
     "BinarizeLabels",
     "GraphSource",
     "TopologicalMatcher",
+    "Crop",
+    "BinarizeGt",
+    "RejectIfEmpty",
+    "ThresholdMask",
+    "NonMaxSuppression",
+    "FilterComponents",
 ]

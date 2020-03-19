@@ -5,6 +5,7 @@ import networkx as nx
 import copy
 from typing import Optional
 import logging
+import time
 
 logger = logging.getLogger(__file__)
 
@@ -79,8 +80,8 @@ class RejectIfEmpty(gp.BatchFilter):
         self,
         ensure_nonempty,
         centroid_size: Optional[gp.Coordinate] = None,
-        request_limit: int = 20,
-        num_components: int = 3,
+        request_limit: int = 100,
+        num_components: int = 2,
     ):
         self.ensure_nonempty = ensure_nonempty
         self.request_limit = request_limit
@@ -98,13 +99,16 @@ class RejectIfEmpty(gp.BatchFilter):
 
     def process(self, batch, request):
         k = 0
+        initial_seed = request._random_seed
+        upstream_request = request.copy()
         while self._isempty(batch[self.ensure_nonempty]) and k < self.request_limit:
+            upstream_request._random_seed = initial_seed + k
             k += 1
             if k == self.request_limit:
                 raise RuntimeError(
                     f"Failed to obtain a batch with {self.ensure_nonempty} non empty"
                 )
-            temp_batch = self.get_upstream_provider().request_batch(request)
+            temp_batch = self.get_upstream_provider().request_batch(upstream_request)
             self._replace_batch(batch, temp_batch)
 
         if isinstance(self.ensure_nonempty, gp.PointsKey):
@@ -137,7 +141,10 @@ class RejectIfEmpty(gp.BatchFilter):
             values = np.unique(dataset.data)
             return len(values) <= self.num_components
         if isinstance(dataset, gp.Points):
-            return len(list(nx.weakly_connected_components(dataset.graph))) < self.num_components
+            return (
+                len(list(nx.weakly_connected_components(dataset.graph)))
+                < self.num_components
+            )
 
 
 class ThresholdMask(gp.BatchFilter):
@@ -188,3 +195,29 @@ class Mask(gp.BatchFilter):
         array.data[mask.data == 0] = 0
 
         return batch
+
+
+class FilterComponents(gp.BatchFilter):
+    def __init__(self, points, node_offset: int):
+        self.points = points
+        self.node_offset = node_offset
+
+    def setup(self):
+        points_spec = self.spec[self.points].copy()
+        self.updates(self.points, points_spec)
+        self.enable_autoskip()
+
+    def prepare(self, request):
+        deps = gp.BatchRequest()
+        deps[self.points] = request[self.points].copy()
+        return deps
+
+    def process(self, batch, request):
+        points = batch[self.points]
+        graph = points.graph
+        wccs = list(nx.weakly_connected_components(graph))
+        for wcc in wccs:
+            if not all([x < self.node_offset for x in wcc]):
+                for node in wcc:
+                    graph.remove_node(node)
+
