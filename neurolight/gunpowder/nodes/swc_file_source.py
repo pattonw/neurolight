@@ -72,6 +72,7 @@ class SwcFileSource(BatchProvider):
         keep_ids: bool = False,
         transpose: Tuple[int] = (0, 1, 2),
         radius: Coordinate = Coordinate((1000, 1000, 1000)),
+        directed: bool = True,
     ):
         self.filename = filename
         self.points = points
@@ -82,6 +83,7 @@ class SwcFileSource(BatchProvider):
         self._graph = SpatialGraph()
         self.transpose = transpose
         self.radius = radius
+        self.directed = directed
 
     @property
     def g(self):
@@ -164,16 +166,18 @@ class SwcFileSource(BatchProvider):
                 )
             )
 
+        self.num_ccs = 0
         if filepath.is_file():
             # read from single file
-            self._parse_swc(filepath)
+            self.num_ccs = self._parse_swc(filepath)
         elif filepath.is_dir():
             # read from directory
             for swc_file in filepath.iterdir():
                 if swc_file.name.endswith(".swc"):
-                    self._parse_swc(swc_file)
+                    self.num_ccs += self._parse_swc(swc_file)
 
         self._graph_to_kdtree()
+        assert len(list(nx.weakly_connected_components(self.g))) == self.num_ccs
 
     def _graph_to_kdtree(self) -> None:
         # add node_ids to coordinates to support overlapping nodes in cKDTree
