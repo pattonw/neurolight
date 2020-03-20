@@ -6,10 +6,11 @@ from gunpowder import (
     Array,
     ArrayKey,
     ArraySpec,
-    PointsKey,
-    PointsSpec,
-    SpatialGraph,
-    GraphPoints,
+    GraphKey,
+    GraphSpec,
+    Graph,
+    Node,
+    Edge,
 )
 from gunpowder.nodes import MergeProvider, RandomLocation, BatchProvider, Normalize
 import numpy as np
@@ -80,7 +81,7 @@ class TestImageSource(BatchProvider):
 
 class TestPointSource(BatchProvider):
     def __init__(
-        self, points: List[PointsKey], directed: bool, size: Coordinate, num_points: int
+        self, points: List[GraphKey], directed: bool, size: Coordinate, num_points: int
     ):
         self.points = points
         self.directed = directed
@@ -90,20 +91,16 @@ class TestPointSource(BatchProvider):
     def setup(self):
         roi = Roi(Coordinate([0] * len(self.size)), self.size)
         for points_key in self.points:
-            self.provides(points_key, PointsSpec(roi=roi))
+            self.provides(points_key, GraphSpec(roi=roi))
 
         k = min(self.size)
-        point_list = [
-            (i, {"location": np.array([i * k / self.num_points] * 3)})
+        nodes = [
+            Node(id=i, location=np.array([i * k / self.num_points] * 3))
             for i in range(self.num_points)
         ]
-        edge_list = [(i, i + 1, {}) for i in range(self.num_points - 1)]
-        if not self.directed:
-            edge_list += [(i + 1, i, {}) for i in range(self.num_points - 1)]
+        edges = [Edge(i, i + 1) for i in range(self.num_points - 1)]
 
-        self.graph = SpatialGraph()
-        self.graph.add_nodes_from(point_list)
-        self.graph.add_edges_from(edge_list)
+        self.graph = Graph(nodes, edges, GraphSpec(roi=roi, directed=self.directed))
 
     def provide(self, request: BatchRequest) -> Batch:
         batch = Batch()
@@ -113,7 +110,7 @@ class TestPointSource(BatchProvider):
 
                 subgraph = self.graph.crop(roi=spec.roi, copy=True)
 
-                batch[points_key] = GraphPoints._from_graph(subgraph, spec.copy())
+                batch[points_key] = subgraph
         return batch
 
 
@@ -128,10 +125,10 @@ def get_test_data_sources(setup_config):
     # New array keys
     # Note: These are intended to be requested with size input_size
     raw = ArrayKey("RAW")
-    consensus = PointsKey("CONSENSUS")
-    skeletonization = PointsKey("SKELETONIZATION")
-    matched = PointsKey("MATCHED")
-    nonempty_placeholder = PointsKey("NONEMPTY")
+    consensus = GraphKey("CONSENSUS")
+    skeletonization = GraphKey("SKELETONIZATION")
+    matched = GraphKey("MATCHED")
+    nonempty_placeholder = GraphKey("NONEMPTY")
     labels = ArrayKey("LABELS")
 
     if setup_config["FUSION_PIPELINE"]:

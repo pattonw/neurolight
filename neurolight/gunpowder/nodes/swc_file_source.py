@@ -1,5 +1,5 @@
-from gunpowder.points import PointsKey
-from gunpowder.graph_points import GraphPoint, GraphPoints, SpatialGraph
+from gunpowder.points import GraphKey
+from gunpowder.graph import Node, Graph
 from gunpowder.nodes.batch_provider import BatchProvider
 from gunpowder.batch_request import BatchRequest
 from gunpowder.coordinate import Coordinate
@@ -30,7 +30,7 @@ class SwcFileSource(BatchProvider):
 
             The file to read from.
 
-        points (:class:`PointsKey`):
+        points (:class:`GraphKey`):
 
             The key of the points set to create.
 
@@ -66,7 +66,7 @@ class SwcFileSource(BatchProvider):
     def __init__(
         self,
         filename: Path,
-        points: List[PointsKey],
+        points: List[GraphKey],
         points_spec: List[PointsSpec] = None,
         scale: Coordinate = Coordinate([1, 1, 1]),
         keep_ids: bool = False,
@@ -80,7 +80,7 @@ class SwcFileSource(BatchProvider):
         self.scale = scale
         self.connected_component_label = 0
         self.keep_ids = keep_ids
-        self._graph = SpatialGraph()
+        self._graph = nx.Graph()
         self.transpose = transpose
         self.radius = radius
         self.directed = directed
@@ -141,7 +141,7 @@ class SwcFileSource(BatchProvider):
             points_subgraph = points_subgraph.crop(request[points_key].roi)
 
             batch = Batch()
-            batch.points[points_key] = GraphPoints._from_graph(
+            batch.points[points_key] = Graph._from_graph(
                 points_subgraph, request[points_key]
             )
 
@@ -261,7 +261,7 @@ class SwcFileSource(BatchProvider):
         points = {}
 
         for node, attrs in tree.nodes.items():
-            points[node] = GraphPoint(
+            points[node] = Node(
                 point_type=attrs["point_type"],
                 location=attrs["location"],
                 radius=attrs["radius"],
@@ -285,12 +285,12 @@ class SwcFileSource(BatchProvider):
             return default
 
     def _add_points_to_source(
-        self, points: Dict[int, GraphPoint], edges: List[Tuple[int, int]]
+        self, points: Dict[int, Node], edges: List[Tuple[int, int]]
     ):
 
         # add points to a temporary graph
         logger.debug("adding {} nodes to graph".format(len(points)))
-        temp = SpatialGraph()
+        temp = nx.Graph()
         for point_id, graph_point in points.items():
             temp.add_node(point_id, **graph_point.attrs)
         for u, v in edges:
@@ -302,13 +302,13 @@ class SwcFileSource(BatchProvider):
         self._graph = nx.union(self._graph, temp)
         logger.debug("graph has {} nodes".format(len(self._graph.nodes)))
 
-    def _subgraph_points(self, nodes: List[int], with_neighbors=False) -> SpatialGraph:
+    def _subgraph_points(self, nodes: List[int], with_neighbors=False) -> nx.Graph:
         """
         Creates a subgraph of `graph` that contains the points in `nodes`.
         If `with_neighbors` is True, the subgraph contains all neighbors
         of all points in `nodes` as well.
         """
-        sub_g = SpatialGraph()
+        sub_g = nx.Graph()
         subgraph_nodes = set(nodes)
         if with_neighbors:
             for n in nodes:

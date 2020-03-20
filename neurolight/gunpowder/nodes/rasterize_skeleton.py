@@ -7,8 +7,8 @@ from gunpowder import (
     Array,
     ArraySpec,
     Coordinate,
-    PointsSpec,
-    GraphPoints,
+    GraphSpec,
+    Graph,
 )
 import logging
 
@@ -67,14 +67,14 @@ class RasterizeSkeleton(BatchFilter):
 
     def prepare(self, request):
         deps = BatchRequest()
-        deps[self.points] = PointsSpec(roi=request[self.array].roi)
+        deps[self.points] = GraphSpec(roi=request[self.array].roi)
         return deps
 
     def process(self, batch, request):
 
         points = batch.points[self.points]
         # assert len(points.data.items()) > 0, "No Swc Points in enlarged Roi."
-        assert isinstance(points, GraphPoints), "Rasterize skeleton needs a Graph."
+        assert isinstance(points, Graph), "Rasterize skeleton needs a Graph."
 
         voxel_size = self.array_spec.voxel_size
 

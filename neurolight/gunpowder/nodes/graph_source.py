@@ -1,5 +1,4 @@
-from gunpowder.points import PointsKey
-from gunpowder.graph_points import GraphPoint, GraphPoints, SpatialGraph
+from gunpowder.graph import Graph, Node, GraphKey
 from gunpowder.nodes.batch_provider import BatchProvider
 from gunpowder.batch_request import BatchRequest
 from gunpowder.coordinate import Coordinate
@@ -10,7 +9,6 @@ from gunpowder.profiling import Timing
 
 import numpy as np
 from scipy.spatial.ckdtree import cKDTree, cKDTreeNode
-from tqdm import tqdm
 
 from pathlib import Path
 from typing import List, Dict, Tuple
@@ -54,7 +52,7 @@ class GraphSource(BatchProvider):
     def __init__(
         self,
         filename: Path,
-        points: List[PointsKey],
+        points: List[GraphKey],
         points_spec: List[PointsSpec] = None,
         scale: Coordinate = Coordinate([1, 1, 1]),
         transpose: Tuple[int] = (0, 1, 2),
@@ -65,7 +63,7 @@ class GraphSource(BatchProvider):
         self.points_spec = points_spec
         self.scale = scale
         self.connected_component_label = 0
-        self._graph = SpatialGraph()
+        self._graph = nx.Graph()
         self.transpose = transpose
 
     @property
@@ -121,7 +119,7 @@ class GraphSource(BatchProvider):
             points_subgraph = points_subgraph.crop(request[points_key].roi)
 
             batch = Batch()
-            batch.points[points_key] = GraphPoints._from_graph(
+            batch.points[points_key] = Node._from_graph(
                 points_subgraph, request[points_key]
             )
 
@@ -156,7 +154,7 @@ class GraphSource(BatchProvider):
             self._read_graph(filepath)
         elif filepath.is_dir():
             # read from directory
-            for graph_file in tqdm(filepath.iterdir()):
+            for graph_file in filepath.iterdir():
                 if graph_file.name.endswith(".obj"):
                     self._read_graph(graph_file)
 
@@ -265,13 +263,13 @@ class GraphSource(BatchProvider):
         else:
             return default
 
-    def _subgraph_points(self, nodes: List[int], with_neighbors=False) -> SpatialGraph:
+    def _subgraph_points(self, nodes: List[int], with_neighbors=False) -> nx.Graph:
         """
         Creates a subgraph of `graph` that contains the points in `nodes`.
         If `with_neighbors` is True, the subgraph contains all neighbors
         of all points in `nodes` as well.
         """
-        sub_g = SpatialGraph()
+        sub_g = nx.Graph()
         subgraph_nodes = set(nodes)
         if with_neighbors:
             for n in nodes:

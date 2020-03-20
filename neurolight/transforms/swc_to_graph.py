@@ -1,6 +1,5 @@
 import networkx as nx
 import numpy as np
-from tqdm import tqdm
 
 from pathlib import Path
 import logging
@@ -182,7 +181,7 @@ def node_gen(filename: Path, origin=np.array([0, 0, 0]), spacing=np.array([1, 1,
 
     # parse file
     with filename.open() as o_f:
-        for line in tqdm(o_f.read().splitlines(), f"Parsing {filename.name}"):
+        for line in o_f.read().splitlines():
             if header and line.startswith("#"):
                 # Search header comments for variables
                 offset = _search_swc_header(line, "offset", offset)

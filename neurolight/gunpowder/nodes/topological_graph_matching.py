@@ -1,10 +1,9 @@
 from gunpowder import (
-    PointsKey,
+    GraphKey,
     BatchRequest,
     Batch,
     BatchFilter,
-    SpatialGraph,
-    GraphPoints,
+    Graph,
 )
 from funlib.match.helper_functions import match
 import networkx as nx
@@ -23,9 +22,9 @@ logger = logging.getLogger(__name__)
 class TopologicalMatcher(BatchFilter):
     def __init__(
         self,
-        G: PointsKey,
-        T: PointsKey,
-        matched: PointsKey,
+        G: GraphKey,
+        T: GraphKey,
+        matched: GraphKey,
         expected_edge_len: float,
         match_distance_threshold: float = 100,
         max_gap_crossing: float = 50,
@@ -91,14 +90,14 @@ class TopologicalMatcher(BatchFilter):
         if not success:
             matched, success = self.__solve_piecewise(graph, tree)
 
-        result = GraphPoints._from_graph(matched, copy.deepcopy(batch[self.T].spec))
+        result = Graph._from_graph(matched, copy.deepcopy(batch[self.T].spec))
 
         batch[self.matched] = result
 
     def __solve_tree(self, graph, tree):
 
         if len(graph.nodes) < 1 or len(tree.nodes) < 1:
-            return SpatialGraph(), False
+            return nx.Graph(), False
         logger.debug("initializing matcher")
 
         node_costs, edge_costs = get_costs(
@@ -215,8 +214,8 @@ class TopologicalMatcher(BatchFilter):
 
     def __save_failed_matching(
         self,
-        graph: SpatialGraph,
-        tree: SpatialGraph,
+        graph: nx.Graph,
+        tree: nx.Graph,
         component: Optional[Set[Hashable]] = None,
         batch_id: Optional[int] = None,
         failure_type: int = 0,

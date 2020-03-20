@@ -9,13 +9,12 @@ from gunpowder import (
     BatchRequest,
     Batch,
     Roi,
-    Points,
-    PointsSpec,
-    GraphPoints,
+    GraphSpec,
+    Graph,
     Array,
     ArrayKey,
     Coordinate,
-    PointsKey,
+    GraphKey,
 )
 from gunpowder.profiling import Timing, ProfilingStats
 
@@ -27,7 +26,7 @@ import itertools
 import pickle
 from pathlib import Path
 
-DataKey = Union[PointsKey, ArrayKey]
+DataKey = Union[GraphKey, ArrayKey]
 
 logger = logging.getLogger(__name__)
 
@@ -135,14 +134,14 @@ class GetNeuronPair(BatchProvider):
 
     def __init__(
         self,
-        point_source: PointsKey,
+        point_source: GraphKey,
         array_source: ArrayKey,
         label_source: ArrayKey,
-        points: Tuple[PointsKey, PointsKey],
+        points: Tuple[GraphKey, GraphKey],
         arrays: Tuple[ArrayKey, ArrayKey],
         labels: Tuple[ArrayKey, ArrayKey],
         output_shape: Coordinate,
-        nonempty_placeholder: Optional[PointsKey] = None,
+        nonempty_placeholder: Optional[GraphKey] = None,
         seperate_by: Tuple[float, float] = (0.0, 1.0),
         shift_attempts: int = 50,
         request_attempts: int = 3,
@@ -212,11 +211,11 @@ class GetNeuronPair(BatchProvider):
                 self.points[0], request[self.points[1]]
             )
         elif any([array in request for array in self.arrays]):
-            dps[point_key] = PointsSpec(
+            dps[point_key] = GraphSpec(
                 roi=request.array_specs.get(self.arrays[0], request[self.arrays[1]]).roi
             )
         elif any([labels in request for labels in self.labels]):
-            dps[point_key] = PointsSpec(
+            dps[point_key] = GraphSpec(
                 roi=request.array_specs.get(self.labels[0], request[self.labels[1]]).roi
             )
         else:
@@ -257,7 +256,7 @@ class GetNeuronPair(BatchProvider):
                 )
             elif any([array in request for array in self.arrays]):
                 dps.place_holders[self.nonempty_placeholder] = copy.deepcopy(
-                    PointsSpec(
+                    GraphSpec(
                         roi=request.array_specs.get(
                             self.arrays[0], request[self.arrays[1]]
                         ).roi
@@ -265,7 +264,7 @@ class GetNeuronPair(BatchProvider):
                 )
             elif any([labels in request for labels in self.labels]):
                 dps.place_holders[self.nonempty_placeholder] = copy.deepcopy(
-                    PointsSpec(
+                    GraphSpec(
                         roi=request.array_specs.get(
                             self.labels[0], request[self.labels[1]]
                         ).roi
@@ -284,7 +283,8 @@ class GetNeuronPair(BatchProvider):
 
         # handle smaller requests
         voxel_size = request.get_lcm_voxel_size()
-        direction -= Coordinate(np.array(direction) % np.array(voxel_size))
+        direction = Coordinate(direction)
+        direction -= Coordinate(tuple(np.array(direction) % np.array(voxel_size)))
 
         if any([points in request for points in self.points]):
             dps[self.point_source] = copy.deepcopy(request[self.points[0]])
@@ -371,7 +371,7 @@ class GetNeuronPair(BatchProvider):
         for key, array in base.arrays.items():
             add[key] = Array(np.zeros_like(array.data), spec=copy.deepcopy(array.spec))
         for key, points in base.points.items():
-            add[key] = GraphPoints({}, spec=copy.deepcopy(points.spec))
+            add[key] = Graph({}, spec=copy.deepcopy(points.spec))
         return add
 
     def merge_batches(self, base: Batch, add: Batch) -> Batch:
@@ -640,16 +640,16 @@ class GetNeuronPair(BatchProvider):
         return array
 
     def _shift_and_crop_points(self, points, direction, output_roi):
-        # Shift and crop the array
+        # Extract portion of points.spec.roi to be kept. i.e. center of size output_roi,
+        # shifted by direction
         shifted_smaller_roi = self._extract_roi(points.spec.roi, output_roi, direction)
 
         point_graph = points.graph
+        # Crop out points to keep
         point_graph.crop(shifted_smaller_roi)
-        point_graph.shift(-shifted_smaller_roi.get_offset())
-        output_roi = (
-            output_roi if output_roi is not None else Roi((None,) * 3, (None,) * 3)
-        )
-        points = GraphPoints._from_graph(point_graph, PointsSpec(roi=output_roi))
+        # Shift them into position relative to output_roi
+        point_graph.shift(-shifted_smaller_roi.get_offset() + output_roi.get_offset())
+        points = Graph._from_graph(point_graph, GraphSpec(roi=output_roi))
         return points
 
     def _get_growth(self):

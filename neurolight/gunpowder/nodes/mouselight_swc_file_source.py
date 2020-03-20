@@ -1,4 +1,4 @@
-from gunpowder.graph_points import GraphPoint
+from gunpowder.graph import Node
 
 from neurolight.transforms.swc_to_graph import parse_swc
 from .swc_file_source import SwcFileSource
@@ -69,9 +69,10 @@ class MouselightSwcFileSource(SwcFileSource):
 
         for node, attrs in tree.nodes.items():
             if not self.ignore_human_nodes or attrs["human_placed"]:
-                points[node] = GraphPoint(
-                    point_type=attrs["point_type"],
+                points[node] = Node(
+                    id=node,
                     location=attrs["location"],
+                    point_type=attrs["point_type"],
                     radius=attrs["radius"],
                 )
 

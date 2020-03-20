@@ -1,5 +1,5 @@
 from provider_test import TestWithTempFiles
-from gunpowder import Roi, Coordinate, GraphPoint, GraphPoints, PointsSpec
+from gunpowder import Roi, Coordinate, Node, Graph, GraphSpec, Edge
 
 import numpy as np
 import networkx as nx
@@ -54,116 +54,117 @@ class SWCBaseTest(TestWithTempFiles):
         |
         -----------
         """
-        points = {
+        arr = np.array
+        points = [
             # backbone
-            0: GraphPoint(Coordinate([0, 0, 5]), radius=0, node_type=0),
-            1: GraphPoint(Coordinate([1, 0, 5]), radius=0, node_type=0),
-            2: GraphPoint(Coordinate([2, 0, 5]), radius=0, node_type=0),
-            3: GraphPoint(Coordinate([3, 0, 5]), radius=0, node_type=0),
-            4: GraphPoint(Coordinate([4, 0, 5]), radius=0, node_type=0),
-            5: GraphPoint(Coordinate([5, 0, 5]), radius=0, node_type=0),
-            6: GraphPoint(Coordinate([6, 0, 5]), radius=0, node_type=0),
-            7: GraphPoint(Coordinate([7, 0, 5]), radius=0, node_type=0),
-            8: GraphPoint(Coordinate([8, 0, 5]), radius=0, node_type=0),
-            9: GraphPoint(Coordinate([9, 0, 5]), radius=0, node_type=0),
-            10: GraphPoint(Coordinate([10, 0, 5]), radius=0, node_type=0),
+            Node(id=0, location=arr([0, 0, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=1, location=arr([1, 0, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=2, location=arr([2, 0, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=3, location=arr([3, 0, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=4, location=arr([4, 0, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=5, location=arr([5, 0, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=6, location=arr([6, 0, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=7, location=arr([7, 0, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=8, location=arr([8, 0, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=9, location=arr([9, 0, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=10, location=arr([10, 0, 5]), attrs={"radius": 0, "node_type": 0}),
             # bottom line
-            11: GraphPoint(Coordinate([0, 1, 5]), radius=0, node_type=0),
-            12: GraphPoint(Coordinate([0, 2, 5]), radius=0, node_type=0),
-            13: GraphPoint(Coordinate([0, 3, 5]), radius=0, node_type=0),
-            14: GraphPoint(Coordinate([0, 4, 5]), radius=0, node_type=0),
-            15: GraphPoint(Coordinate([0, 5, 5]), radius=0, node_type=0),
-            16: GraphPoint(Coordinate([0, 6, 5]), radius=0, node_type=0),
-            17: GraphPoint(Coordinate([0, 7, 5]), radius=0, node_type=0),
-            18: GraphPoint(Coordinate([0, 8, 5]), radius=0, node_type=0),
-            19: GraphPoint(Coordinate([0, 9, 5]), radius=0, node_type=0),
-            20: GraphPoint(Coordinate([0, 10, 5]), radius=0, node_type=0),
+            Node(id=11, location=arr([0, 1, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=12, location=arr([0, 2, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=13, location=arr([0, 3, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=14, location=arr([0, 4, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=15, location=arr([0, 5, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=16, location=arr([0, 6, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=17, location=arr([0, 7, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=18, location=arr([0, 8, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=19, location=arr([0, 9, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=20, location=arr([0, 10, 5]), attrs={"radius": 0, "node_type": 0}),
             # mid line
-            21: GraphPoint(Coordinate([5, 1, 5]), radius=0, node_type=0),
-            22: GraphPoint(Coordinate([5, 2, 5]), radius=0, node_type=0),
-            23: GraphPoint(Coordinate([5, 3, 5]), radius=0, node_type=0),
-            24: GraphPoint(Coordinate([5, 4, 5]), radius=0, node_type=0),
-            25: GraphPoint(Coordinate([5, 5, 5]), radius=0, node_type=0),
-            26: GraphPoint(Coordinate([5, 6, 5]), radius=0, node_type=0),
-            27: GraphPoint(Coordinate([5, 7, 5]), radius=0, node_type=0),
-            28: GraphPoint(Coordinate([5, 8, 5]), radius=0, node_type=0),
-            29: GraphPoint(Coordinate([5, 9, 5]), radius=0, node_type=0),
-            30: GraphPoint(Coordinate([5, 10, 5]), radius=0, node_type=0),
+            Node(id=21, location=arr([5, 1, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=22, location=arr([5, 2, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=23, location=arr([5, 3, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=24, location=arr([5, 4, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=25, location=arr([5, 5, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=26, location=arr([5, 6, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=27, location=arr([5, 7, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=28, location=arr([5, 8, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=29, location=arr([5, 9, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=30, location=arr([5, 10, 5]), attrs={"radius": 0, "node_type": 0}),
             # top line
-            31: GraphPoint(Coordinate([10, 1, 5]), radius=0, node_type=0),
-            32: GraphPoint(Coordinate([10, 2, 5]), radius=0, node_type=0),
-            33: GraphPoint(Coordinate([10, 3, 5]), radius=0, node_type=0),
-            34: GraphPoint(Coordinate([10, 4, 5]), radius=0, node_type=0),
-            35: GraphPoint(Coordinate([10, 5, 5]), radius=0, node_type=0),
-            36: GraphPoint(Coordinate([10, 6, 5]), radius=0, node_type=0),
-            37: GraphPoint(Coordinate([10, 7, 5]), radius=0, node_type=0),
-            38: GraphPoint(Coordinate([10, 8, 5]), radius=0, node_type=0),
-            39: GraphPoint(Coordinate([10, 9, 5]), radius=0, node_type=0),
-            40: GraphPoint(Coordinate([10, 10, 5]), radius=0, node_type=0),
-        }
-
-        edges = [
-            (0, 0),
-            (0, 1),
-            (1, 2),
-            (2, 3),
-            (3, 4),
-            (4, 5),
-            (5, 6),
-            (6, 7),
-            (7, 8),
-            (8, 9),
-            (9, 10),
-            (0, 11),
-            (11, 12),
-            (12, 13),
-            (13, 14),
-            (14, 15),
-            (15, 16),
-            (16, 17),
-            (17, 18),
-            (18, 19),
-            (19, 20),
-            (5, 21),
-            (21, 22),
-            (22, 23),
-            (23, 24),
-            (24, 25),
-            (25, 26),
-            (26, 27),
-            (27, 28),
-            (28, 29),
-            (29, 30),
-            (10, 31),
-            (31, 32),
-            (32, 33),
-            (33, 34),
-            (34, 35),
-            (35, 36),
-            (36, 37),
-            (37, 38),
-            (38, 39),
-            (39, 40),
+            Node(id=31, location=arr([10, 1, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=32, location=arr([10, 2, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=33, location=arr([10, 3, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=34, location=arr([10, 4, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=35, location=arr([10, 5, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=36, location=arr([10, 6, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=37, location=arr([10, 7, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=38, location=arr([10, 8, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=39, location=arr([10, 9, 5]), attrs={"radius": 0, "node_type": 0}),
+            Node(id=40, location=arr([10, 10, 5]), attrs={"radius": 0, "node_type": 0}),
         ]
 
-        return GraphPoints(
+        edges = [
+            Edge(0, 0),
+            Edge(0, 1),
+            Edge(1, 2),
+            Edge(2, 3),
+            Edge(3, 4),
+            Edge(4, 5),
+            Edge(5, 6),
+            Edge(6, 7),
+            Edge(7, 8),
+            Edge(8, 9),
+            Edge(9, 10),
+            Edge(0, 11),
+            Edge(11, 12),
+            Edge(12, 13),
+            Edge(13, 14),
+            Edge(14, 15),
+            Edge(15, 16),
+            Edge(16, 17),
+            Edge(17, 18),
+            Edge(18, 19),
+            Edge(19, 20),
+            Edge(5, 21),
+            Edge(21, 22),
+            Edge(22, 23),
+            Edge(23, 24),
+            Edge(24, 25),
+            Edge(25, 26),
+            Edge(26, 27),
+            Edge(27, 28),
+            Edge(28, 29),
+            Edge(29, 30),
+            Edge(10, 31),
+            Edge(31, 32),
+            Edge(32, 33),
+            Edge(33, 34),
+            Edge(34, 35),
+            Edge(35, 36),
+            Edge(36, 37),
+            Edge(37, 38),
+            Edge(38, 39),
+            Edge(39, 40),
+        ]
+
+        return Graph(
             points,
-            PointsSpec(
+            edges,
+            GraphSpec(
                 roi=Roi(Coordinate((-100, -100, -100)), Coordinate((300, 300, 300)))
             ),
-            edges=edges,
         )
 
     def _graph_points(self, points, edges, spec=None):
-        return GraphPoints(
+        return Graph(
             points,
-            spec=PointsSpec(roi=Roi(*(Coordinate((None,) * 3),) * 2)),
+            spec=GraphSpec(roi=Roi(*(Coordinate((None,) * 3),) * 2)),
             edges=edges,
         )
 
     def _get_points(
         self, inside: np.ndarray, slope: np.ndarray, bb: Roi
-    ) -> Tuple[Dict[int, GraphPoint], List[Tuple[int, int]]]:
+    ) -> Tuple[Dict[int, Node], List[Tuple[int, int]]]:
         slope = slope / max(slope)
         shape = np.array(bb.get_shape())
         outside_down = inside - shape * slope
@@ -173,8 +174,8 @@ class SWCBaseTest(TestWithTempFiles):
 
         points = {
             # line
-            0: GraphPoint(down_intercept, node_type=0, radius=0),
-            1: GraphPoint(up_intercept, node_type=0, radius=0),
+            0: Node(down_intercept, node_type=0, radius=0),
+            1: Node(up_intercept, node_type=0, radius=0),
         }
         edges = [(0, 1)]
         return self._graph_points(points, edges)

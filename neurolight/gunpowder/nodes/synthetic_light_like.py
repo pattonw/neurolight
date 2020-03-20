@@ -1,9 +1,8 @@
-from gunpowder.points import PointsKey, Point
-from gunpowder.graph_points import GraphPoints
+from gunpowder.graph import Graph, GraphKey, Node
 from gunpowder.nodes.batch_provider import BatchProvider
 from gunpowder.batch_request import BatchRequest
 from gunpowder.roi import Roi
-from gunpowder.points_spec import PointsSpec
+from gunpowder.graph_spec import GraphSpec
 from gunpowder.batch import Batch
 from gunpowder.profiling import Timing
 
@@ -25,7 +24,7 @@ logger = logging.getLogger(__name__)
 class SyntheticLightLike(BatchProvider):
     def __init__(
         self,
-        points: PointsKey,
+        points: GraphKey,
         thetas: List[float] = np.array([0.2, 0.3, 0.35]) * math.pi,
         num_nodes: Tuple[int, int] = [100, 500],
         p_die: float = 0.1,
@@ -80,11 +79,11 @@ class SyntheticLightLike(BatchProvider):
         trees_graph = nx.disjoint_union_all(trees)
 
         points = {
-            node_id: Point(np.floor(node_attrs["pos"]) + roi.get_begin())
+            node_id: Node(np.floor(node_attrs["pos"]) + roi.get_begin())
             for node_id, node_attrs in trees_graph.nodes.items()
         }
 
-        batch[self.points] = GraphPoints(points, request[self.points], list(trees_graph.edges))
+        batch[self.points] = Graph(points, request[self.points], list(trees_graph.edges))
 
         timing.stop()
         batch.profiling_stats.add(timing)

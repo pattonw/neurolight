@@ -4,3 +4,6 @@ __pycache__
 .vscode
 *.egg-info
 .pytest_cache
+secrets.json
+subsample_skeletonization
+visualize_matchings

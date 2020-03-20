@@ -1,5 +1,5 @@
 import numpy as np
-from gunpowder import BatchFilter, Roi, Points, Array, ArrayKey, Coordinate, PointsKey, GraphPoint
+from gunpowder import BatchFilter, Roi, Graph, Array, ArrayKey, Coordinate, GraphKey, Node
 import networkx as nx
 import logging
 
@@ -11,8 +11,8 @@ class Recenter(BatchFilter):
 
         Args:
 
-            point_source (:class:``PointsKey``):
-                The Points from which to ensure a node is centered
+            point_source (:class:``GraphKey``):
+                The Graph from which to ensure a node is centered
 
             array_source (:class:``Tuple[ArraySpec]``):
                 The Arrays to crop
@@ -23,7 +23,7 @@ class Recenter(BatchFilter):
         """
 
     def __init__(
-        self, point_source: PointsKey, array_source: ArrayKey, max_offset: float = 1.0
+        self, point_source: GraphKey, array_source: ArrayKey, max_offset: float = 1.0
     ):
         self.point_source = point_source
         self.array_source = array_source
@@ -76,7 +76,7 @@ class Recenter(BatchFilter):
         return batch
 
     def _shift_and_crop(
-        self, points: Points, array: Array, direction: Coordinate, output_roi: Roi
+        self, points: Graph, array: Array, direction: Coordinate, output_roi: Roi
     ):
         # Shift and crop the array
         center = array.spec.roi.get_offset() + array.spec.roi.get_shape() // 2
@@ -121,7 +121,7 @@ class Recenter(BatchFilter):
 
         # store new graph data in points
         new_points_data = {
-            point_id: GraphPoint(
+            point_id: Node(
                 point["location"],
                 point_id=point["point_id"],
                 point_type=point["point_type"],
@@ -131,7 +131,7 @@ class Recenter(BatchFilter):
             )
             for point_id, point in new_points_graph.nodes.items()
         }
-        points = Points(new_points_data, new_points_spec)
+        points = Graph(new_points_data, new_points_spec)
         points.spec.roi = output_roi
         return points, array
 
