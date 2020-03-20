@@ -178,6 +178,7 @@ def get_test_data_sources(setup_config):
             max_gap_crossing=30 * micron_scale,
             try_complete=False,
             use_gurobi=True,
+            expected_edge_len=1000,
         )
         + RasterizeSkeleton(
             points=matched,
@@ -195,6 +196,5 @@ def get_test_data_sources(setup_config):
         labels,
         consensus,
         nonempty_placeholder,
-        skeletonization,
         matched,
     )
