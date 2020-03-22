@@ -143,6 +143,7 @@ def embedding_pipeline(setup_config, get_data_sources=None):
         pipeline, embedding, embedding_gradient = add_embedding_training(
             pipeline, setup_config, raw, labels, maxima
         )
+        inputs = (labels, maxima)
 
         snapshot_datasets += [
             # output data
@@ -158,6 +159,7 @@ def embedding_pipeline(setup_config, get_data_sources=None):
 
     else:
         pipeline, embedding = add_embedding_prediction(pipeline, setup_config, raw)
+        inputs = tuple()
 
         snapshot_datasets += [
             # output data
@@ -172,4 +174,4 @@ def embedding_pipeline(setup_config, get_data_sources=None):
     if setup_config["PROFILE_EVERY"] > 0:
         pipeline += gp.PrintProfilingStats(every=int(setup_config["PROFILE_EVERY"]))
 
-    return (pipeline,) + outputs
+    return (pipeline,) + outputs + (inputs,)
