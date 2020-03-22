@@ -1,4 +1,5 @@
-from gunpowder.graph import Graph, Node, GraphKey
+from gunpowder.graph import Graph, Node, GraphKey, Edge
+from gunpowder.graph_spec import GraphSpec
 from gunpowder.nodes.batch_provider import BatchProvider
 from gunpowder.batch_request import BatchRequest
 from gunpowder.coordinate import Coordinate
@@ -114,23 +115,27 @@ class GraphSource(BatchProvider):
             points_subgraph = self._subgraph_points(
                 point_ids, with_neighbors=len(point_ids) < len(self._graph.nodes) // 2
             )
+            nodes = [
+                Node(id=node, location=attrs["location"], attrs=attrs)
+                for node, attrs in points_subgraph.nodes.items()
+            ]
+            edges = [Edge(u, v) for u, v in points_subgraph.edges]
+            return_graph = Graph(nodes, edges, GraphSpec(roi=request[points_key].roi))
 
             # Handle boundary cases
-            points_subgraph = points_subgraph.crop(request[points_key].roi)
+            return_graph = return_graph.trim(request[points_key].roi)
 
             batch = Batch()
-            batch.points[points_key] = Node._from_graph(
-                points_subgraph, request[points_key]
-            )
+            batch.points[points_key] = return_graph
 
             logger.debug(
                 "Graph points source provided {} points for roi: {}".format(
-                    len(batch.points[points_key].data), request[points_key].roi
+                    len(list(batch.points[points_key].nodes)), request[points_key].roi
                 )
             )
 
             logger.debug(
-                f"Providing {len(points_subgraph.nodes)} nodes to {points_key}"
+                f"Providing {len(list(points_subgraph.nodes))} nodes to {points_key}"
             )
 
         timing.stop()
