@@ -227,14 +227,12 @@ class GetNeuronPair(BatchProvider):
 
         dps[point_key].roi = dps[point_key].roi.grow(growth, growth)
 
-        dps.place_holders[self.array_source] = copy.deepcopy(request[self.arrays[0]])
-        dps.place_holders[self.array_source].roi = dps.place_holders[
-            self.array_source
-        ].roi.grow(growth, growth)
-        dps.place_holders[self.label_source] = copy.deepcopy(request[self.labels[0]])
-        dps.place_holders[self.label_source].roi = dps.place_holders[
-            self.label_source
-        ].roi.grow(growth, growth)
+        dps[self.array_source] = copy.deepcopy(request[self.arrays[0]])
+        dps[self.array_source].roi = dps[self.array_source].roi.grow(growth, growth)
+        dps[self.array_source].placeholder = True
+        dps[self.label_source] = copy.deepcopy(request[self.labels[0]])
+        dps[self.label_source].roi = dps[self.label_source].roi.grow(growth, growth)
+        dps[self.label_source].placeholder = True
 
         return dps, seed
 
@@ -247,72 +245,34 @@ class GetNeuronPair(BatchProvider):
         dps = BatchRequest(random_seed=seed)
 
         if self.nonempty_placeholder is not None:
-            # Handle nonempty placeholder
+            # request nonempty placeholder of size request total roi
+            # grow such that it can be cropped down to two different locations
             growth = self._get_growth()
 
-            if any([points in request for points in self.points]):
-                dps.place_holders[self.nonempty_placeholder] = copy.deepcopy(
-                    request.points_specs.get(self.points[0], request[self.points[1]])
-                )
-            elif any([array in request for array in self.arrays]):
-                dps.place_holders[self.nonempty_placeholder] = copy.deepcopy(
-                    GraphSpec(
-                        roi=request.array_specs.get(
-                            self.arrays[0], request[self.arrays[1]]
-                        ).roi
-                    )
-                )
-            elif any([labels in request for labels in self.labels]):
-                dps.place_holders[self.nonempty_placeholder] = copy.deepcopy(
-                    GraphSpec(
-                        roi=request.array_specs.get(
-                            self.labels[0], request[self.labels[1]]
-                        ).roi
-                    )
-                )
-            else:
-                raise ValueError(
-                    "One of the following must be requested: {}, {}, {}".format(
-                        self.points, self.arrays, self.labels
-                    )
-                )
-
-            dps.place_holders[self.nonempty_placeholder].roi = dps.place_holders[
-                self.nonempty_placeholder
-            ].roi.grow(growth, growth)
+            total_roi = request.get_total_roi()
+            grown_roi = total_roi.grow(growth, growth)
+            dps[self.nonempty_placeholder] = GraphSpec(roi=grown_roi, placeholder=True)
 
         # handle smaller requests
-        voxel_size = request.get_lcm_voxel_size()
+        array_keys = list(request.array_specs.keys())
+        voxel_size = self.spec.get_lcm_voxel_size(array_keys)
         direction = Coordinate(direction)
         direction -= Coordinate(tuple(np.array(direction) % np.array(voxel_size)))
 
         if any([points in request for points in self.points]):
             dps[self.point_source] = copy.deepcopy(request[self.points[0]])
-            dps[self.point_source].roi = (
-                dps[self.point_source]
-                .roi.shift(direction)
-            )
+            dps[self.point_source].roi = dps[self.point_source].roi.shift(direction)
         if any([array in request for array in self.arrays]):
             dps[self.array_source] = copy.deepcopy(request[self.arrays[0]])
-            dps[self.array_source].roi = (
-                dps[self.array_source]
-                .roi.shift(direction)
-            )
-
+            dps[self.array_source].roi = dps[self.array_source].roi.shift(direction)
         if any([labels in request for labels in self.labels]):
             dps[self.label_source] = copy.deepcopy(request[self.labels[0]])
-            dps[self.label_source].roi = (
-                dps[self.label_source]
-                .roi.shift(direction)
-            )
+            dps[self.label_source].roi = dps[self.label_source].roi.shift(direction)
 
         for source, targets in self.extra_keys.items():
             if targets[0] in request:
                 dps[source] = copy.deepcopy(request[targets[0]])
-                dps[source].roi = (
-                    dps[source]
-                    .roi.shift(direction)
-                )
+                dps[source].roi = dps[source].roi.shift(direction)
 
         return dps
 
@@ -418,20 +378,25 @@ class GetNeuronPair(BatchProvider):
                 points_request_base, base_seed = self.prepare_points(request)
                 base_batch = self.upstream_provider.request_batch(points_request_base)
                 profiling_stats.merge_with(base_batch.profiling_stats)
-                if len(base_batch[self.nonempty_placeholder].graph.nodes) > 0:
+                if len(list(base_batch[self.nonempty_placeholder].nodes)) > 0:
                     # Can happen if there are processing steps between random location and here.
                     break
             logger.debug("Got base batch")
 
             wccs = list(
-                nx.weakly_connected_components(
-                    base_batch[self.nonempty_placeholder].graph.crop(
-                        roi=self._centered_output_roi(
-                            base_batch[self.nonempty_placeholder].spec.roi
-                        ),
-                        copy=True,
+                base_batch[self.nonempty_placeholder]
+                .crop(
+                    roi=self._centered_output_roi(
+                        base_batch[self.nonempty_placeholder].spec.roi
+                    ),
+                    copy=True,
+                )
+                .trim(
+                    roi=self._centered_output_roi(
+                        base_batch[self.nonempty_placeholder].spec.roi
                     )
                 )
+                .connected_components
             )
             if len(wccs) > 2:
                 logger.debug(
@@ -458,29 +423,29 @@ class GetNeuronPair(BatchProvider):
     def seperate_using_kdtrees(
         self, base_batch: Batch, add_batch: Batch, output_roi: Roi, final=False
     ):
-        points_add = add_batch.points.get(
-            self.point_source, add_batch.points.get(self.nonempty_placeholder, None)
+        points_add = add_batch.graphs.get(
+            self.point_source, add_batch.graphs.get(self.nonempty_placeholder, None)
         )
-        points_base = base_batch.points.get(
-            self.point_source, base_batch.points.get(self.nonempty_placeholder, None)
+        points_base = base_batch.graphs.get(
+            self.point_source, base_batch.graphs.get(self.nonempty_placeholder, None)
         )
 
-        if len(points_add.graph.nodes) < 1 or len(points_base.graph.nodes) < 1:
+        if len(list(points_add.nodes)) < 1 or len(list(points_base.nodes)) < 1:
             return Coordinate([0, 0, 0])
 
         # shift add points to start at [0,0,0]
         add_locations = np.array(
             [
-                point["location"] - points_add.spec.roi.get_begin()
-                for point in points_add.graph.nodes.values()
+                point.location - points_add.spec.roi.get_begin()
+                for point in points_add.nodes
             ]
         )
         add_tree = cKDTree(add_locations)
         # shift base points to start at [0,0,0]
         base_locations = np.array(
             [
-                point["location"] - points_base.spec.roi.get_begin()
-                for point in points_base.graph.nodes.values()
+                point.location - points_base.spec.roi.get_begin()
+                for point in points_base.nodes
             ]
         )
         base_tree = cKDTree(base_locations)
@@ -553,6 +518,7 @@ class GetNeuronPair(BatchProvider):
                     count += 1
 
             if count == 0 or self.seperate_by[0] <= min_dist <= self.seperate_by[1]:
+                print(f"shift: {shift_attempt} worked with {min_dist} and {count}")
                 return shift_attempt
 
             logger.debug(
@@ -589,13 +555,16 @@ class GetNeuronPair(BatchProvider):
 
         # Shift and crop points and array
         return_roi = self._return_roi(request)
+        print(f"return roi: {return_roi}")
         for source_key, point_set in batch.points.items():
             point_set = self._shift_and_crop_points(point_set, direction, return_roi)
             batch.points[source_key] = point_set
+            print(f"{source_key} has roi {point_set.spec.roi}")
 
         for source_key, array_set in batch.arrays.items():
             array_set = self._shift_and_crop_array(array_set, direction, return_roi)
             batch.arrays[source_key] = array_set
+            print(f"{source_key} has roi {array_set.spec.roi}")
 
         return batch
 
@@ -644,13 +613,15 @@ class GetNeuronPair(BatchProvider):
         # shifted by direction
         shifted_smaller_roi = self._extract_roi(points.spec.roi, output_roi, direction)
 
-        point_graph = points.graph
         # Crop out points to keep
-        point_graph.crop(shifted_smaller_roi)
+        cropped = points.crop(shifted_smaller_roi).trim(shifted_smaller_roi)
+
         # Shift them into position relative to output_roi
-        point_graph.shift(-shifted_smaller_roi.get_offset() + output_roi.get_offset())
-        points = Graph._from_graph(point_graph, GraphSpec(roi=output_roi))
-        return points
+        direction = -shifted_smaller_roi.get_offset() + output_roi.get_offset()
+        cropped.shift(direction)
+        cropped.spec.roi = output_roi
+
+        return cropped
 
     def _get_growth(self):
         """
@@ -665,4 +636,3 @@ class GetNeuronPair(BatchProvider):
         # expand positive and negative sides enough to contain any desired shift
         half_shift = (voxel_shift + 1) // 2
         return Coordinate(half_shift * 2 * voxel_size)
-
