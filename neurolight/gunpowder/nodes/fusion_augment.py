@@ -1,5 +1,14 @@
 import numpy as np
-from gunpowder import Array, BatchFilter, BatchRequest, PointsSpec, ArraySpec
+from gunpowder import (
+    Array,
+    BatchFilter,
+    BatchRequest,
+    PointsSpec,
+    ArraySpec,
+    Node,
+    Edge,
+    Batch,
+)
 from scipy import ndimage
 
 import logging
@@ -142,6 +151,8 @@ class FusionAugment(BatchFilter):
         return deps
 
     def process(self, batch, request):
+        outputs = Batch()
+
         raw_base_spec = batch[self.raw_base].spec.copy()
 
         # Get base arrays
@@ -195,25 +206,25 @@ class FusionAugment(BatchFilter):
             soft_mask /= np.clip(np.max(soft_mask), 1e-5, float("inf"))
             soft_mask = np.clip((soft_mask * 2), 0, 1)
             if self.soft_mask is not None:
-                batch.arrays[self.soft_mask] = Array(
+                outputs.arrays[self.soft_mask] = Array(
                     soft_mask,
                     spec=ArraySpec(
                         roi=raw_base_spec.roi, voxel_size=raw_base_spec.voxel_size
                     ),
                 )
             if self.masked_base is not None:
-                batch.arrays[self.masked_base] = Array(
+                outputs.arrays[self.masked_base] = Array(
                     raw_base_array * (soft_mask > 0.25), spec=raw_base_spec.copy()
                 )
             if self.masked_add is not None:
-                batch.arrays[self.masked_add] = Array(
+                outputs.arrays[self.masked_add] = Array(
                     raw_add_array * soft_mask,
                     spec=ArraySpec(
                         roi=raw_base_spec.roi, voxel_size=raw_base_spec.voxel_size
                     ),
                 )
             if self.mask_maxed is not None:
-                batch.arrays[self.mask_maxed] = Array(
+                outputs.arrays[self.mask_maxed] = Array(
                     np.maximum(
                         raw_base_array * (soft_mask > 0.25), raw_add_array * soft_mask
                     ),
@@ -233,21 +244,27 @@ class FusionAugment(BatchFilter):
 
         # return raw and labels for "fused" volume
         # raw_fused_array.astype(raw_base_spec.dtype)
-        batch.arrays[self.raw_fused] = Array(
+        outputs.arrays[self.raw_fused] = Array(
             data=raw_fused_array.astype(raw_base_spec.dtype), spec=raw_base_spec
         )
-        batch.arrays[self.labels_fused] = Array(
+        outputs.arrays[self.labels_fused] = Array(
             data=fused_labels_array, spec=labels_add_spec
         )
 
         # fuse points:
         if self.points_fused in request:
-            batch.points[self.points_fused] = deepcopy(batch[self.points_base])
-            batch.points[self.points_fused]._graph = batch.points[
-                self.points_base
-            ].graph.merge(batch[self.points_add].graph)
+            max_id = max([node.id for node in batch.graphs[self.points_base].nodes])
+            fused_graph = batch.graphs[self.points_base].copy()
+            for node in batch.graphs[self.points_add].nodes:
+                attrs = deepcopy(node.all)
+                attrs["id"] += max_id + 1
+                fused_graph.add_node(Node.from_attrs(attrs))
+            for edge in batch.graphs[self.points_add].edges:
+                edge = Edge(edge.u + max_id + 1, edge.v + max_id + 1)
+                fused_graph.add_edge(edge)
+            outputs.graphs[self.points_fused] = fused_graph
 
-        return batch
+        return outputs
 
     def _relabel(self, a):
         """
