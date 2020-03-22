@@ -12,6 +12,7 @@ from gunpowder import (
 from scipy import ndimage
 
 import logging
+import warnings
 from copy import deepcopy
 
 logger = logging.getLogger(__name__)
@@ -241,6 +242,11 @@ class FusionAugment(BatchFilter):
         # load specs
         labels_add_spec = batch[self.labels_add].spec.copy()
         raw_base_spec = batch[self.raw_base].spec.copy()
+        warnings.warn(
+            "Using dtype from data, not spec! Not best practice but should be equivalent!"
+        )
+        raw_dtype = batch[self.raw_base].data.dtype
+        raw_base_spec.dtype = raw_dtype
 
         # return raw and labels for "fused" volume
         # raw_fused_array.astype(raw_base_spec.dtype)
