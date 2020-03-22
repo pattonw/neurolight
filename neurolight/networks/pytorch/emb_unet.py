@@ -86,7 +86,7 @@ class EmbeddingLoss(torch.nn.Module):
         input = input.cpu()
         target = target.cpu()
         mask = mask.cpu()
-        return ultrametric_loss(
+        loss, emst, edges_u, edges_v, dist, ratio_pos, ratio_neg = ultrametric_loss(
             embedding=input,
             gt_seg=target,
             mask=mask,
@@ -97,3 +97,4 @@ class EmbeddingLoss(torch.nn.Module):
             quadrupel_loss=self.quadrupel_loss,
             constrained_emst=self.constrained_emst,
         )
+        return loss
