@@ -1,5 +1,6 @@
 from gunpowder.points import GraphKey
-from gunpowder.graph import Node, Graph
+from gunpowder.graph import Node, Graph, Edge
+from gunpowder.graph_spec import GraphSpec
 from gunpowder.nodes.batch_provider import BatchProvider
 from gunpowder.batch_request import BatchRequest
 from gunpowder.coordinate import Coordinate
@@ -80,7 +81,7 @@ class SwcFileSource(BatchProvider):
         self.scale = scale
         self.connected_component_label = 0
         self.keep_ids = keep_ids
-        self._graph = nx.Graph()
+        self._graph = nx.DiGraph()
         self.transpose = transpose
         self.radius = radius
         self.directed = directed
@@ -136,18 +137,22 @@ class SwcFileSource(BatchProvider):
             points_subgraph = self._subgraph_points(
                 list(point_locations.keys()), with_neighbors=len(point_locations) < 1000
             )
+            nodes = [
+                Node(id=node, location=attrs["location"], attrs=attrs)
+                for node, attrs in points_subgraph.nodes.items()
+            ]
+            edges = [Edge(u, v) for u, v in points_subgraph.edges]
+            return_graph = Graph(nodes, edges, GraphSpec(roi=request[points_key].roi))
 
             # Handle boundary cases
-            points_subgraph = points_subgraph.crop(request[points_key].roi)
+            return_graph = return_graph.trim(request[points_key].roi)
 
             batch = Batch()
-            batch.points[points_key] = Graph._from_graph(
-                points_subgraph, request[points_key]
-            )
+            batch.points[points_key] = return_graph
 
             logger.debug(
                 "Swc points source provided {} points for roi: {}".format(
-                    len(batch.points[points_key].data), request[points_key].roi
+                    len(list(batch.points[points_key].nodes)), request[points_key].roi
                 )
             )
 
@@ -258,15 +263,12 @@ class SwcFileSource(BatchProvider):
 
         assert len(list(nx.weakly_connected_components(tree))) == 1
 
-        points = {}
+        points = []
 
         for node, attrs in tree.nodes.items():
-            points[node] = Node(
-                point_type=attrs["point_type"],
-                location=attrs["location"],
-                radius=attrs["radius"],
-            )
-        self._add_points_to_source(points, set(tree.edges))
+            attrs["id"] = node
+            points.append(Node(id=attrs["id"], location=attrs["location"], attrs=attrs))
+        self._add_points_to_source(points, set(Edge(u, v) for u, v in tree.edges))
 
         return len(list(nx.weakly_connected_components(tree)))
 
@@ -284,20 +286,19 @@ class SwcFileSource(BatchProvider):
         else:
             return default
 
-    def _add_points_to_source(
-        self, points: Dict[int, Node], edges: List[Tuple[int, int]]
-    ):
+    def _add_points_to_source(self, points: List[Node], edges: List[Edge]):
 
         # add points to a temporary graph
         logger.debug("adding {} nodes to graph".format(len(points)))
         temp = nx.Graph()
-        for point_id, graph_point in points.items():
-            temp.add_node(point_id, **graph_point.attrs)
-        for u, v in edges:
-            if u in temp.nodes and v in temp.nodes:
-                temp.add_edge(u, v)
+        for node in points:
+            temp.add_node(node.id, **node.attrs)
+        for e in edges:
+            temp.add_edge(e.u, e.v)
 
-        temp = nx.convert_node_labels_to_integers(temp, first_label=len(self._graph.nodes))
+        temp = nx.convert_node_labels_to_integers(
+            temp, first_label=len(self._graph.nodes)
+        )
 
         self._graph = nx.union(self._graph, temp)
         logger.debug("graph has {} nodes".format(len(self._graph.nodes)))
@@ -308,7 +309,7 @@ class SwcFileSource(BatchProvider):
         If `with_neighbors` is True, the subgraph contains all neighbors
         of all points in `nodes` as well.
         """
-        sub_g = nx.Graph()
+        sub_g = nx.DiGraph()
         subgraph_nodes = set(nodes)
         if with_neighbors:
             for n in nodes:
@@ -324,4 +325,3 @@ class SwcFileSource(BatchProvider):
             if nbr in subgraph_nodes
         )
         return sub_g
-
