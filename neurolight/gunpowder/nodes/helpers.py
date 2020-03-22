@@ -1,6 +1,7 @@
 import gunpowder as gp
 import numpy as np
 import networkx as nx
+import torch
 
 import copy
 from typing import Optional
@@ -8,6 +9,74 @@ import logging
 import time
 
 logger = logging.getLogger(__file__)
+
+
+class UnSqueeze(gp.BatchFilter):
+    def __init__(self, array):
+        self.array = array
+
+    def setup(self):
+        self.enable_autoskip()
+        self.updates(self.array, self.spec[self.array].copy())
+
+    def prepare(self, request):
+        deps = gp.BatchRequest()
+        deps[self.array] = request[self.array].copy()
+        return deps
+
+    def process(self, batch, request):
+        outputs = gp.Batch()
+        outputs[self.array] = copy.deepcopy(batch[self.array])
+        logger.warning(f"unsqueeze input shape: {outputs[self.array].data.shape}")
+        outputs[self.array].data = (
+            torch.from_numpy(batch[self.array].data).unsqueeze(0).numpy()
+        )
+        logger.warning(f"unsqueeze output shape: {outputs[self.array].data.shape}")
+        return outputs
+
+
+class Squeeze(gp.BatchFilter):
+    def __init__(self, array):
+        self.array = array
+
+    def setup(self):
+        self.enable_autoskip()
+        self.updates(self.array, self.spec[self.array].copy())
+
+    def prepare(self, request):
+        deps = gp.BatchRequest()
+        deps[self.array] = request[self.array].copy()
+        return deps
+
+    def process(self, batch, request):
+        outputs = gp.Batch()
+        outputs[self.array] = copy.deepcopy(batch[self.array])
+        logger.warning(f"unsqueeze input shape: {outputs[self.array].data.shape}")
+        outputs[self.array].data = (
+            torch.from_numpy(batch[self.array].data).squeeze(0).numpy()
+        )
+        logger.warning(f"unsqueeze output shape: {outputs[self.array].data.shape}")
+        return outputs
+
+class ToInt64(gp.BatchFilter):
+    def __init__(self, array):
+        self.array = array
+
+    def setup(self):
+        self.enable_autoskip()
+        self.updates(self.array, self.spec[self.array].copy())
+
+    def prepare(self, request):
+        deps = gp.BatchRequest()
+        deps[self.array] = request[self.array].copy()
+        return deps
+
+    def process(self, batch, request):
+        outputs = gp.Batch()
+        outputs[self.array] = copy.deepcopy(batch[self.array])
+        outputs[self.array].data = batch[self.array].data.astype(np.int64)
+        outputs[self.array].spec.dtype = np.int64
+        return outputs
 
 
 class BinarizeGt(gp.BatchFilter):
@@ -220,4 +289,3 @@ class FilterComponents(gp.BatchFilter):
             if not all([x < self.node_offset for x in wcc]):
                 for node in wcc:
                     graph.remove_node(node)
-
