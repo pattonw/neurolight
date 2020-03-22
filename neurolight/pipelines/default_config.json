@@ -5,9 +5,9 @@
     "GAP_CROSSING_DIST": 4.8,
     "MATCH_DISTANCE_THRESHOLD": 7.6,
     "EMBEDDING_DIMS": 3,
-    "NUM_FMAPS_EMBEDDING": 6,
-    "FMAP_INC_FACTORS_EMBEDDING": 3,
-    "NUM_FMAPS_FOREGROUND": 4,
+    "NUM_FMAPS_EMBEDDING": 2,
+    "FMAP_INC_FACTORS_EMBEDDING": 2,
+    "NUM_FMAPS_FOREGROUND": 2,
     "FMAP_INC_FACTORS_FOREGROUND": 2,
     "DOWNSAMPLE_FACTORS": [[1, 3, 3], [2, 2, 2], [2, 2, 2]],
     "KERNEL_SIZE_UP": [
@@ -58,5 +58,6 @@
     "NORMALIZE_EMBEDDINGS": true,
     "DATA": "train",
     "GUARANTEE_NONEMPTY": true,
-    "SAMPLES_PATH": "/nrs/funke/mouselight"
+    "SAMPLES_PATH": "/nrs/funke/mouselight",
+    "USE_GUROBI": false
 }
