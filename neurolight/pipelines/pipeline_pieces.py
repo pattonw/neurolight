@@ -2,7 +2,7 @@ import gunpowder as gp
 from gunpowder.coordinate import Coordinate
 from gunpowder.array import ArrayKey
 from gunpowder.points import PointsKey
-from gunpowder.torch import Predict
+from gunpowder.torch import Predict, Train
 import numpy as np
 import torch
 import daisy
@@ -19,6 +19,7 @@ from neurolight.gunpowder.nodes import (
     NonMaxSuppression,
     FilterComponents,
 )
+from neurolight.gunpowder.nodes.helpers import UnSqueeze, ToInt64
 from neurolight.gunpowder.contrib.nodes import AddDistance, TanhSaturate
 
 from neurolight.gunpowder.pytorch.nodes.train_embedding import TrainEmbedding
@@ -531,12 +532,15 @@ def add_foreground_prediction(pipeline, setup_config, raw):
     # New array keys
     fg_pred = ArrayKey("FG_PRED")
 
-    pipeline = pipeline + Predict(
-        model=ForegroundUnet(setup_config),
-        checkpoint=checkpoint,
-        inputs={"raw": raw},
-        outputs={0: fg_pred},
-        device="cuda",
+    pipeline = (
+        pipeline
+        + UnSqueeze(raw)
+        + Predict(
+            model=ForegroundUnet(setup_config),
+            checkpoint=checkpoint,
+            inputs={"raw": raw},
+            outputs={0: fg_pred},
+        )
     )
 
     return pipeline, fg_pred
@@ -557,7 +561,6 @@ def add_embedding_prediction(pipeline, setup_config, raw):
         checkpoint=checkpoint,
         inputs={"raw": raw},
         outputs={0: embedding},
-        device="cpu",
     )
 
     return pipeline, embedding
@@ -614,20 +617,21 @@ def add_embedding_training(pipeline, setup_config, raw, gt_labels, mask):
             model.parameters(), lr=0.5e-5, betas=(0.95, 0.999), eps=1e-8
         )
 
-    pipeline = pipeline + TrainEmbedding(
-        model=model,
-        optimizer=optimizer,
-        loss=loss,
-        inputs={"raw": raw},
-        outputs={0: embedding},
-        target=gt_labels,
-        input_size=input_size,
-        output_size=output_size,
-        gradients={0: embedding_gradient},
-        save_every=checkpoint_every,
-        log_dir=tensorboard_log_dir,
-        mask=mask,
-        checkpoint_basename=embedding_net_name,
+    pipeline = (
+        pipeline
+        + ToInt64(gt_labels)
+        + Train(
+            model=model,
+            optimizer=optimizer,
+            loss=loss,
+            inputs={"raw": raw},
+            loss_inputs={0: embedding, "target": gt_labels, "mask": mask},
+            outputs={0: embedding},
+            gradients={0: embedding_gradient},
+            save_every=checkpoint_every,
+            log_dir=tensorboard_log_dir,
+            checkpoint_basename=embedding_net_name,
+        )
     )
 
     return pipeline, embedding, embedding_gradient
