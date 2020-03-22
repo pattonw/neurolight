@@ -1,10 +1,4 @@
-from gunpowder import (
-    GraphKey,
-    BatchRequest,
-    Batch,
-    BatchFilter,
-    Graph,
-)
+from gunpowder import GraphKey, BatchRequest, Batch, BatchFilter, Graph
 from funlib.match.helper_functions import match
 import networkx as nx
 
@@ -65,11 +59,11 @@ class TopologicalMatcher(BatchFilter):
 
     def process(self, batch: Batch, request: BatchRequest):
 
-        graph = copy.deepcopy(batch[self.G].graph).to_undirected()
+        graph = copy.deepcopy(batch[self.G]).to_nx_graph().to_undirected()
         mouselight_preprocessing(
             graph, self.max_gap_crossing, expected_edge_len=self.expected_edge_len
         )
-        tree = copy.deepcopy(batch[self.T].graph)
+        tree = copy.deepcopy(batch[self.T].to_nx_graph())
 
         if self.with_fallback:
             add_fallback(
@@ -90,7 +84,7 @@ class TopologicalMatcher(BatchFilter):
         if not success:
             matched, success = self.__solve_piecewise(graph, tree)
 
-        result = Graph._from_graph(matched, copy.deepcopy(batch[self.T].spec))
+        result = Graph.from_nx_graph(matched, copy.deepcopy(batch[self.T].spec))
 
         batch[self.matched] = result
 
@@ -112,7 +106,11 @@ class TopologicalMatcher(BatchFilter):
         success = True
         try:
             matched = match(
-                graph, tree, node_match_costs=node_costs, edge_match_costs=edge_costs
+                graph,
+                tree,
+                node_match_costs=node_costs,
+                edge_match_costs=edge_costs,
+                use_gurobi=self.use_gurobi,
             )
         except ValueError as e:
             logger.debug(e)
