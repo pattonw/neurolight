@@ -53,7 +53,7 @@ class NonMaxSuppression(BatchFilter):
         window_size = self.window_size / voxel_size
 
         nms_op = NMS(window_size, self.threshold)
-        nms_input = torch.from_numpy(data).unsqueeze(0)
+        nms_input = torch.from_numpy(data)
         maxima = nms_op(nms_input)
 
-        batch.arrays[self.nms] = Array(maxima.squeeze(0).numpy(), batch[self.array].spec.copy())
+        batch.arrays[self.nms] = Array(maxima.numpy(), batch[self.array].spec.copy())
