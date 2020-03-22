@@ -37,14 +37,12 @@ class RasterizeSkeleton(BatchFilter):
         points,
         array,
         array_spec,
-        radius=1.0,
         connected_component_labeling: bool = True,
     ):
 
         self.points = points
         self.array = array
         self.array_spec = array_spec
-        self.radius = radius
         self.connected_component_labeling = connected_component_labeling
 
     def setup(self):
@@ -86,43 +84,38 @@ class RasterizeSkeleton(BatchFilter):
         array_roi = Roi(offset, shape)
         array_data = np.zeros(shape, dtype=self.array_spec.dtype)
 
-        graph = points.graph
+        graph = points
 
         if self.connected_component_labeling:
-            wccs = list(enumerate(nx.weakly_connected_components(graph)))
-            if len(wccs) > len(graph.nodes) / 2:
-                logger.warning(
-                    f"{self.name()} can get very slow for large numbers of connected "
-                    + f"components! Your graph has {len(wccs)} connected components, "
-                    + f"and {len(graph.nodes)} nodes"
-                )
-            for i, cc in enumerate(nx.weakly_connected_components(graph)):
-                cc = graph.subgraph(cc)
-                binarized = np.zeros_like(array_data, dtype=np.bool)
-                for u, v in cc.edges:
-                    p1 = (cc.nodes[u]["location"] / voxel_size - offset).astype(int)
-                    p2 = (cc.nodes[v]["location"] / voxel_size - offset).astype(int)
-                    binarized = self._rasterize_line_segment(p1, p2, binarized)
-
+            graph.relabel_connected_components()
+            wccs = list(enumerate(graph.connected_components))
+            binarized = [
+                np.zeros_like(array_data, dtype=bool) for i in range(len(wccs))
+            ]
+            for e in graph.edges:
+                cc = graph.node(e.u).attrs["component"]
+                p1 = (graph.node(e.u).location / voxel_size - offset).astype(int)
+                p2 = (graph.node(e.v).location / voxel_size - offset).astype(int)
+                self._rasterize_line_segment(p1, p2, binarized[cc])
+            for i, bined in enumerate(binarized):
                 overlap = np.logical_and(
-                    np.logical_and(array_data > 0, array_data != i + 1), binarized
+                    np.logical_and(array_data > 0, array_data != i + 1), bined
                 )
-                array_data[binarized] = i + 1
+                array_data[bined] = i + 1
                 array_data[overlap] = -1
         else:
             binarized = np.zeros_like(array_data, dtype=np.bool)
-            for u, v in graph.edges:
-                p1 = (graph.nodes[u]["location"] / voxel_size - offset).astype(int)
-                p2 = (graph.nodes[v]["location"] / voxel_size - offset).astype(int)
+            for e in graph.edges:
+                p1 = (graph.node(e.u).location / voxel_size - offset).astype(int)
+                p2 = (graph.node(e.v).location / voxel_size - offset).astype(int)
                 binarized = self._rasterize_line_segment(p1, p2, binarized)
 
             overlap = np.logical_and(
                 np.logical_and(array_data > 0, array_data != 1), binarized
             )
             array_data[binarized] = 1
-            array_data[overlap] = -1
 
-        logger.debug(f"Input graph had {len(graph.nodes)} nodes!")
+        logger.debug(f"Input graph had {len(list(graph.nodes))} nodes!")
         logger.debug(f"Output array contains {sum(array_data != 0)} non_empty pixels")
 
         array = Array(
@@ -165,6 +158,8 @@ class RasterizeSkeleton(BatchFilter):
         return np.array(np.rint(bline), dtype=start_voxel.dtype)
 
     def _rasterize_line_segment(self, point, parent, skeletonized):
+        point = np.clip(np.floor(point), np.zeros_like(point), np.array(skeletonized.shape)-1)
+        parent = np.clip(np.floor(parent), np.zeros_like(parent), np.array(skeletonized.shape)-1)
 
         # use Bresenham's line algorithm based on:
         # http://code.activestate.com/recipes/578112-bresenhams-line-algorithm-in-n-dimensions/
@@ -181,6 +176,6 @@ class RasterizeSkeleton(BatchFilter):
                     )
                 )
             skeletonized[tuple(idx)] = True
-        skeletonized[tuple(point)] = True
+        skeletonized[tuple(point.astype(int))] = True
 
         return skeletonized
