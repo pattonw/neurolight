@@ -28,7 +28,7 @@ if __name__ == "__main__":
         penalty_attr="penalty",
     )
 
-    matched = match(temp, tree, node_costs, edge_costs)
+    matched = match(temp, tree, node_costs, edge_costs, use_gurobi=False)
 
     visualize_trees(
         {

@@ -130,6 +130,7 @@ def get_test_data_sources(setup_config):
     matched = GraphKey("MATCHED")
     nonempty_placeholder = GraphKey("NONEMPTY")
     labels = ArrayKey("LABELS")
+    use_gurobi = setup_config["USE_GUROBI"]
 
     if setup_config["FUSION_PIPELINE"]:
         ensure_nonempty = nonempty_placeholder
@@ -174,7 +175,7 @@ def get_test_data_sources(setup_config):
             match_distance_threshold=50 * micron_scale,
             max_gap_crossing=30 * micron_scale,
             try_complete=False,
-            use_gurobi=True,
+            use_gurobi=use_gurobi,
             expected_edge_len=1000,
         )
         + RasterizeSkeleton(

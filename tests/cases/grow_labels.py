@@ -33,7 +33,7 @@ class GrowLabelsTest(SWCBaseTest):
         swc_path = Path(self.path_to(swc_file))
 
         swc_points = self._get_points(np.array([1, 1, 1]), np.array([1, 1, 1]), bb)
-        self._write_swc(swc_path, swc_points.graph)
+        self._write_swc(swc_path, swc_points.to_nx_graph())
 
         # create swc sources
         swc_key = PointsKey("SWC")

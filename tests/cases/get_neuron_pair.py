@@ -34,7 +34,7 @@ class GetNeuronPairTest(SWCBaseTest):
         path = Path(self.path_to("test_swc_source.swc"))
 
         # write test swc
-        self._write_swc(path, self._toy_swc_points().graph)
+        self._write_swc(path, self._toy_swc_points().to_nx_graph())
 
         # read arrays
         swc_source = PointsKey("SWC_SOURCE")
@@ -140,13 +140,13 @@ class GetNeuronPairTest(SWCBaseTest):
                 )
 
                 min_dist = 5
-                for a_attrs, b_attrs in itertools.product(
-                    batch[points_a].graph.nodes.values(),
-                    batch[points_b].graph.nodes.values(),
+                for a, b in itertools.product(
+                    batch[points_a].nodes,
+                    batch[points_b].nodes,
                 ):
                     min_dist = min(
                         min_dist,
-                        np.linalg.norm(a_attrs["location"] - b_attrs["location"]),
+                        np.linalg.norm(a.location - b.location),
                     )
 
                 self.assertLessEqual(min_dist, 3)

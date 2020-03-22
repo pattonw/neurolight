@@ -174,10 +174,10 @@ class SWCBaseTest(TestWithTempFiles):
 
         points = {
             # line
-            0: Node(down_intercept, node_type=0, radius=0),
-            1: Node(up_intercept, node_type=0, radius=0),
+            Node(id=0, location=down_intercept, attrs={"node_type": 0, "radius": 0}),
+            Node(id=1, location=up_intercept, attrs={"node_type": 0, "radius": 0}),
         }
-        edges = [(0, 1)]
+        edges = [Edge(0, 1)]
         return self._graph_points(points, edges)
 
     def _resample_relative(

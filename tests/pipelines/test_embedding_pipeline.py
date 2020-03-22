@@ -19,10 +19,12 @@ def test_embedding_pipeline(fusion_pipeline, train_embedding, snapshot_every):
     voxel_size = Coordinate(setup_config["VOXEL_SIZE"])
     output_size = Coordinate(setup_config["OUTPUT_SHAPE"]) * voxel_size
     input_size = Coordinate(setup_config["INPUT_SHAPE"]) * voxel_size
-    pipeline, raw, output = embedding_pipeline(setup_config, get_test_data_sources)
+    pipeline, raw, output, inputs = embedding_pipeline(setup_config, get_test_data_sources)
     request = BatchRequest()
     request.add(raw, input_size)
     request.add(output, output_size)
+    for key in inputs:
+        request.add(key, output_size)
     with build(pipeline):
         batch = pipeline.request_batch(request)
         assert output in batch

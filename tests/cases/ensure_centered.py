@@ -28,7 +28,7 @@ class EnsureCenteredTest(SWCBaseTest):
         path = Path(self.path_to("test_swc_source.swc"))
 
         # write test swc
-        self._write_swc(path, self._toy_swc_points().graph)
+        self._write_swc(path, self._toy_swc_points().to_nx_graph())
 
         # read arrays
         swc = PointsKey("SWC")
