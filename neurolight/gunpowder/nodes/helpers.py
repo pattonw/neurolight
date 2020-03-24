@@ -176,13 +176,13 @@ class RejectIfEmpty(gp.BatchFilter):
                 raise RuntimeError(
                     f"Failed to obtain a batch with {self.ensure_nonempty} non empty"
                 )
-            temp_batch = self.get_upstream_provider().request_batch(upstream_request)
-            self._replace_batch(batch, temp_batch)
+            batch = self.get_upstream_provider().request_batch(upstream_request)
 
         if isinstance(self.ensure_nonempty, gp.PointsKey):
-            logger.debug(
-                f"{self.ensure_nonempty} has {len(batch[self.ensure_nonempty].data)} nodes"
+            logger.warning(
+                f"{self.ensure_nonempty} has {len(list(batch[self.ensure_nonempty].connected_components))} connected_components"
             )
+        return batch
 
     def _replace_batch(self, batch, replacement):
         for key, val in replacement.items():
@@ -208,11 +208,8 @@ class RejectIfEmpty(gp.BatchFilter):
         if isinstance(dataset, gp.Array):
             values = np.unique(dataset.data)
             return len(values) <= self.num_components
-        if isinstance(dataset, gp.Points):
-            return (
-                len(list(nx.weakly_connected_components(dataset.graph)))
-                < self.num_components
-            )
+        if isinstance(dataset, gp.Graph):
+            return len(list(dataset.connected_components)) < self.num_components
 
 
 class ThresholdMask(gp.BatchFilter):
