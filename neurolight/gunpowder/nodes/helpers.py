@@ -278,10 +278,9 @@ class FilterComponents(gp.BatchFilter):
         return deps
 
     def process(self, batch, request):
-        points = batch[self.points]
-        graph = points.graph
-        wccs = list(nx.weakly_connected_components(graph))
+        graph = batch[self.points]
+        wccs = list(graph.connected_components)
         for wcc in wccs:
             if not all([x < self.node_offset for x in wcc]):
                 for node in wcc:
-                    graph.remove_node(node)
+                    graph.remove_node(gp.Node(id=node, location=None))
