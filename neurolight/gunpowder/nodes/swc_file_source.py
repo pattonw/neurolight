@@ -5,7 +5,7 @@ from gunpowder.nodes.batch_provider import BatchProvider
 from gunpowder.batch_request import BatchRequest
 from gunpowder.coordinate import Coordinate
 from gunpowder.roi import Roi
-from gunpowder.points_spec import PointsSpec
+from gunpowder.graph_spec import GraphSpec
 from gunpowder.batch import Batch
 from gunpowder.profiling import Timing
 import numpy as np
@@ -35,9 +35,9 @@ class SwcFileSource(BatchProvider):
 
             The key of the points set to create.
 
-        points_spec (:class:`PointsSpec`, optional):
+        points_spec (:class:`GraphSpec`, optional):
 
-            An optional :class:`PointsSpec` to overwrite the points specs
+            An optional :class:`GraphSpec` to overwrite the points specs
             automatically determined from the CSV file. This is useful to set
             the :class:`Roi` manually.
 
@@ -68,7 +68,7 @@ class SwcFileSource(BatchProvider):
         self,
         filename: Path,
         points: List[GraphKey],
-        points_spec: List[PointsSpec] = None,
+        points_spec: List[GraphSpec] = None,
         scale: Coordinate = Coordinate([1, 1, 1]),
         keep_ids: bool = False,
         transpose: Tuple[int] = (0, 1, 2),
@@ -107,7 +107,7 @@ class SwcFileSource(BatchProvider):
             roi = Roi(min_bb, max_bb - min_bb)
 
             for point in self.points:
-                self.provides(point, PointsSpec(roi=roi))
+                self.provides(point, GraphSpec(roi=roi))
 
     def provide(self, request: BatchRequest) -> Batch:
 
@@ -148,11 +148,11 @@ class SwcFileSource(BatchProvider):
             return_graph = return_graph.trim(request[points_key].roi)
 
             batch = Batch()
-            batch.points[points_key] = return_graph
+            batch.graphs[points_key] = return_graph
 
             logger.debug(
                 "Swc points source provided {} points for roi: {}".format(
-                    len(list(batch.points[points_key].nodes)), request[points_key].roi
+                    len(list(batch.graphs[points_key].nodes)), request[points_key].roi
                 )
             )
 
