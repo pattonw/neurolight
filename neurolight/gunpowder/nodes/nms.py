@@ -37,8 +37,9 @@ class NonMaxSuppression(BatchFilter):
 
     def setup(self):
         self.enable_autoskip()
-
-        self.provides(self.nms, self.spec[self.array].copy())
+        provided_spec = self.spec[self.array].copy()
+        provided_spec.dtype = bool
+        self.provides(self.nms, provided_spec)
 
     def prepare(self, request: BatchRequest):
         deps = BatchRequest()
