@@ -1,6 +1,7 @@
 import gunpowder as gp
 from gunpowder.coordinate import Coordinate
 from gunpowder.array import ArrayKey
+from gunpowder.array_spec import ArraySpec
 from gunpowder.points import PointsKey
 from gunpowder.torch import Predict, Train
 import numpy as np
@@ -19,7 +20,7 @@ from neurolight.gunpowder.nodes import (
     NonMaxSuppression,
     FilterComponents,
 )
-from neurolight.gunpowder.nodes.helpers import UnSqueeze, ToInt64
+from neurolight.gunpowder.nodes.helpers import UnSqueeze, Squeeze, ToInt64
 from neurolight.gunpowder.contrib.nodes import AddDistance, TanhSaturate
 
 from neurolight.gunpowder.pytorch.nodes.train_embedding import TrainEmbedding
@@ -68,6 +69,7 @@ class RandomLocations(gp.RandomLocation):
 
 def get_training_inputs(setup_config, get_data_sources=None, locations=True):
     input_shape = gp.Coordinate(setup_config["INPUT_SHAPE"])
+    output_shape = gp.Coordinate(setup_config["OUTPUT_SHAPE"])
     voxel_size = gp.Coordinate(setup_config["VOXEL_SIZE"])
     if setup_config["DATA"] == "train":
         samples = setup_config["TRAIN_SAMPLES"]
@@ -78,6 +80,7 @@ def get_training_inputs(setup_config, get_data_sources=None, locations=True):
     logger.info(f"Using samples {samples} to generate data")
 
     input_size = input_shape * voxel_size
+    output_size = output_shape * voxel_size
 
     datasets = []
 
@@ -154,7 +157,7 @@ def get_training_inputs(setup_config, get_data_sources=None, locations=True):
     datasets += [
         # input data
         (raw, input_size, "volumes/raw", logging.INFO),
-        (labels, input_size, "volumes/labels", logging.INFO),
+        (labels, output_size, "volumes/labels", logging.INFO),
         (matched, input_size, "points/matched", logging.INFO),
     ]
 
@@ -235,7 +238,7 @@ def get_mouselight_data_sources(
     data_sources = (
         tuple(
             (
-                gp.N5Source(
+                gp.ZarrSource(
                     filename=str((sample / raw_n5).absolute()),
                     datasets={raw: "volume"},
                     array_specs={
@@ -263,6 +266,7 @@ def get_mouselight_data_sources(
             )
             + gp.MergeProvider()
             + random(**kwargs)
+            + gp.Normalize(raw)
             + FilterComponents(matched, node_offset[sample.name])
             + RasterizeSkeleton(
                 points=matched,
@@ -427,7 +431,6 @@ def add_data_augmentation(pipeline, raw):
     # TODO: Config these
     pipeline = (
         pipeline
-        + gp.Normalize(raw)
         + gp.ElasticAugment(
             [40, 10, 10],
             [0.25, 1, 1],
@@ -524,6 +527,7 @@ def grow_labels(pipeline, setup_config, labels):
 
 def add_foreground_prediction(pipeline, setup_config, raw):
     checkpoint = setup_config.get("FOREGROUND_CHECKPOINT")
+    voxel_size = gp.Coordinate(setup_config["VOXEL_SIZE"])
     if checkpoint is None or not Path(checkpoint).exists():
         checkpoint = None
     else:
@@ -540,6 +544,7 @@ def add_foreground_prediction(pipeline, setup_config, raw):
             checkpoint=checkpoint,
             inputs={"raw": raw},
             outputs={0: fg_pred},
+            array_specs={fg_pred: ArraySpec(dtype=np.float32, voxel_size=voxel_size)},
         )
     )
 
@@ -548,6 +553,7 @@ def add_foreground_prediction(pipeline, setup_config, raw):
 
 def add_embedding_prediction(pipeline, setup_config, raw):
     checkpoint = setup_config.get("EMBEDDING_CHECKPOINT")
+    voxel_size = Coordinate(setup_config.get("VOXEL_SIZE"))
     if checkpoint is None or not Path(checkpoint).exists():
         checkpoint = None
     else:
@@ -561,6 +567,7 @@ def add_embedding_prediction(pipeline, setup_config, raw):
         checkpoint=checkpoint,
         inputs={"raw": raw},
         outputs={0: embedding},
+        array_specs={embedding: ArraySpec(dtype=np.float32, voxel_size=voxel_size)},
     )
 
     return pipeline, embedding
@@ -620,6 +627,7 @@ def add_embedding_training(pipeline, setup_config, raw, gt_labels, mask):
     pipeline = (
         pipeline
         + ToInt64(gt_labels)
+        + Squeeze(mask)
         + Train(
             model=model,
             optimizer=optimizer,
@@ -628,6 +636,10 @@ def add_embedding_training(pipeline, setup_config, raw, gt_labels, mask):
             loss_inputs={0: embedding, "target": gt_labels, "mask": mask},
             outputs={0: embedding},
             gradients={0: embedding_gradient},
+            array_specs={
+                embedding: ArraySpec(dtype=np.float32, voxel_size=voxel_size),
+                embedding_gradient: ArraySpec(dtype=np.float32, voxel_size=voxel_size),
+            },
             save_every=checkpoint_every,
             log_dir=tensorboard_log_dir,
             checkpoint_basename=embedding_net_name,
