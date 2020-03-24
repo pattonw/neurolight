@@ -259,14 +259,16 @@ class FusionAugment(BatchFilter):
 
         # fuse points:
         if self.points_fused in request:
-            max_id = max([node.id for node in batch.graphs[self.points_base].nodes])
+            node_ids = [node.id for node in batch.graphs[self.points_base].nodes]
+            num_nodes = len(node_ids)
+            offset = 0 if num_nodes == 0 else max(node_ids) + 1
             fused_graph = batch.graphs[self.points_base].copy()
             for node in batch.graphs[self.points_add].nodes:
                 attrs = deepcopy(node.all)
-                attrs["id"] += max_id + 1
+                attrs["id"] += offset
                 fused_graph.add_node(Node.from_attrs(attrs))
             for edge in batch.graphs[self.points_add].edges:
-                edge = Edge(edge.u + max_id + 1, edge.v + max_id + 1)
+                edge = Edge(edge.u + offset, edge.v + offset)
                 fused_graph.add_edge(edge)
             outputs.graphs[self.points_fused] = fused_graph
 
