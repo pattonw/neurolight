@@ -2,3 +2,8 @@ __pycache__
 .idea
 *.hdf
 .vscode
+*.egg-info
+.pytest_cache
+secrets.json
+subsample_skeletonization
+visualize_matchings

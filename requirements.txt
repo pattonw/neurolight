@@ -2,3 +2,13 @@ flake8==3.7.7
 black==19.3b0
 spimagine==0.2.6
 tifffile==2019.7.2
+git+git://github.com/funkelab/funlib.match#egg=funlib.match
+git+git://github.com/funkelab/funlib.learn.torch#egg=funlib.learn.torch
+pylp
+pytest
+git+git://github.com/funkey/gunpowder@v1.2-dev#egg=gunpowder
+rtree
+mlpack
+git+git://github.com/funkelab/daisy#egg=daisy
+neuroglancer
+torch

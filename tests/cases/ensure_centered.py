@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from .swc_base_test import SWCBaseTest
-from neurolight.gunpowder.swc_file_source import SwcFileSource
-from neurolight.gunpowder.rasterize_skeleton import RasterizeSkeleton
+from swc_base_test import SWCBaseTest
+from neurolight import SwcFileSource
+from neurolight.gunpowder.nodes.rasterize_skeleton import RasterizeSkeleton
 from gunpowder import (
     ArrayKey,
     ArraySpec,
@@ -28,7 +28,7 @@ class EnsureCenteredTest(SWCBaseTest):
         path = Path(self.path_to("test_swc_source.swc"))
 
         # write test swc
-        self._write_swc(path, self._toy_swc_points().graph)
+        self._write_swc(path, self._toy_swc_points().to_nx_graph())
 
         # read arrays
         swc = PointsKey("SWC")
@@ -50,8 +50,8 @@ class EnsureCenteredTest(SWCBaseTest):
         request = BatchRequest()
         request.add(img, Coordinate((5, 5, 5)))
 
-        for i in range(100):
-            with build(pipeline):
+        with build(pipeline):
+            for i in range(100):
                 batch = pipeline.request_batch(request)
 
             data = batch[img].data

@@ -1,7 +1,8 @@
-from .swc_base_test import SWCBaseTest
-from neurolight.gunpowder.swc_file_source import SwcFileSource
-from neurolight.gunpowder.fusion_augment import FusionAugment
-from neurolight.gunpowder.rasterize_skeleton import RasterizeSkeleton
+from swc_base_test import SWCBaseTest
+from neurolight.gunpowder.nodes.swc_file_source import SwcFileSource
+from neurolight.gunpowder.nodes.fusion_augment import FusionAugment
+from neurolight.gunpowder.nodes.rasterize_skeleton import RasterizeSkeleton
+from neurolight.gunpowder.nodes.grow_labels import GrowLabels
 from gunpowder import (
     PointsKey,
     PointsSpec,
@@ -12,6 +13,7 @@ from gunpowder import (
     build,
     Coordinate,
     MergeProvider,
+    Normalize,
 )
 
 import numpy as np
@@ -26,8 +28,7 @@ class FusionAugmentTest(SWCBaseTest):
     def test_two_disjoint_lines_intensity(self):
         LABEL_RADIUS = 3
         RAW_RADIUS = 3
-        # exagerated to show problem
-        BLEND_SMOOTHNESS = 10
+        BLEND_SMOOTHNESS = 3
 
         bb = Roi(Coordinate([0, 0, 0]), ([256, 256, 256]))
         voxel_size = Coordinate([1, 1, 1])
@@ -38,7 +39,7 @@ class FusionAugmentTest(SWCBaseTest):
         intercepts, slopes = self._get_line_pair(roi=bb, dist=3 * LABEL_RADIUS)
         for intercept, slope, swc_path in zip(intercepts, slopes, swc_paths):
             swc_points = self._get_points(intercept, slope, bb)
-            self._write_swc(swc_path, swc_points.graph)
+            self._write_swc(swc_path, swc_points.to_nx_graph())
 
         # create swc sources
         fused = ArrayKey("FUSED")
@@ -73,18 +74,19 @@ class FusionAugmentTest(SWCBaseTest):
                 points=swc_keys[0],
                 array=labels_keys[0],
                 array_spec=ArraySpec(
-                    interpolatable=False, dtype=np.uint32, voxel_size=voxel_size
+                    interpolatable=False, dtype=np.uint16, voxel_size=voxel_size
                 ),
-                radius=LABEL_RADIUS,
             )
+            + GrowLabels(array=labels_keys[0], radii=[LABEL_RADIUS])
             + RasterizeSkeleton(
                 points=swc_keys[0],
                 array=raw_keys[0],
                 array_spec=ArraySpec(
-                    interpolatable=False, dtype=np.uint32, voxel_size=voxel_size
+                    interpolatable=False, dtype=np.uint16, voxel_size=voxel_size
                 ),
-                radius=RAW_RADIUS,
             )
+            + GrowLabels(array=raw_keys[0], radii=[RAW_RADIUS])
+            + Normalize(raw_keys[0])
         )
 
         # data source for swc b
@@ -96,18 +98,19 @@ class FusionAugmentTest(SWCBaseTest):
                 points=swc_keys[1],
                 array=labels_keys[1],
                 array_spec=ArraySpec(
-                    interpolatable=False, dtype=np.uint32, voxel_size=voxel_size
+                    interpolatable=False, dtype=np.uint16, voxel_size=voxel_size
                 ),
-                radius=LABEL_RADIUS,
             )
+            + GrowLabels(array=labels_keys[1], radii=[LABEL_RADIUS])
             + RasterizeSkeleton(
                 points=swc_keys[1],
                 array=raw_keys[1],
                 array_spec=ArraySpec(
-                    interpolatable=False, dtype=np.uint32, voxel_size=voxel_size
+                    interpolatable=False, dtype=np.uint16, voxel_size=voxel_size
                 ),
-                radius=RAW_RADIUS,
             )
+            + GrowLabels(array=raw_keys[1], radii=[RAW_RADIUS])
+            + Normalize(raw_keys[1])
         )
         data_sources = tuple([data_sources_a, data_sources_b]) + MergeProvider()
 
@@ -144,8 +147,7 @@ class FusionAugmentTest(SWCBaseTest):
     def test_two_disjoint_lines_softmask(self):
         LABEL_RADIUS = 3
         RAW_RADIUS = 3
-        # exagerated to show problem
-        BLEND_SMOOTHNESS = 10
+        BLEND_SMOOTHNESS = 3
 
         bb = Roi(Coordinate([0, 0, 0]), ([256, 256, 256]))
         voxel_size = Coordinate([1, 1, 1])
@@ -156,7 +158,7 @@ class FusionAugmentTest(SWCBaseTest):
         intercepts, slopes = self._get_line_pair(roi=bb, dist=3 * LABEL_RADIUS)
         for intercept, slope, swc_path in zip(intercepts, slopes, swc_paths):
             swc_points = self._get_points(intercept, slope, bb)
-            self._write_swc(swc_path, swc_points.graph)
+            self._write_swc(swc_path, swc_points.to_nx_graph())
 
         # create swc sources
         fused = ArrayKey("FUSED")
@@ -182,7 +184,6 @@ class FusionAugmentTest(SWCBaseTest):
         request.add(swc_keys[0], bb.get_shape())
         request.add(swc_keys[1], bb.get_shape())
 
-        # data source for swc a
         data_sources_a = tuple()
         data_sources_a = (
             data_sources_a
@@ -191,18 +192,19 @@ class FusionAugmentTest(SWCBaseTest):
                 points=swc_keys[0],
                 array=labels_keys[0],
                 array_spec=ArraySpec(
-                    interpolatable=False, dtype=np.uint32, voxel_size=voxel_size
+                    interpolatable=False, dtype=np.uint16, voxel_size=voxel_size
                 ),
-                radius=LABEL_RADIUS,
             )
+            + GrowLabels(array=labels_keys[0], radii=[LABEL_RADIUS])
             + RasterizeSkeleton(
                 points=swc_keys[0],
                 array=raw_keys[0],
                 array_spec=ArraySpec(
-                    interpolatable=False, dtype=np.uint32, voxel_size=voxel_size
+                    interpolatable=False, dtype=np.uint16, voxel_size=voxel_size
                 ),
-                radius=RAW_RADIUS,
             )
+            + GrowLabels(array=raw_keys[0], radii=[RAW_RADIUS])
+            + Normalize(raw_keys[0])
         )
 
         # data source for swc b
@@ -214,18 +216,19 @@ class FusionAugmentTest(SWCBaseTest):
                 points=swc_keys[1],
                 array=labels_keys[1],
                 array_spec=ArraySpec(
-                    interpolatable=False, dtype=np.uint32, voxel_size=voxel_size
+                    interpolatable=False, dtype=np.uint16, voxel_size=voxel_size
                 ),
-                radius=LABEL_RADIUS,
             )
+            + GrowLabels(array=labels_keys[1], radii=[LABEL_RADIUS])
             + RasterizeSkeleton(
                 points=swc_keys[1],
                 array=raw_keys[1],
                 array_spec=ArraySpec(
-                    interpolatable=False, dtype=np.uint32, voxel_size=voxel_size
+                    interpolatable=False, dtype=np.uint16, voxel_size=voxel_size
                 ),
-                radius=RAW_RADIUS,
             )
+            + GrowLabels(array=raw_keys[1], radii=[RAW_RADIUS])
+            + Normalize(raw_keys[1])
         )
         data_sources = tuple([data_sources_a, data_sources_b]) + MergeProvider()
 
@@ -265,4 +268,3 @@ class FusionAugmentTest(SWCBaseTest):
 
         diff = np.linalg.norm(fused_data - a_data - b_data)
         self.assertAlmostEqual(diff, 0)
-

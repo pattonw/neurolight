@@ -1,6 +1,6 @@
-from .swc_base_test import SWCBaseTest
-from neurolight.gunpowder.swc_file_source import SwcFileSource
-from neurolight.gunpowder.rasterize_skeleton import RasterizeSkeleton
+from swc_base_test import SWCBaseTest
+from neurolight.gunpowder.nodes.swc_file_source import SwcFileSource
+from neurolight.gunpowder.nodes.rasterize_skeleton import RasterizeSkeleton
 from gunpowder import (
     PointsSpec,
     ArraySpec,
@@ -30,7 +30,7 @@ class RasterizeSkeletonTest(SWCBaseTest):
         swc_path = Path(self.path_to(swc_file))
 
         swc_points = self._get_points(np.array([1, 1, 1]), np.array([1, 1, 1]), bb)
-        self._write_swc(swc_path, swc_points.graph)
+        self._write_swc(swc_path, swc_points.to_nx_graph())
 
         # create swc sources
         swc_key = PointsKey("SWC")

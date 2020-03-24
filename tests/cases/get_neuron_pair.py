@@ -1,11 +1,12 @@
 from pathlib import Path
+import itertools
 
-from .swc_base_test import SWCBaseTest
-from neurolight.gunpowder.swc_file_source import SwcFileSource
-from neurolight.gunpowder.grow_labels import GrowLabels
-from neurolight.gunpowder.rasterize_skeleton import RasterizeSkeleton
-from neurolight.gunpowder.get_neuron_pair import GetNeuronPair
-from neurolight.gunpowder.binarize_labels import BinarizeLabels
+from swc_base_test import SWCBaseTest
+from neurolight.gunpowder.nodes.swc_file_source import SwcFileSource
+from neurolight.gunpowder.nodes.grow_labels import GrowLabels
+from neurolight.gunpowder.nodes.rasterize_skeleton import RasterizeSkeleton
+from neurolight.gunpowder.nodes.get_neuron_pair import GetNeuronPair
+from neurolight.gunpowder.nodes.binarize_labels import BinarizeLabels
 from gunpowder import (
     ArrayKey,
     ArraySpec,
@@ -33,10 +34,11 @@ class GetNeuronPairTest(SWCBaseTest):
         path = Path(self.path_to("test_swc_source.swc"))
 
         # write test swc
-        self._write_swc(path, self._toy_swc_points().graph)
+        self._write_swc(path, self._toy_swc_points().to_nx_graph())
 
         # read arrays
         swc_source = PointsKey("SWC_SOURCE")
+        ensure_nonempty = PointsKey("ENSURE_NONEMPTY")
         labels_source = ArrayKey("LABELS_SOURCE")
         img_source = ArrayKey("IMG_SOURCE")
         img_swc = PointsKey("IMG_SWC")
@@ -50,13 +52,17 @@ class GetNeuronPairTest(SWCBaseTest):
         labels_a = ArrayKey("LABELS_A")
         labels_b = ArrayKey("LABELS_B")
 
-        fused_points = PointsKey("SKELETON_FUSED")
-        fused_image = ArrayKey("VOLUME_FUSED")
-        fused_labels = ArrayKey("LABELS_FUSED")
+        data_shape = 5
+        output_shape = Coordinate((data_shape, data_shape, data_shape))
 
         # Get points from test swc
         swc_file_source = SwcFileSource(
-            path, [swc_source], [PointsSpec(roi=Roi((-10, -10, -10), (31, 31, 31)))]
+            path,
+            [swc_source, ensure_nonempty],
+            [
+                PointsSpec(roi=Roi((-10, -10, -10), (31, 31, 31))),
+                PointsSpec(roi=Roi((-10, -10, -10), (31, 31, 31))),
+            ],
         )
         # Create an artificial image source by rasterizing the points
         image_source = (
@@ -97,37 +103,51 @@ class GetNeuronPairTest(SWCBaseTest):
         skeleton += (
             (swc_file_source, image_source, label_source)
             + MergeProvider()
-            + RandomLocation(ensure_nonempty=swc_source, ensure_centered=True)
+            + RandomLocation(ensure_nonempty=ensure_nonempty, ensure_centered=True)
         )
 
         pipeline = skeleton + GetNeuronPair(
             point_source=swc_source,
+            nonempty_placeholder=ensure_nonempty,
             array_source=imgs,
             label_source=labels,
             points=(points_a, points_b),
             arrays=(img_a, img_b),
             labels=(labels_a, labels_b),
-            seperate_by=2,
+            seperate_by=(1, 3),
             shift_attempts=100,
-            request_attempts=10
+            request_attempts=10,
+            output_shape=output_shape,
         )
 
         request = BatchRequest()
 
-        data_shape = 5
-
-        request.add(points_a, Coordinate((data_shape, data_shape, data_shape)))
-        request.add(points_b, Coordinate((data_shape, data_shape, data_shape)))
-        request.add(img_a, Coordinate((data_shape, data_shape, data_shape)))
-        request.add(img_b, Coordinate((data_shape, data_shape, data_shape)))
-        request.add(labels_a, Coordinate((data_shape, data_shape, data_shape)))
-        request.add(labels_b, Coordinate((data_shape, data_shape, data_shape)))
+        request.add(points_a, output_shape)
+        request.add(points_b, output_shape)
+        request.add(img_a, output_shape)
+        request.add(img_b, output_shape)
+        request.add(labels_a, output_shape)
+        request.add(labels_b, output_shape)
 
         with build(pipeline):
-            batch = pipeline.request_batch(request)
-            assert all(
-                [
-                    x in batch
-                    for x in [points_a, points_b, img_a, img_b, labels_a, labels_b]
-                ]
-            )
+            for i in range(10):
+                batch = pipeline.request_batch(request)
+                assert all(
+                    [
+                        x in batch
+                        for x in [points_a, points_b, img_a, img_b, labels_a, labels_b]
+                    ]
+                )
+
+                min_dist = 5
+                for a, b in itertools.product(
+                    batch[points_a].nodes,
+                    batch[points_b].nodes,
+                ):
+                    min_dist = min(
+                        min_dist,
+                        np.linalg.norm(a.location - b.location),
+                    )
+
+                self.assertLessEqual(min_dist, 3)
+                self.assertGreaterEqual(min_dist, 1)
