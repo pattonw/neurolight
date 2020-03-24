@@ -235,6 +235,7 @@ class FusionAugment(BatchFilter):
                 )
 
             raw_fused_array = np.maximum(soft_mask * raw_add_array, raw_base_array)
+            raw_fused_array = np.clip(raw_fused_array, 0, 1)
 
         else:
             raise NotImplementedError("Unknown blend mode %s." % self.blend_mode)
@@ -242,10 +243,7 @@ class FusionAugment(BatchFilter):
         # load specs
         labels_add_spec = batch[self.labels_add].spec.copy()
         raw_base_spec = batch[self.raw_base].spec.copy()
-        warnings.warn(
-            "Using dtype from data, not spec! Not best practice but should be equivalent!"
-        )
-        raw_dtype = batch[self.raw_base].data.dtype
+        raw_dtype = raw_base_spec.dtype
         raw_base_spec.dtype = raw_dtype
 
         # return raw and labels for "fused" volume
