@@ -58,13 +58,16 @@ class Squeeze(gp.BatchFilter):
         logger.warning(f"unsqueeze output shape: {outputs[self.array].data.shape}")
         return outputs
 
+
 class ToInt64(gp.BatchFilter):
     def __init__(self, array):
         self.array = array
 
     def setup(self):
         self.enable_autoskip()
-        self.updates(self.array, self.spec[self.array].copy())
+        provided_spec = self.spec[self.array].copy()
+        provided_spec.dtype = np.int64
+        self.updates(self.array, provided_spec)
 
     def prepare(self, request):
         deps = gp.BatchRequest()
