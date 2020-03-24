@@ -27,11 +27,9 @@ class UnSqueeze(gp.BatchFilter):
     def process(self, batch, request):
         outputs = gp.Batch()
         outputs[self.array] = copy.deepcopy(batch[self.array])
-        logger.warning(f"unsqueeze input shape: {outputs[self.array].data.shape}")
         outputs[self.array].data = (
             torch.from_numpy(batch[self.array].data).unsqueeze(0).numpy()
         )
-        logger.warning(f"unsqueeze output shape: {outputs[self.array].data.shape}")
         return outputs
 
 
@@ -51,11 +49,9 @@ class Squeeze(gp.BatchFilter):
     def process(self, batch, request):
         outputs = gp.Batch()
         outputs[self.array] = copy.deepcopy(batch[self.array])
-        logger.warning(f"unsqueeze input shape: {outputs[self.array].data.shape}")
         outputs[self.array].data = (
             torch.from_numpy(batch[self.array].data).squeeze(0).numpy()
         )
-        logger.warning(f"unsqueeze output shape: {outputs[self.array].data.shape}")
         return outputs
 
 
