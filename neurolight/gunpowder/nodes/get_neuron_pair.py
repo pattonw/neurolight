@@ -331,7 +331,7 @@ class GetNeuronPair(BatchProvider):
         for key, array in base.arrays.items():
             add[key] = Array(np.zeros_like(array.data), spec=copy.deepcopy(array.spec))
         for key, points in base.points.items():
-            add[key] = Graph({}, spec=copy.deepcopy(points.spec))
+            add[key] = Graph([], [], spec=copy.deepcopy(points.spec))
         return add
 
     def merge_batches(self, base: Batch, add: Batch) -> Batch:
@@ -518,7 +518,7 @@ class GetNeuronPair(BatchProvider):
                     count += 1
 
             if count == 0 or self.seperate_by[0] <= min_dist <= self.seperate_by[1]:
-                print(f"shift: {shift_attempt} worked with {min_dist} and {count}")
+                logger.debug(f"shift: {shift_attempt} worked with {min_dist} and {count}")
                 return shift_attempt
 
             logger.debug(
@@ -555,16 +555,13 @@ class GetNeuronPair(BatchProvider):
 
         # Shift and crop points and array
         return_roi = self._return_roi(request)
-        print(f"return roi: {return_roi}")
         for source_key, point_set in batch.points.items():
             point_set = self._shift_and_crop_points(point_set, direction, return_roi)
             batch.points[source_key] = point_set
-            print(f"{source_key} has roi {point_set.spec.roi}")
 
         for source_key, array_set in batch.arrays.items():
             array_set = self._shift_and_crop_array(array_set, direction, return_roi)
             batch.arrays[source_key] = array_set
-            print(f"{source_key} has roi {array_set.spec.roi}")
 
         return batch
 
