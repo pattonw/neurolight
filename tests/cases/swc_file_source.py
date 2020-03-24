@@ -2,7 +2,7 @@ from pathlib import Path
 
 from swc_base_test import SWCBaseTest
 from neurolight.gunpowder.nodes.swc_file_source import SwcFileSource
-from gunpowder import PointsKey, PointsSpec, BatchRequest, Roi, build
+from gunpowder import GraphKey, GraphSpec, BatchRequest, Roi, build
 import numpy as np
 import networkx as nx
 
@@ -18,12 +18,12 @@ class SwcFileSourceTest(SWCBaseTest):
         self._write_swc(path, self._toy_swc_points().to_nx_graph())
 
         # read arrays
-        swc = PointsKey("SWC")
+        swc = GraphKey("SWC")
         source = SwcFileSource(path, [swc])
 
         with build(source):
             batch = source.request_batch(
-                BatchRequest({swc: PointsSpec(roi=Roi((0, 0, 5), (11, 11, 1)))})
+                BatchRequest({swc: GraphSpec(roi=Roi((0, 0, 5), (11, 11, 1)))})
             )
 
         for node in self._toy_swc_points().nodes:
@@ -38,12 +38,12 @@ class SwcFileSourceTest(SWCBaseTest):
         self._write_swc(path, self._toy_swc_points().to_nx_graph())
 
         # read arrays
-        swc = PointsKey("SWC")
+        swc = GraphKey("SWC")
         source = SwcFileSource(path, [swc])
 
         with build(source):
             batch = source.request_batch(
-                BatchRequest({swc: PointsSpec(roi=Roi((0, 1, 5), (11, 10, 1)))})
+                BatchRequest({swc: GraphSpec(roi=Roi((0, 1, 5), (11, 10, 1)))})
             )
 
         temp_g = batch.points[swc]
@@ -67,16 +67,18 @@ class SwcFileSourceTest(SWCBaseTest):
 
         # write test swc
         self._write_swc(
-            path, self._toy_swc_points().to_nx_graph(), {"resolution": np.array([2, 2, 2])}
+            path,
+            self._toy_swc_points().to_nx_graph(),
+            {"resolution": np.array([2, 2, 2])},
         )
 
         # read arrays
-        swc = PointsKey("SWC")
+        swc = GraphKey("SWC")
         source = SwcFileSource(path, [swc])
 
         with build(source):
             batch = source.request_batch(
-                BatchRequest({swc: PointsSpec(roi=Roi((0, 5, 10), (1, 2, 1)))})
+                BatchRequest({swc: GraphSpec(roi=Roi((0, 5, 10), (1, 2, 1)))})
             )
 
         temp_g = batch.points[swc]
@@ -91,8 +93,9 @@ class SwcFileSourceTest(SWCBaseTest):
         # expect relabelled ids
         path = []
         while current is not None:
-            path.append(tuple(temp_g.node(current).location))
-            successors = list(temp_g.successors(current).keys())
+            current_node = temp_g.node(current)
+            path.append(tuple(current_node.location))
+            successors = list(temp_g.successors(current_node))
             current = successors[0] if len(successors) == 1 else None
 
         for a, b in zip(path, expected_path):
@@ -103,16 +106,18 @@ class SwcFileSourceTest(SWCBaseTest):
 
         # write test swc
         self._write_swc(
-            path, self._toy_swc_points().to_nx_graph(), {"resolution": np.array([2, 2, 2])}
+            path,
+            self._toy_swc_points().to_nx_graph(),
+            {"resolution": np.array([2, 2, 2])},
         )
 
         # read arrays
-        swc = PointsKey("SWC")
+        swc = GraphKey("SWC")
         source = SwcFileSource(path, [swc], keep_ids=True)
 
         with build(source):
             batch = source.request_batch(
-                BatchRequest({swc: PointsSpec(roi=Roi((0, 5, 10), (1, 2, 1)))})
+                BatchRequest({swc: GraphSpec(roi=Roi((0, 5, 10), (1, 2, 1)))})
             )
 
         temp_g = batch.points[swc]
@@ -129,8 +134,9 @@ class SwcFileSourceTest(SWCBaseTest):
         ]
         path = []
         while current is not None:
-            path.append(tuple(temp_g.node(current).location))
-            successors = list(temp_g.successors(current).keys())
+            current_node = temp_g.node(current)
+            path.append(tuple(current_node.location))
+            successors = list(temp_g.successors(current_node))
             current = successors[0] if len(successors) == 1 else None
 
         for a, b in zip(path, expected_path):
@@ -149,12 +155,12 @@ class SwcFileSourceTest(SWCBaseTest):
             )
 
         # read arrays
-        swc = PointsKey("SWC")
+        swc = GraphKey("SWC")
         source = SwcFileSource(path, [swc])
 
         with build(source):
             batch = source.request_batch(
-                BatchRequest({swc: PointsSpec(roi=Roi((0, 0, 5), (11, 11, 3)))})
+                BatchRequest({swc: GraphSpec(roi=Roi((0, 0, 5), (11, 11, 3)))})
             )
 
         temp_g = batch.points[swc]
@@ -186,12 +192,12 @@ class SwcFileSourceTest(SWCBaseTest):
             )
 
         # read arrays
-        swc = PointsKey("SWC")
+        swc = GraphKey("SWC")
         source = SwcFileSource(path, [swc])
 
         with build(source):
             batch = source.request_batch(
-                BatchRequest({swc: PointsSpec(roi=Roi((0, 0, 5), (11, 13, 1)))})
+                BatchRequest({swc: GraphSpec(roi=Roi((0, 0, 5), (11, 13, 1)))})
             )
 
         temp_g = batch.points[swc]
