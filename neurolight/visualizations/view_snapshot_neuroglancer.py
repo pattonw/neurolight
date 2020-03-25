@@ -166,6 +166,10 @@ def visualize_hdf5(hdf5_file: Path, voxel_size, mst=False, maxima_for=None, skip
             if skip == volume:
                 continue
             v = daisy.open_ds(str(hdf5_file.absolute()), f"volumes/{volume}")
+            if len(v.shape) == 5:
+                v.n_channel_dims -= 1
+                v.materialize()
+                v.data = v.data[0]
             if v.dtype == np.int64:
                 v.materialize()
                 v.data = v.data.astype(np.uint64)
