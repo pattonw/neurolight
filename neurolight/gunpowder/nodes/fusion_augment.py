@@ -243,7 +243,7 @@ class FusionAugment(BatchFilter):
         # load specs
         labels_add_spec = batch[self.labels_add].spec.copy()
         raw_base_spec = batch[self.raw_base].spec.copy()
-        raw_dtype = raw_base_spec.dtype
+        raw_dtype = batch[self.raw_base].data.dtype
         raw_base_spec.dtype = raw_dtype
 
         # return raw and labels for "fused" volume
