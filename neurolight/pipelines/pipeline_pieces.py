@@ -340,6 +340,7 @@ def get_neuron_pair(
     micron_scale = voxel_size[0]
 
     # Somewhat arbitrary hyperparameters
+    blend_mode = setup_config["BLEND_MODE"]
     shift_attempts = setup_config["SHIFT_ATTEMPTS"]
     request_attempts = setup_config["REQUEST_ATTEMPTS"]
     blend_smoothness = setup_config["BLEND_SMOOTHNESS"]
@@ -399,7 +400,7 @@ def get_neuron_pair(
             masked_base=masked_base,
             masked_add=masked_add,
             mask_maxed=mask_maxed,
-            blend_mode="labels_mask",  # TODO: Config this
+            blend_mode=blend_mode,
             blend_smoothness=blend_smoothness * micron_scale,
             gaussian_smooth_mode="mirror",  # TODO: Config this
             num_blended_objects=0,  # TODO: Config this
