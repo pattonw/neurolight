@@ -69,6 +69,7 @@ class FusionAugment(BatchFilter):
                 One of "labels_mask" or "intensities". If "labels_mask" (the default),
                 alpha blending is applied to the labels mask of "add" volume. If
                 "intensities", raw intensities of "add" volume are used.
+                if "add", simply add the two volumes.
 
             blend_smoothness (``float``, optional):
 
@@ -194,6 +195,9 @@ class FusionAugment(BatchFilter):
 
             add_mask = raw_add_array.astype(np.float32) / np.max(raw_add_array)
             raw_fused_array = add_mask * raw_add_array + (1 - add_mask) * raw_base_array
+
+        elif self.blend_mode == "add":
+            raw_fused_array = raw_add_array + raw_base_array
 
         elif self.blend_mode == "labels_mask":
 
