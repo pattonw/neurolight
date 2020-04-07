@@ -1,14 +1,11 @@
 import logging
 
-from gunpowder.batch_request import BatchRequest
+from gunpowder import Array
+
 from gunpowder.torch.nodes.train import Train
-from gunpowder.array import ArrayKey, Array
-from gunpowder.array_spec import ArraySpec
-from gunpowder.coordinate import Coordinate
 from gunpowder.ext import torch
 import numpy as np
 
-from typing import Dict, Union, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -177,14 +174,6 @@ class TrainEmbedding(Train):
         if self.summary_writer and batch.iteration % self.log_every == 0:
 
             self.summary_writer.add_scalar("loss", batch.loss, batch.iteration)
-            t = torch.squeeze(outputs[0], 0).cpu().detach().numpy()
-            std = 0
-            k = t.shape[0]
-            for i in range(k):
-                std += t[i].std() / k
-            # average of the channel wise standard deviation
-            # network seems to struggle at the start due to low variance in output channels
-            self.summary_writer.add_scalar(f"embedding_std", std, batch.iteration)
             # The alpha to use for this iteration that would have provided the best score
             self.summary_writer.add_scalar(
                 "best_alpha_min", best_alpha_min, batch.iteration
@@ -209,6 +198,6 @@ class TrainEmbedding(Train):
             )
             # The number of non-background objects
             self.summary_writer.add_scalar(
-                "num_obj", len(device_targets["output"].unique())
+                "num_obj", len(device_loss_kwargs["target"].unique())
             )
 
