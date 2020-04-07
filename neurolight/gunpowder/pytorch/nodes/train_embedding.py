@@ -22,101 +22,11 @@ class TrainEmbedding(Train):
 
     def __init__(
         self,
-        model: torch.nn.Module,
-        loss,
-        optimizer,
-        inputs: Dict[str, ArrayKey],
-        outputs: Dict[Union[int, str], ArrayKey],
-        target: ArrayKey,
-        mask: ArrayKey,
-        input_size: Coordinate,
-        output_size: Coordinate,
-        gradients: Optional[Dict[Union[int, str], ArrayKey]] = None,
-        array_specs: Dict[str, ArraySpec] = None,
-        checkpoint_basename: str = "model",
-        save_every: int = 2000,
-        log_dir: str = None,
-        log_every: int = 1,
+        *args,
+        **kwargs,
     ):
 
-        self.input_size = input_size
-        self.output_size = output_size
-
-        self.mask = mask
-
-        super(TrainEmbedding, self).__init__(
-            model,
-            loss,
-            optimizer,
-            inputs,
-            outputs,
-            target,
-            gradients,
-            array_specs,
-            checkpoint_basename,
-            save_every,
-            log_dir,
-            log_every,
-        )
-        self.outputs = outputs
-
-        self.intermediate_layers = {}
-        self.register_hooks()
-
-    def prepare(self, request):
-        """
-        TODO: There is no prepare method for the train nodes.
-        This is a pain because it means that whatever is in the pipeline
-        when it passes this node will be used as the inputs/targets etc.
-
-        If you request ground truth labels of size "input_size", your loss
-        function will probably throw an error due to it comparing the output
-        of your network with size "output_size" to your labels which have size
-        "input_size".
-        """
-        deps = BatchRequest()
-        # Get the roi for the outputs
-        output_requests = BatchRequest()
-        for array_key in self.outputs.values():
-            output_requests[array_key] = request[array_key].copy()
-        output_total_roi = output_requests.get_total_roi()
-        diff = self.output_size - output_total_roi.get_shape()
-        assert Coordinate([x % 2 for x in diff]) == Coordinate(
-            [0] * len(self.output_size)
-        )
-
-        output_roi = output_total_roi.grow(diff // 2, diff // 2)
-        assert output_roi.get_shape() == self.output_size
-
-        # Grow the output roi to fit the appropriate input roi
-        diff = self.input_size - output_roi.get_shape()
-        assert Coordinate([x % 2 for x in diff]) == Coordinate(
-            [0] * len(self.output_size)
-        )
-        input_roi = output_roi.grow(diff // 2, diff // 2)
-
-        # Request inputs:
-        for array_key in self.inputs.values():
-            deps[array_key] = ArraySpec(roi=input_roi)
-
-        # Request targets:
-        for array_key in self.targets.values():
-            deps[array_key] = ArraySpec(roi=output_roi)
-        deps[self.mask] = ArraySpec(roi=output_roi)
-
-        return deps
-
-    def register_hooks(self):
-        for key in self.outputs:
-            if isinstance(key, str):
-                layer = getattr(self.model, key)
-                layer.register_forward_hook(self.create_hook(key))
-
-    def create_hook(self, key):
-        def save_layer(module, input, output):
-            self.intermediate_layers[key] = output
-
-        return save_layer
+        super(TrainEmbedding, self).__init__(*args, **kwargs)
 
     def train_step(self, batch, request):
         self.intermediate_layers = {}
