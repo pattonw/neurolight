@@ -29,24 +29,16 @@ class TrainEmbedding(Train):
         super(TrainEmbedding, self).__init__(*args, **kwargs)
 
     def train_step(self, batch, request):
-        self.intermediate_layers = {}
 
         inputs = self._Train__collect_provided_inputs(batch)
-        targets = self._Train__collect_provided_targets(batch)
-        mask = torch.as_tensor(batch[self.mask].data, device=self.device)
         requested_outputs = self._Train__collect_requested_outputs(request)
 
+        # keys are argument names of model forward pass
         device_inputs = {
-            k: torch.as_tensor(v, device=self.device).unsqueeze(0)
-            for k, v in inputs.items()
+            k: torch.as_tensor(v, device=self.device) for k, v in inputs.items()
         }
 
-        device_targets = {
-            k: torch.as_tensor(v.astype(np.int64), device=self.device).unsqueeze(0)
-            for k, v in targets.items()
-        }
-        mask = mask.unsqueeze(0)
-
+        # get outputs. Keys are tuple indices or model attr names as in self.outputs
         self.optimizer.zero_grad()
         model_outputs = self.model(**device_inputs)
         if isinstance(model_outputs, tuple):
@@ -58,28 +50,56 @@ class TrainEmbedding(Train):
                 "Torch train node only supports return types of tuple",
                 f"and torch.Tensor from model.forward(). not {type(model_outputs)}",
             )
+        outputs.update(self.intermediate_layers)
 
-        for array_name, array_key in self.gradients.items():
-            if array_key not in request:
-                continue
-            if isinstance(array_name, int):
-                tensor = outputs[array_name]
-            elif isinstance(array_name, str):
-                tensor = getattr(self.model, array_name)
+        # Some inputs to the loss should come from the batch, not the model
+        provided_loss_inputs = self.__collect_provided_loss_inputs(batch)
+
+        device_loss_inputs = {
+            k: torch.as_tensor(v, device=self.device)
+            for k, v in provided_loss_inputs.items()
+        }
+
+        # Some inputs to the loss function should come from the outputs of the model
+        # Update device loss inputs with tensors from outputs if available
+        flipped_outputs = {v: outputs[k] for k, v in self.outputs.items()}
+        device_loss_inputs = {
+            k: flipped_outputs.get(v, device_loss_inputs.get(k))
+            for k, v in self.loss_inputs.items()
+        }
+
+        device_loss_args = []
+        for i in range(len(device_loss_inputs)):
+            if i in device_loss_inputs:
+                device_loss_args.append(device_loss_inputs.pop(i))
             else:
-                raise RuntimeError(
-                    "only ints and strings are supported as gradients keys"
-                )
-            tensor.retain_grad()
+                break
+        device_loss_kwargs = {}
+        for k, v in list(device_loss_inputs.items()):
+            if isinstance(k, str):
+                device_loss_kwargs[k] = device_loss_inputs.pop(k)
+        assert (
+            len(device_loss_inputs) == 0
+        ), f"Not all loss inputs could be interpreted. Failed keys: {device_loss_inputs.keys()}"
 
-        logger.debug("model output: %s", outputs[0])
-        logger.debug("expected output: %s", device_targets["output"])
+        self.retain_gradients(request, outputs)
+
+        logger.debug("model outputs: %s", outputs)
+        logger.debug(f"loss_inputs: {device_loss_args}, {device_loss_kwargs}")
         loss, emst, edges_u, edges_v, dist, ratio_pos, ratio_neg = self.loss(
-            input=outputs[0], target=device_targets["output"], mask=mask
+            *device_loss_args, **device_loss_kwargs
         )
         loss.backward()
         self.optimizer.step()
 
+        # add requested model outputs to batch
+        for array_key, array_name in requested_outputs.items():
+            spec = self.spec[array_key].copy()
+            spec.roi = request[array_key].roi
+            batch.arrays[array_key] = Array(
+                outputs[array_name].cpu().detach().numpy(), spec
+            )
+
         for array_name, array_key in self.gradients.items():
             if array_key not in request:
                 continue
@@ -94,22 +114,14 @@ class TrainEmbedding(Train):
             spec = self.spec[array_key].copy()
             spec.roi = request[array_key].roi
             batch.arrays[array_key] = Array(
-                torch.squeeze(tensor.grad, 0).cpu().numpy(), spec
+                tensor.grad.cpu().detach().numpy(), spec
             )
 
         for array_key, array_name in requested_outputs.items():
-            if isinstance(array_name, int):
-                tensor = outputs[array_name]
-            elif isinstance(array_name, str):
-                tensor = getattr(self.model, array_name)
-            else:
-                raise RuntimeError(
-                    "only ints and strings are supported as gradients keys"
-                )
             spec = self.spec[array_key].copy()
             spec.roi = request[array_key].roi
             batch.arrays[array_key] = Array(
-                torch.squeeze(tensor, 0).cpu().detach().numpy(), spec
+                outputs[array_name].cpu().detach().numpy(), spec
             )
 
         batch.loss = loss.cpu().detach().numpy()
