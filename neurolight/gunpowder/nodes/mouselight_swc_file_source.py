@@ -1,4 +1,4 @@
-from gunpowder.graph import Node
+from gunpowder.graph import Node, Edge
 
 from neurolight.transforms.swc_to_graph import parse_swc
 from .swc_file_source import SwcFileSource
@@ -65,25 +65,24 @@ class MouselightSwcFileSource(SwcFileSource):
 
         assert len(list(nx.weakly_connected_components(tree))) == 1
 
-        points = {}
+        points = []
 
         for node, attrs in tree.nodes.items():
             if not self.ignore_human_nodes or attrs["human_placed"]:
-                points[node] = Node(
+                points.append(Node(
                     id=node,
                     location=attrs["location"],
-                    point_type=attrs["point_type"],
-                    radius=attrs["radius"],
-                )
+                    attrs=attrs,
+                ))
 
         human_edges = set()
         if self.ignore_human_nodes:
             for u, v in tree.edges:
                 if u not in points or v not in points:
-                    human_edges.add((u, v))
-        edges = set((u, v) for (u, v) in tree.edges)
+                    human_edges.add(Edge(u, v))
+        edges = set(Edge(u, v) for (u, v) in tree.edges)
         if not self.directed:
-            edges = edges | set((v, u) for u, v in tree.edges())
-        self._add_points_to_source(points, set(tree.edges) - human_edges)
+            edges = edges | set(Edge(v, u) for u, v in tree.edges())
+        self._add_points_to_source(points, edges - human_edges)
 
         return len(list(nx.weakly_connected_components(tree)))
