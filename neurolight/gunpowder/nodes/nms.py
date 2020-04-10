@@ -57,4 +57,7 @@ class NonMaxSuppression(BatchFilter):
         nms_input = torch.from_numpy(data)
         maxima = nms_op(nms_input)
 
-        batch.arrays[self.nms] = Array(maxima.numpy(), batch[self.array].spec.copy())
+        spec = batch[self.array].spec.copy()
+        spec.dtype = bool
+
+        batch.arrays[self.nms] = Array(maxima.numpy(), spec)
