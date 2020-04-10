@@ -49,12 +49,16 @@ class TopologicalMatcher(BatchFilter):
 
     def setup(self):
         self.enable_autoskip()
-        self.provides(self.matched, copy.deepcopy(self.spec[self.T]))
+        spec = copy.deepcopy(self.spec[self.T])
+        spec.directed = False
+        self.provides(self.matched, spec)
 
     def prepare(self, request: BatchRequest) -> BatchRequest:
         deps = BatchRequest()
         deps[self.G] = copy.deepcopy(request[self.matched])
+        deps[self.G].directed = self.spec[self.G].directed
         deps[self.T] = copy.deepcopy(request[self.matched])
+        deps[self.T].directed = self.spec[self.T].directed
         return deps
 
     def process(self, batch: Batch, request: BatchRequest):
@@ -84,7 +88,9 @@ class TopologicalMatcher(BatchFilter):
         if not success:
             matched, success = self.__solve_piecewise(graph, tree)
 
-        result = Graph.from_nx_graph(matched, copy.deepcopy(batch[self.T].spec))
+        spec = batch[self.T].spec.copy()
+        spec.directed = False
+        result = Graph.from_nx_graph(matched, spec)
 
         batch[self.matched] = result
 
