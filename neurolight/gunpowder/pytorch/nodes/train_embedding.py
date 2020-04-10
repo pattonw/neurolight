@@ -1,10 +1,11 @@
-import logging
-
 from gunpowder import Array
 
 from gunpowder.torch.nodes.train import Train
 from gunpowder.ext import torch
 import numpy as np
+
+import logging
+from pathlib import Path
 
 
 logger = logging.getLogger(__name__)
@@ -17,13 +18,13 @@ class TrainEmbedding(Train):
     an easy way of extending the logging functionality.
     """
 
-    def __init__(
-        self,
-        *args,
-        **kwargs,
-    ):
+    def __init__(self, *args, **kwargs):
 
         super(TrainEmbedding, self).__init__(*args, **kwargs)
+
+    def write_csv(data):
+        with Path("data_log.csv").open("r+") as f:
+            f.write(", ".join([f"{x}" for x in data]) + "\n")
 
     def train_step(self, batch, request):
 
@@ -50,7 +51,7 @@ class TrainEmbedding(Train):
         outputs.update(self.intermediate_layers)
 
         # Some inputs to the loss should come from the batch, not the model
-        provided_loss_inputs = self.__collect_provided_loss_inputs(batch)
+        provided_loss_inputs = self._Train__collect_provided_loss_inputs(batch)
 
         device_loss_inputs = {
             k: torch.as_tensor(v, device=self.device)
@@ -110,9 +111,7 @@ class TrainEmbedding(Train):
                 )
             spec = self.spec[array_key].copy()
             spec.roi = request[array_key].roi
-            batch.arrays[array_key] = Array(
-                tensor.grad.cpu().detach().numpy(), spec
-            )
+            batch.arrays[array_key] = Array(tensor.grad.cpu().detach().numpy(), spec)
 
         for array_key, array_name in requested_outputs.items():
             spec = self.spec[array_key].copy()
@@ -151,6 +150,10 @@ class TrainEmbedding(Train):
         ratio_neg = np.concatenate([ratio_neg, np.array([0])], axis=0)
         dist = np.concatenate([dist, np.array([0])], axis=0)
 
+        # get pos and neg aspects of loss:
+        pos_loss = sum(ratio_pos * dist)
+        neg_loss = batch.loss - pos_loss
+
         # Reorder edges to process mst in the proper order
         # In the case of a constrained um_loss, edges won't be in ascending order
         order = np.argsort(dist, axis=-1)
@@ -174,17 +177,21 @@ class TrainEmbedding(Train):
         if self.summary_writer and batch.iteration % self.log_every == 0:
 
             self.summary_writer.add_scalar("loss", batch.loss, batch.iteration)
+            self.summary_writer.add_scalar("pos_loss", pos_loss, batch.iteration)
+            self.summary_writer.add_scalar("neg_loss", neg_loss, batch.iteration)
             # The alpha to use for this iteration that would have provided the best score
             self.summary_writer.add_scalar(
-                "best_alpha_min", best_alpha_min, batch.iteration
+                "optimal_threshold_min", best_alpha_min, batch.iteration
             )
             # The next highest alpha. There should be a large gap between each process
             self.summary_writer.add_scalar(
-                "best_alpha_max", best_alpha_max, batch.iteration
+                "optimal_threshold_max", best_alpha_max, batch.iteration
             )
             # The size of optimal alpha range.
             self.summary_writer.add_scalar(
-                "best_alpha_range", best_alpha_max - best_alpha_min, batch.iteration
+                "optimal_threshold_range",
+                best_alpha_max - best_alpha_min,
+                batch.iteration,
             )
             # The score given a perfectly chosen alpha
             self.summary_writer.add_scalar("best_score", best_score, batch.iteration)
@@ -199,5 +206,19 @@ class TrainEmbedding(Train):
             # The number of non-background objects
             self.summary_writer.add_scalar(
                 "num_obj", len(device_loss_kwargs["target"].unique())
+            )
+
+            self.write_csv(
+                [
+                    batch.loss,
+                    pos_loss,
+                    neg_loss,
+                    best_alpha_min,
+                    best_alpha_min,
+                    best_alpha_max - best_alpha_min,
+                    best_score,
+                    np.mean(ratio_pos * dist),
+                    np.mean(ratio_neg * dist),
+                ]
             )
 
