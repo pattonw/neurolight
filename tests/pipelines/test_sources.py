@@ -91,7 +91,7 @@ class TestPointSource(BatchProvider):
     def setup(self):
         roi = Roi(Coordinate([0] * len(self.size)), self.size)
         for points_key in self.points:
-            self.provides(points_key, GraphSpec(roi=roi))
+            self.provides(points_key, GraphSpec(roi=roi, directed=self.directed))
 
         k = min(self.size)
         nodes = [
@@ -192,7 +192,6 @@ def get_test_data_sources(setup_config):
         data_sources,
         raw,
         labels,
-        consensus,
         nonempty_placeholder,
         matched,
     )
