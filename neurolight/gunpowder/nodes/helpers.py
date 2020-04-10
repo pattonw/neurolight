@@ -220,7 +220,7 @@ class ThresholdMask(gp.BatchFilter):
 
     def setup(self):
         mask_spec = copy.deepcopy(self.spec[self.array])
-        mask_spec.dtype = np.uint32
+        mask_spec.dtype = np.float32
         self.provides(self.mask, mask_spec)
         self.enable_autoskip()
 
@@ -230,9 +230,9 @@ class ThresholdMask(gp.BatchFilter):
         return deps
 
     def process(self, batch, request):
-        mask = (batch[self.array].data > self.threshold).astype(np.uint32)
-        mask_spec = copy.deepcopy(batch[self.array].spec)
-        mask_spec.dtype = np.uint32
+        mask = (batch[self.array].data > self.threshold).astype(np.float32)
+        mask_spec = self.spec[self.mask].copy()
+        mask_spec.roi = batch[self.array].spec.roi
         batch[self.mask] = gp.Array(mask, mask_spec)
 
         return batch
