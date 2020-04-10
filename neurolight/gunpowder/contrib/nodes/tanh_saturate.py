@@ -1,6 +1,7 @@
 import logging
 import numpy as np
 
+from gunpowder.batch_request import BatchRequest
 from gunpowder.nodes.batch_filter import BatchFilter
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,15 @@ class TanhSaturate(BatchFilter):
 
         self.array = array
         self.scale = scale
+
+    def setup(self):
+        self.enable_autoskip()
+        self.updates(self.array, self.spec[self.array])
+
+    def prepare(self, request):
+        deps = BatchRequest()
+        deps[self.array] = request[self.array].copy()
+        return deps
 
     def process(self, batch, request):
 
