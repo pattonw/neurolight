@@ -697,9 +697,7 @@ def add_foreground_training(pipeline, setup_config, raw, gt_fg, loss_weights):
 
     pipeline = (
         pipeline
-        + UnSqueeze(raw)
-        # + UnSqueeze(gt_fg)
-        # + UnSqueeze(loss_weights)
+        + UnSqueeze([raw, gt_fg, loss_weights])
         + Train(
             model=model,
             optimizer=optimizer,
@@ -716,11 +714,7 @@ def add_foreground_training(pipeline, setup_config, raw, gt_fg, loss_weights):
             log_dir=tensorboard_log_dir,
             checkpoint_basename=foreground_net_name,
         )
-        + Squeeze(raw)
-        # + Squeeze(gt_fg)
-        # + Squeeze(loss_weights)
-        + Squeeze(fg_pred)
-        + Squeeze(fg_gradient)
+        + Squeeze([raw, gt_fg, loss_weights, fg_pred, fg_gradient])
     )
 
     return pipeline, fg_pred, fg_gradient
