@@ -97,6 +97,10 @@ class SwcFileSource(BatchProvider):
 
             assert len(self.points) == len(self.points_spec)
             for point, point_spec in zip(self.points, self.points_spec):
+                assert (
+                    point_spec.directed is None or point_spec.directed == self.directed
+                )
+                point_spec.directed = self.directed
                 self.provides(point, point_spec)
         else:
             logger.debug("No point spec provided!")
@@ -107,7 +111,11 @@ class SwcFileSource(BatchProvider):
             roi = Roi(min_bb, max_bb - min_bb)
 
             for point in self.points:
-                self.provides(point, GraphSpec(roi=roi))
+                self.provides(point, GraphSpec(roi=roi, directed=self.directed))
+
+        for i, wcc in enumerate(nx.weakly_connected_components(self._graph)):
+            for node in wcc:
+                self._graph.nodes[node]["component"] = i
 
     def provide(self, request: BatchRequest) -> Batch:
 
@@ -142,7 +150,11 @@ class SwcFileSource(BatchProvider):
                 for node, attrs in points_subgraph.nodes.items()
             ]
             edges = [Edge(u, v) for u, v in points_subgraph.edges]
-            return_graph = Graph(nodes, edges, GraphSpec(roi=request[points_key].roi))
+            return_graph = Graph(
+                nodes,
+                edges,
+                GraphSpec(roi=request[points_key].roi, directed=self.directed),
+            )
 
             # Handle boundary cases
             return_graph = return_graph.trim(request[points_key].roi)
@@ -300,7 +312,7 @@ class SwcFileSource(BatchProvider):
             temp, first_label=len(self._graph.nodes)
         )
 
-        self._graph = nx.union(self._graph, temp)
+        self._graph = nx.disjoint_union(self._graph, temp)
         logger.debug("graph has {} nodes".format(len(self._graph.nodes)))
 
     def _subgraph_points(self, nodes: List[int], with_neighbors=False) -> nx.Graph:
