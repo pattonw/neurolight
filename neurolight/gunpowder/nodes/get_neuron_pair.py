@@ -25,6 +25,7 @@ import copy
 import itertools
 import pickle
 from pathlib import Path
+import random
 
 DataKey = Union[GraphKey, ArrayKey]
 
@@ -413,6 +414,8 @@ class GetNeuronPair(BatchProvider):
                     add_batch,
                     output_roi,
                     final=(i == self.request_attempts - 1),
+                    goal=random.random() * (self.seperate_by[1] - self.seperate_by[0])
+                    + self.seperate_by[0],
                 )
                 if direction is not None:
                     logger.debug("Got add batch")
@@ -421,7 +424,13 @@ class GetNeuronPair(BatchProvider):
                     continue
 
     def seperate_using_kdtrees(
-        self, base_batch: Batch, add_batch: Batch, output_roi: Roi, final=False
+        self,
+        base_batch: Batch,
+        add_batch: Batch,
+        output_roi: Roi,
+        final=False,
+        goal: float = 0,
+        epsilon: float = 0.1,
     ):
         points_add = add_batch.graphs.get(
             self.point_source, add_batch.graphs.get(self.nonempty_placeholder, None)
@@ -487,9 +496,7 @@ class GetNeuronPair(BatchProvider):
             current_check = add_locations - shift_attempt * 2
 
             # get all points in base that are close to shifted add points
-            points_too_close = base_tree.query_ball_point(
-                current_check, np.mean(self.seperate_by)
-            )
+            points_too_close = base_tree.query_ball_point(current_check, goal)
 
             # calculate next shift
             direction = np.zeros([3])
@@ -514,15 +521,22 @@ class GetNeuronPair(BatchProvider):
                     min_dist = min(min_dist, mag)
                     unit_vector = vector / (mag + 1)
                     # want to move at most n units if mag is 0, or 0 units if mag is n
-                    direction += (np.max(self.seperate_by) - mag) * unit_vector
+                    direction += (goal - mag) * unit_vector
                     count += 1
 
-            if count == 0 or self.seperate_by[0] <= min_dist <= self.seperate_by[1]:
-                logger.debug(f"shift: {shift_attempt} worked with {min_dist} and {count}")
+            if (
+                count == 0
+                or goal - goal * epsilon - epsilon
+                <= min_dist
+                <= goal + goal * epsilon + epsilon
+            ):
+                logger.debug(
+                    f"shift: {shift_attempt} worked with {min_dist} and {count}"
+                )
                 return shift_attempt
 
             logger.debug(
-                f"min dist {min_dist} not in {self.seperate_by} "
+                f"min dist {min_dist} not in {goal - goal*epsilon, goal + goal*epsilon} "
                 f"with shift: {current_shift}"
             )
             direction /= count
