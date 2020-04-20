@@ -86,7 +86,7 @@ class DaisyGraphProvider(BatchProvider):
         batch = Batch()
 
         for key, spec in request.items():
-            logger.warning(f"fetching {key} in roi {spec.roi}")
+            logger.debug(f"fetching {key} in roi {spec.roi}")
             requested_graph = self.graph_provider.get_graph(
                 spec.roi,
                 edge_inclusion="either",
@@ -96,7 +96,7 @@ class DaisyGraphProvider(BatchProvider):
                 nodes_filter=self.nodes_filter,
                 edges_filter=self.edges_filter,
             )
-            logger.warning(
+            logger.debug(
                 f"got {len(requested_graph.nodes)} nodes and {len(requested_graph.edges)} edges"
             )
             for node, attrs in requested_graph.nodes.items():
