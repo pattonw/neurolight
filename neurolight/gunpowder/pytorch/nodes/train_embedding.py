@@ -22,8 +22,11 @@ class TrainEmbedding(Train):
 
         super(TrainEmbedding, self).__init__(*args, **kwargs)
 
-    def write_csv(data):
-        with Path("data_log.csv").open("r+") as f:
+    def write_csv(self, data):
+        log_file = Path("data_log.csv")
+        if not log_file.exists():
+            log_file.touch()
+        with log_file.open("a+") as f:
             f.write(", ".join([f"{x}" for x in data]) + "\n")
 
     def train_step(self, batch, request):
@@ -205,11 +208,14 @@ class TrainEmbedding(Train):
             )
             # The number of non-background objects
             self.summary_writer.add_scalar(
-                "num_obj", len(device_loss_kwargs["target"].unique())
+                "num_obj",
+                len(device_loss_kwargs["target"].unique()) - 1,
+                batch.iteration,
             )
 
             self.write_csv(
                 [
+                    batch.iteration,
                     batch.loss,
                     pos_loss,
                     neg_loss,
@@ -221,4 +227,3 @@ class TrainEmbedding(Train):
                     np.mean(ratio_neg * dist),
                 ]
             )
-
