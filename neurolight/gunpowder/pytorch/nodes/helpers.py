@@ -42,12 +42,14 @@ class Squeeze(gp.BatchFilter):
     def prepare(self, request):
         deps = gp.BatchRequest()
         for array in self.arrays:
-            deps[array] = request[array].copy()
+            if array in request:
+                deps[array] = request[array].copy()
         return deps
 
     def process(self, batch, request):
         outputs = gp.Batch()
         for array in self.arrays:
-            outputs[array] = copy.deepcopy(batch[array])
-            outputs[array].data = torch.from_numpy(batch[array].data).squeeze(0).numpy()
+            if array in batch:
+                outputs[array] = copy.deepcopy(batch[array])
+                outputs[array].data = torch.from_numpy(batch[array].data).squeeze(0).numpy()
         return outputs
