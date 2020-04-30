@@ -45,7 +45,7 @@ class NMS(torch.nn.Module):
 
         down_1, indices = self.down_1(raw)
         maxima = self.up_1(down_1, indices)
-        zeros = torch.zeros(*maxima.shape, device=raw.device)
+        zeros = torch.zeros(*maxima.shape, device=raw.device, dtype=maxima.dtype)
         thresholded_maxima = torch.where(maxima > self.threshold, maxima, zeros)
         maxima_mask = thresholded_maxima == raw
 
