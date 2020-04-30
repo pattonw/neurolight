@@ -38,14 +38,14 @@ def get_costs(
     tree_nodes = list(tree.nodes)
     tree_edge_list = list(tree.edges)
 
-    logger.info(f"Initializing nodes took: {time.time() - start_time} seconds!")
+    logger.debug(f"Initializing nodes took: {time.time() - start_time} seconds!")
     start_time = time.time()
 
     # map from node to index. Necessary to vectorize edge operations
     graph_index_map = {u: i for i, u in enumerate(graph_nodes)}
     tree_index_map = {u: i for i, u in enumerate(tree_nodes + [None])}
 
-    logger.info(f"Initializing index_maps took: {time.time() - start_time} seconds!")
+    logger.debug(f"Initializing index_maps took: {time.time() - start_time} seconds!")
     start_time = time.time()
 
     # loop over edges to get array of u, v. map u, v to index of u, v in above vectors
@@ -56,7 +56,7 @@ def get_costs(
         [(graph_index_map[u], graph_index_map[v]) for u, v in graph.edges], dtype=int
     )
 
-    logger.info(f"Initializing edges took: {time.time() - start_time} seconds!")
+    logger.debug(f"Initializing edges took: {time.time() - start_time} seconds!")
     start_time = time.time()
 
     # loop over graph nodes to extract locations
@@ -70,7 +70,7 @@ def get_costs(
         [graph.edges[x].get(penalty_attr, 0) for x in graph_edge_list]
     )
 
-    logger.info(
+    logger.debug(
         f"Initializing graph location/penalty vectors took: {time.time() - start_time} seconds!"
     )
     start_time = time.time()
@@ -90,33 +90,33 @@ def get_costs(
         [tree.edges[x].get(penalty_attr, 0) for x in tree_edge_list]
     )
 
-    logger.info(
+    logger.debug(
         f"Initializing tree location/penalty vectors took: {time.time() - start_time} seconds!"
     )
     start_time = time.time()
 
     # create array of tree_nodes for np.find calls
     tree_nodes = np.array(tree_nodes + [None])
-    logger.info(f"Initializing tree_nodes took: {time.time() - start_time} seconds!")
+    logger.debug(f"Initializing tree_nodes took: {time.time() - start_time} seconds!")
     start_time = time.time()
 
     # initialize kdtrees
     graph_kd = cKDTree(graph_locations)
     tree_kd = cKDTree(tree_locations)
-    logger.info(f"Initializing cKDTrees took: {time.time() - start_time} seconds!")
+    logger.debug(f"Initializing cKDTrees took: {time.time() - start_time} seconds!")
     start_time = time.time()
 
     # get (u, v) index pairs from tree_kd and graph_kd
     # u in tree and v in graph
     close_enough = tree_kd.query_ball_tree(graph_kd, node_match_threshold)
-    logger.info(f"Querying cKDTrees took: {time.time() - start_time} seconds!")
+    logger.debug(f"Querying cKDTrees took: {time.time() - start_time} seconds!")
     start_time = time.time()
     # loop over query_ball_tree result
     index_pairs = np.array(
         [(i, x) for i, y in enumerate(close_enough) for x in y]
         + [(-1, i) for i in range(len(graph_nodes))]  # -1 is index of None tree node
     )
-    logger.info(f"Looping over cKDTrees output took: {time.time() - start_time} seconds!")
+    logger.debug(f"Looping over cKDTrees output took: {time.time() - start_time} seconds!")
     start_time = time.time()
 
     pairs_t = np.take(tree_nodes, index_pairs[:, 0])
@@ -125,7 +125,7 @@ def get_costs(
     pairs_g_locs = np.take(graph_locations, index_pairs[:, 1], axis=0)
     pairs_t_pens = np.take(tree_penalties, index_pairs[:, 0], axis=0)
     pairs_g_pens = np.take(graph_penalties, index_pairs[:, 1], axis=0)
-    logger.info(
+    logger.debug(
         f"Initializing node vectors for computation took: {time.time() - start_time} seconds!"
     )
     start_time = time.time()
@@ -138,7 +138,7 @@ def get_costs(
     )
     node_matchings = np.stack([pairs_g, pairs_t, node_costs], axis=1)
 
-    logger.info(f"Computing node costs output took: {time.time() - start_time} seconds!")
+    logger.debug(f"Computing node costs output took: {time.time() - start_time} seconds!")
     start_time = time.time()
 
     # Edge matchings
@@ -146,7 +146,7 @@ def get_costs(
     # What would be faster: rtree containing many small edges and making few large queries
     # or rtree containing few large edges and making many small queries?
     tree_rtree = initialize_rtree(tree_edges, tree_locations)
-    logger.info(f"Initializing rtree took: {time.time() - start_time} seconds!")
+    logger.debug(f"Initializing rtree took: {time.time() - start_time} seconds!")
     start_time = time.time()
 
     possible_edge_matchings = query_rtree(
@@ -154,7 +154,7 @@ def get_costs(
     )
     if len(possible_edge_matchings) < 1:
         return (node_matchings, [])
-    logger.info(f"Querying rtree took: {time.time() - start_time} seconds!")
+    logger.debug(f"Querying rtree took: {time.time() - start_time} seconds!")
     start_time = time.time()
     tree_e_indices = np.take(tree_edges, possible_edge_matchings[:, 1], axis=0)
     t_e_locs = np.take(tree_locations, tree_e_indices, axis=0)
@@ -163,17 +163,17 @@ def get_costs(
     t_e_pens = np.take(tree_edge_penalties, possible_edge_matchings[:, 1], axis=0)
     g_e_pens = np.take(graph_edge_penalties, possible_edge_matchings[:, 0], axis=0)
 
-    logger.info(f"Initializing edge vectors took: {time.time() - start_time} seconds!")
+    logger.debug(f"Initializing edge vectors took: {time.time() - start_time} seconds!")
     start_time = time.time()
 
     distances, lengths = edge_dist(g_e_locs, t_e_locs)
-    logger.info(f"Computing edge distances took: {time.time() - start_time} seconds!")
+    logger.debug(f"Computing edge distances took: {time.time() - start_time} seconds!")
     start_time = time.time()
 
     costs = edge_cost(
         distances, edge_match_threshold, lengths, expected_edge_len, t_e_pens + g_e_pens
     )
-    logger.info(f"Computing edge distances took: {time.time() - start_time} seconds!")
+    logger.debug(f"Computing edge distances took: {time.time() - start_time} seconds!")
     start_time = time.time()
 
     filtered_matchings = possible_edge_matchings[distances < edge_match_threshold]
@@ -193,8 +193,8 @@ def get_costs(
 
     edge_matchings = np.stack([graph_as, graph_bs, tree_as, tree_bs, costs], axis=1)
 
-    logger.info(f"Filtering distances took: {time.time() - start_time} seconds!")
-    logger.info(f"Filtered out {len(distances) - len(filtered_matchings)}")
+    logger.debug(f"Filtering distances took: {time.time() - start_time} seconds!")
+    logger.debug(f"Filtered out {len(distances) - len(filtered_matchings)}")
     start_time = time.time()
 
     return node_matchings, edge_matchings
