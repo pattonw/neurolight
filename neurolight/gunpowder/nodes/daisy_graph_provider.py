@@ -109,6 +109,7 @@ class DaisyGraphProvider(BatchProvider):
                 requested_graph = requested_graph.to_undirected()
 
             points = Graph.from_nx_graph(requested_graph, spec)
+            points.relabel_connected_components()
             points.crop(spec.roi)
             batch[key] = points
 
