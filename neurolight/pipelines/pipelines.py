@@ -65,8 +65,8 @@ def foreground_pipeline(setup_config, get_data_sources=None):
 
     snapshot_datasets += [
         # gt label data
-        (gt_fg, input_size, "volumes/gt_fg"),
-        (loss_weights, input_size, "volumes/loss_weights"),
+        (gt_fg, output_size, "volumes/gt_fg"),
+        (loss_weights, output_size, "volumes/loss_weights"),
     ]
 
     pipeline = add_data_augmentation(pipeline, raw)
@@ -75,21 +75,22 @@ def foreground_pipeline(setup_config, get_data_sources=None):
         pipeline = add_caching(pipeline, setup_config)
 
     if setup_config["TRAIN_FOREGROUND"]:
-        pipeline, fg_pred, fg_pred_gradient, fg_logits, fg_logits_gradient = add_foreground_training(
+
+        pipeline, fg_pred, fg_pred_gradient = add_foreground_training(
             pipeline, setup_config, raw, gt_fg, loss_weights
         )
 
         snapshot_datasets += [
             # output data
             (fg_pred, output_size, "volumes/fg_pred"),
-            (fg_logits, output_size, "volumes/fg_logits"),
         ]
 
         snapshot_datasets += [
             # gradient debugging
             (fg_pred_gradient, output_size, "volumes/fg_pred_gradient"),
-            (fg_logits_gradient, output_size, "volumes/fg_logits_gradient"),
         ]
+
+        inputs = [gt_fg, loss_weights]
 
         outputs = (raw, fg_pred)
 
@@ -100,6 +101,7 @@ def foreground_pipeline(setup_config, get_data_sources=None):
             # output data
             (fg_pred, output_size, "volumes/fg_pred")
         ]
+        inputs = []
 
         outputs = (raw, fg_pred)
 
@@ -110,7 +112,7 @@ def foreground_pipeline(setup_config, get_data_sources=None):
 
         pipeline = add_snapshot(pipeline, setup_config, snapshot_datasets)
 
-    return (pipeline,) + outputs
+    return (pipeline,) + outputs + (inputs, )
 
 
 def embedding_pipeline(setup_config, get_data_sources=None):

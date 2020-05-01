@@ -1,14 +1,12 @@
-import logging
+from gunpowder import Array
 
-from gunpowder.batch_request import BatchRequest
 from gunpowder.torch.nodes.train import Train
-from gunpowder.array import ArrayKey, Array
-from gunpowder.array_spec import ArraySpec
-from gunpowder.coordinate import Coordinate
 from gunpowder.ext import torch
 import numpy as np
 
-from typing import Dict, Union, Optional
+import logging
+from pathlib import Path
+
 
 logger = logging.getLogger(__name__)
 
@@ -20,123 +18,28 @@ class TrainEmbedding(Train):
     an easy way of extending the logging functionality.
     """
 
-    def __init__(
-        self,
-        model: torch.nn.Module,
-        loss,
-        optimizer,
-        inputs: Dict[str, ArrayKey],
-        outputs: Dict[Union[int, str], ArrayKey],
-        target: ArrayKey,
-        mask: ArrayKey,
-        input_size: Coordinate,
-        output_size: Coordinate,
-        gradients: Optional[Dict[Union[int, str], ArrayKey]] = None,
-        array_specs: Dict[str, ArraySpec] = None,
-        checkpoint_basename: str = "model",
-        save_every: int = 2000,
-        log_dir: str = None,
-        log_every: int = 1,
-    ):
+    def __init__(self, *args, **kwargs):
 
-        self.input_size = input_size
-        self.output_size = output_size
+        super(TrainEmbedding, self).__init__(*args, **kwargs)
 
-        self.mask = mask
-
-        super(TrainEmbedding, self).__init__(
-            model,
-            loss,
-            optimizer,
-            inputs,
-            outputs,
-            target,
-            gradients,
-            array_specs,
-            checkpoint_basename,
-            save_every,
-            log_dir,
-            log_every,
-        )
-        self.outputs = outputs
-
-        self.intermediate_layers = {}
-        self.register_hooks()
-
-    def prepare(self, request):
-        """
-        TODO: There is no prepare method for the train nodes.
-        This is a pain because it means that whatever is in the pipeline
-        when it passes this node will be used as the inputs/targets etc.
-
-        If you request ground truth labels of size "input_size", your loss
-        function will probably throw an error due to it comparing the output
-        of your network with size "output_size" to your labels which have size
-        "input_size".
-        """
-        deps = BatchRequest()
-        # Get the roi for the outputs
-        output_requests = BatchRequest()
-        for array_key in self.outputs.values():
-            output_requests[array_key] = request[array_key].copy()
-        output_total_roi = output_requests.get_total_roi()
-        diff = self.output_size - output_total_roi.get_shape()
-        assert Coordinate([x % 2 for x in diff]) == Coordinate(
-            [0] * len(self.output_size)
-        )
-
-        output_roi = output_total_roi.grow(diff // 2, diff // 2)
-        assert output_roi.get_shape() == self.output_size
-
-        # Grow the output roi to fit the appropriate input roi
-        diff = self.input_size - output_roi.get_shape()
-        assert Coordinate([x % 2 for x in diff]) == Coordinate(
-            [0] * len(self.output_size)
-        )
-        input_roi = output_roi.grow(diff // 2, diff // 2)
-
-        # Request inputs:
-        for array_key in self.inputs.values():
-            deps[array_key] = ArraySpec(roi=input_roi)
-
-        # Request targets:
-        for array_key in self.targets.values():
-            deps[array_key] = ArraySpec(roi=output_roi)
-        deps[self.mask] = ArraySpec(roi=output_roi)
-
-        return deps
-
-    def register_hooks(self):
-        for key in self.outputs:
-            if isinstance(key, str):
-                layer = getattr(self.model, key)
-                layer.register_forward_hook(self.create_hook(key))
-
-    def create_hook(self, key):
-        def save_layer(module, input, output):
-            self.intermediate_layers[key] = output
-
-        return save_layer
+    def write_csv(self, data):
+        log_file = Path("data_log.csv")
+        if not log_file.exists():
+            log_file.touch()
+        with log_file.open("a+") as f:
+            f.write(", ".join([f"{x}" for x in data]) + "\n")
 
     def train_step(self, batch, request):
-        self.intermediate_layers = {}
 
         inputs = self._Train__collect_provided_inputs(batch)
-        targets = self._Train__collect_provided_targets(batch)
-        mask = torch.as_tensor(batch[self.mask].data, device=self.device)
         requested_outputs = self._Train__collect_requested_outputs(request)
 
+        # keys are argument names of model forward pass
         device_inputs = {
-            k: torch.as_tensor(v, device=self.device).unsqueeze(0)
-            for k, v in inputs.items()
+            k: torch.as_tensor(v, device=self.device) for k, v in inputs.items()
         }
 
-        device_targets = {
-            k: torch.as_tensor(v.astype(np.int64), device=self.device).unsqueeze(0)
-            for k, v in targets.items()
-        }
-        mask = mask.unsqueeze(0)
-
+        # get outputs. Keys are tuple indices or model attr names as in self.outputs
         self.optimizer.zero_grad()
         model_outputs = self.model(**device_inputs)
         if isinstance(model_outputs, tuple):
@@ -148,28 +51,56 @@ class TrainEmbedding(Train):
                 "Torch train node only supports return types of tuple",
                 f"and torch.Tensor from model.forward(). not {type(model_outputs)}",
             )
+        outputs.update(self.intermediate_layers)
 
-        for array_name, array_key in self.gradients.items():
-            if array_key not in request:
-                continue
-            if isinstance(array_name, int):
-                tensor = outputs[array_name]
-            elif isinstance(array_name, str):
-                tensor = getattr(self.model, array_name)
+        # Some inputs to the loss should come from the batch, not the model
+        provided_loss_inputs = self._Train__collect_provided_loss_inputs(batch)
+
+        device_loss_inputs = {
+            k: torch.as_tensor(v, device=self.device)
+            for k, v in provided_loss_inputs.items()
+        }
+
+        # Some inputs to the loss function should come from the outputs of the model
+        # Update device loss inputs with tensors from outputs if available
+        flipped_outputs = {v: outputs[k] for k, v in self.outputs.items()}
+        device_loss_inputs = {
+            k: flipped_outputs.get(v, device_loss_inputs.get(k))
+            for k, v in self.loss_inputs.items()
+        }
+
+        device_loss_args = []
+        for i in range(len(device_loss_inputs)):
+            if i in device_loss_inputs:
+                device_loss_args.append(device_loss_inputs.pop(i))
             else:
-                raise RuntimeError(
-                    "only ints and strings are supported as gradients keys"
-                )
-            tensor.retain_grad()
+                break
+        device_loss_kwargs = {}
+        for k, v in list(device_loss_inputs.items()):
+            if isinstance(k, str):
+                device_loss_kwargs[k] = device_loss_inputs.pop(k)
+        assert (
+            len(device_loss_inputs) == 0
+        ), f"Not all loss inputs could be interpreted. Failed keys: {device_loss_inputs.keys()}"
 
-        logger.debug("model output: %s", outputs[0])
-        logger.debug("expected output: %s", device_targets["output"])
+        self.retain_gradients(request, outputs)
+
+        logger.debug("model outputs: %s", outputs)
+        logger.debug(f"loss_inputs: {device_loss_args}, {device_loss_kwargs}")
         loss, emst, edges_u, edges_v, dist, ratio_pos, ratio_neg = self.loss(
-            input=outputs[0], target=device_targets["output"], mask=mask
+            *device_loss_args, **device_loss_kwargs
         )
         loss.backward()
         self.optimizer.step()
 
+        # add requested model outputs to batch
+        for array_key, array_name in requested_outputs.items():
+            spec = self.spec[array_key].copy()
+            spec.roi = request[array_key].roi
+            batch.arrays[array_key] = Array(
+                outputs[array_name].cpu().detach().numpy(), spec
+            )
+
         for array_name, array_key in self.gradients.items():
             if array_key not in request:
                 continue
@@ -183,23 +114,13 @@ class TrainEmbedding(Train):
                 )
             spec = self.spec[array_key].copy()
             spec.roi = request[array_key].roi
-            batch.arrays[array_key] = Array(
-                torch.squeeze(tensor.grad, 0).cpu().numpy(), spec
-            )
+            batch.arrays[array_key] = Array(tensor.grad.cpu().detach().numpy(), spec)
 
         for array_key, array_name in requested_outputs.items():
-            if isinstance(array_name, int):
-                tensor = outputs[array_name]
-            elif isinstance(array_name, str):
-                tensor = getattr(self.model, array_name)
-            else:
-                raise RuntimeError(
-                    "only ints and strings are supported as gradients keys"
-                )
             spec = self.spec[array_key].copy()
             spec.roi = request[array_key].roi
             batch.arrays[array_key] = Array(
-                torch.squeeze(tensor, 0).cpu().detach().numpy(), spec
+                outputs[array_name].cpu().detach().numpy(), spec
             )
 
         batch.loss = loss.cpu().detach().numpy()
@@ -232,6 +153,10 @@ class TrainEmbedding(Train):
         ratio_neg = np.concatenate([ratio_neg, np.array([0])], axis=0)
         dist = np.concatenate([dist, np.array([0])], axis=0)
 
+        # get pos and neg aspects of loss:
+        pos_loss = sum(ratio_pos * dist)
+        neg_loss = batch.loss - pos_loss
+
         # Reorder edges to process mst in the proper order
         # In the case of a constrained um_loss, edges won't be in ascending order
         order = np.argsort(dist, axis=-1)
@@ -255,25 +180,21 @@ class TrainEmbedding(Train):
         if self.summary_writer and batch.iteration % self.log_every == 0:
 
             self.summary_writer.add_scalar("loss", batch.loss, batch.iteration)
-            t = torch.squeeze(outputs[0], 0).cpu().detach().numpy()
-            std = 0
-            k = t.shape[0]
-            for i in range(k):
-                std += t[i].std() / k
-            # average of the channel wise standard deviation
-            # network seems to struggle at the start due to low variance in output channels
-            self.summary_writer.add_scalar(f"embedding_std", std, batch.iteration)
+            self.summary_writer.add_scalar("pos_loss", pos_loss, batch.iteration)
+            self.summary_writer.add_scalar("neg_loss", neg_loss, batch.iteration)
             # The alpha to use for this iteration that would have provided the best score
             self.summary_writer.add_scalar(
-                "best_alpha_min", best_alpha_min, batch.iteration
+                "optimal_threshold_min", best_alpha_min, batch.iteration
             )
             # The next highest alpha. There should be a large gap between each process
             self.summary_writer.add_scalar(
-                "best_alpha_max", best_alpha_max, batch.iteration
+                "optimal_threshold_max", best_alpha_max, batch.iteration
             )
             # The size of optimal alpha range.
             self.summary_writer.add_scalar(
-                "best_alpha_range", best_alpha_max - best_alpha_min, batch.iteration
+                "optimal_threshold_range",
+                best_alpha_max - best_alpha_min,
+                batch.iteration,
             )
             # The score given a perfectly chosen alpha
             self.summary_writer.add_scalar("best_score", best_score, batch.iteration)
@@ -287,6 +208,22 @@ class TrainEmbedding(Train):
             )
             # The number of non-background objects
             self.summary_writer.add_scalar(
-                "num_obj", len(device_targets["output"].unique())
+                "num_obj",
+                len(device_loss_kwargs["target"].unique()) - 1,
+                batch.iteration,
             )
 
+            self.write_csv(
+                [
+                    batch.iteration,
+                    batch.loss,
+                    pos_loss,
+                    neg_loss,
+                    best_alpha_min,
+                    best_alpha_min,
+                    best_alpha_max - best_alpha_min,
+                    best_score,
+                    np.mean(ratio_pos * dist),
+                    np.mean(ratio_neg * dist),
+                ]
+            )

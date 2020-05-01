@@ -1,4 +1,5 @@
 import gunpowder as gp
+import neurolight as nl
 from gunpowder.coordinate import Coordinate
 from gunpowder.array import ArrayKey
 from gunpowder.array_spec import ArraySpec
@@ -7,6 +8,14 @@ from gunpowder.torch import Predict, Train
 import numpy as np
 import torch
 import daisy
+
+from gunpowder.nodes.random_location import RandomLocation
+from neurolight.gunpowder.nodes.daisy_graph_provider import DaisyGraphProvider
+from neurolight.gunpowder.nodes.filtered_daisy_graph_provider import (
+    FilteredDaisyGraphProvider,
+)
+
+from neurolight.gunpowder.pytorch.nodes.train_embedding import TrainEmbedding
 
 from neurolight.gunpowder.nodes import (
     TopologicalMatcher,
@@ -20,11 +29,12 @@ from neurolight.gunpowder.nodes import (
     NonMaxSuppression,
     FilterComponents,
 )
-from neurolight.gunpowder.nodes.helpers import UnSqueeze, Squeeze, ToInt64
+# from neurolight.gunpowder.nodes.helpers import UnSqueeze, Squeeze
+from neurolight.gunpowder.nodes.helpers import ToInt64
+from neurolight.gunpowder.pytorch.nodes.helpers import UnSqueeze, Squeeze
 from neurolight.gunpowder.contrib.nodes import AddDistance, TanhSaturate
+from neurolight.gunpowder.nodes.clahe import scipyCLAHE
 
-from neurolight.gunpowder.pytorch.nodes.train_embedding import TrainEmbedding
-from neurolight.gunpowder.pytorch.nodes.train_foreground import TrainForeground
 from neurolight.networks.pytorch.radam import RAdam
 from neurolight.networks.pytorch import (
     EmbeddingUnet,
@@ -89,19 +99,13 @@ def get_training_inputs(setup_config, get_data_sources=None, locations=True):
             data_sources,
             raw,
             labels,
-            consensus,
             nonempty_placeholder,
             matched,
         ) = get_mouselight_data_sources(setup_config, samples, locations=True)
     else:
-        (
-            data_sources,
-            raw,
-            labels,
-            consensus,
-            nonempty_placeholder,
-            matched,
-        ) = get_data_sources(setup_config)
+        (data_sources, raw, labels, nonempty_placeholder, matched) = get_data_sources(
+            setup_config
+        )
 
     if setup_config.get("FUSION_PIPELINE"):
         (
@@ -112,23 +116,15 @@ def get_training_inputs(setup_config, get_data_sources=None, locations=True):
             raw_base,
             labels_base,
             matched_base,
-            consensus_base,
             raw_add,
             labels_add,
             matched_add,
-            consensus_add,
             soft_mask,
             masked_base,
             masked_add,
             mask_maxed,
         ) = get_neuron_pair(
-            data_sources,
-            setup_config,
-            raw,
-            labels,
-            matched,
-            nonempty_placeholder,
-            consensus,
+            data_sources, setup_config, raw, labels, matched, nonempty_placeholder
         )
 
         datasets += [
@@ -139,17 +135,16 @@ def get_training_inputs(setup_config, get_data_sources=None, locations=True):
             (labels_add, input_size, "volumes/labels_add", logging.DEBUG),
             (matched_base, input_size, "points/matched_base", logging.DEBUG),
             (matched_add, input_size, "points/matched_add", logging.DEBUG),
-            (consensus_base, input_size, "points/consensus_base", logging.DEBUG),
-            (consensus_add, input_size, "points/consensus_add", logging.DEBUG),
         ]
 
-        datasets += [
-            # fusion debugging data
-            (soft_mask, input_size, "volumes/soft_mask", logging.DEBUG),
-            (masked_base, input_size, "volumes/masked_base", logging.DEBUG),
-            (masked_add, input_size, "volumes/masked_add", logging.DEBUG),
-            (mask_maxed, input_size, "volumes/mask_maxed", logging.DEBUG),
-        ]
+        if setup_config["BLEND_MODE"] == "label_mask":
+            datasets += [
+                # fusion debugging data
+                (soft_mask, input_size, "volumes/soft_mask", logging.DEBUG),
+                (masked_base, input_size, "volumes/masked_base", logging.DEBUG),
+                (masked_add, input_size, "volumes/masked_add", logging.DEBUG),
+                (mask_maxed, input_size, "volumes/mask_maxed", logging.DEBUG),
+            ]
     else:
 
         pipeline = data_sources
@@ -175,7 +170,7 @@ def get_mouselight_data_sources(
     mongo_url = setup_config["MONGO_URL"]
     samples_path = Path(setup_config["SAMPLES_PATH"])
 
-    specified_locations = setup_config.get("SPECIFIED_LOCATIONS")
+    # specified_locations = setup_config.get("SPECIFIED_LOCATIONS")
 
     # Graph matching parameters
     point_balance_radius = setup_config["POINT_BALANCE_RADIUS"]
@@ -188,25 +183,31 @@ def get_mouselight_data_sources(
 
     # Data Properties
     voxel_size = gp.Coordinate(setup_config["VOXEL_SIZE"])
+    output_shape = gp.Coordinate(setup_config["OUTPUT_SHAPE"])
+    output_size = output_shape * voxel_size
     micron_scale = voxel_size[0]
+
+    distance_attr = setup_config["DISTANCE_ATTRIBUTE"]
+    target_distance = float(setup_config["MIN_DIST_TO_FALLBACK"])
+    max_nonempty_points = int(setup_config["MAX_RANDOM_LOCATION_POINTS"])
+
+    mongo_db_template = setup_config["MONGO_DB_TEMPLATE"]
+    matched_source = setup_config.get("MATCHED_SOURCE", "matched")
 
     # New array keys
     # Note: These are intended to be requested with size input_size
     raw = ArrayKey("RAW")
-    consensus = gp.PointsKey("CONSENSUS")
     matched = gp.PointsKey("MATCHED")
     nonempty_placeholder = gp.PointsKey("NONEMPTY")
     labels = ArrayKey("LABELS")
 
-    if setup_config["FUSION_PIPELINE"]:
-        ensure_nonempty = nonempty_placeholder
-    else:
-        ensure_nonempty = consensus
+    ensure_nonempty = nonempty_placeholder
 
     node_offset = {
         sample.name: (
             daisy.persistence.MongoDbGraphProvider(
-                f"mouselight-{sample.name}-skeletonization", mongo_url
+                mongo_db_template.format(sample=sample.name, source="skeletonization"),
+                mongo_url,
             ).num_nodes(None)
             + 1
         )
@@ -214,26 +215,27 @@ def get_mouselight_data_sources(
         if sample.name in source_samples
     }
 
-    if specified_locations is not None:
-        centers = pickle.load(open(specified_locations, "rb"))
-        random = gp.SpecifiedLocation
-        kwargs = {"locations": centers, "choose_randomly": True}
-        logger.info(f"Using specified locations from {specified_locations}")
-    elif not locations:
-        random = gp.RandomLocation
-        kwargs = {
-            "ensure_nonempty": ensure_nonempty,
-            "ensure_centered": True,
-            "point_balance_radius": point_balance_radius * micron_scale,
-        }
-    else:
-        random = RandomLocations
-        kwargs = {
-            "ensure_nonempty": ensure_nonempty,
-            "ensure_centered": True,
-            "point_balance_radius": point_balance_radius * micron_scale,
-            "loc": gp.ArrayKey("RANDOM_LOCATION"),
-        }
+    # if specified_locations is not None:
+    #     centers = pickle.load(open(specified_locations, "rb"))
+    #     random = gp.SpecifiedLocation
+    #     kwargs = {"locations": centers, "choose_randomly": True}
+    #     logger.info(f"Using specified locations from {specified_locations}")
+    # elif locations:
+    #     random = RandomLocations
+    #     kwargs = {
+    #         "ensure_nonempty": ensure_nonempty,
+    #         "ensure_centered": True,
+    #         "point_balance_radius": point_balance_radius * micron_scale,
+    #         "loc": gp.ArrayKey("RANDOM_LOCATION"),
+    #     }
+    # else:
+
+    random = RandomLocation
+    kwargs = {
+        "ensure_nonempty": ensure_nonempty,
+        "ensure_centered": True,
+        "point_balance_radius": point_balance_radius * micron_scale,
+    }
 
     data_sources = (
         tuple(
@@ -247,27 +249,30 @@ def get_mouselight_data_sources(
                         )
                     },
                 ),
-                gp.DaisyGraphProvider(
-                    f"mouselight-{sample.name}-consensus",
-                    mongo_url,
-                    points=[consensus, nonempty_placeholder],
-                    directed=True,
-                    node_attrs=[],
-                    edge_attrs=[],
-                ),
-                gp.DaisyGraphProvider(
-                    f"mouselight-{sample.name}-matched",
+                DaisyGraphProvider(
+                    mongo_db_template.format(sample=sample.name, source=matched_source),
                     mongo_url,
                     points=[matched],
                     directed=True,
                     node_attrs=[],
                     edge_attrs=[],
                 ),
+                FilteredDaisyGraphProvider(
+                    mongo_db_template.format(sample=sample.name, source=matched_source),
+                    mongo_url,
+                    points=[nonempty_placeholder],
+                    directed=True,
+                    node_attrs=["distance_to_fallback"],
+                    edge_attrs=[],
+                    num_nodes=max_nonempty_points,
+                    dist_attribute=distance_attr,
+                    min_dist=target_distance,
+                ),
             )
             + gp.MergeProvider()
             + random(**kwargs)
             + gp.Normalize(raw)
-            + FilterComponents(matched, node_offset[sample.name])
+            + FilterComponents(matched, node_offset[sample.name], centroid_size=output_size)
             + RasterizeSkeleton(
                 points=matched,
                 array=labels,
@@ -281,7 +286,7 @@ def get_mouselight_data_sources(
         + gp.RandomProvider()
     )
 
-    return (data_sources, raw, labels, consensus, nonempty_placeholder, matched)
+    return (data_sources, raw, labels, nonempty_placeholder, matched)
 
 
 def get_snapshot_source(setup_config: Dict[str, Any], source_samples: List[str]):
@@ -330,7 +335,6 @@ def get_neuron_pair(
     labels: ArrayKey,
     matched: PointsKey,
     nonempty_placeholder: PointsKey,
-    consensus: PointsKey,
 ):
 
     # Data Properties
@@ -340,6 +344,7 @@ def get_neuron_pair(
     micron_scale = voxel_size[0]
 
     # Somewhat arbitrary hyperparameters
+    blend_mode = setup_config["BLEND_MODE"]
     shift_attempts = setup_config["SHIFT_ATTEMPTS"]
     request_attempts = setup_config["REQUEST_ATTEMPTS"]
     blend_smoothness = setup_config["BLEND_SMOOTHNESS"]
@@ -355,13 +360,11 @@ def get_neuron_pair(
     raw_base = ArrayKey("RAW_BASE")
     labels_base = ArrayKey("LABELS_BASE")
     matched_base = gp.PointsKey("MATCHED_BASE")
-    consensus_base = gp.PointsKey("CONSENSUS_BASE")
 
     # array keys for add volume
     raw_add = ArrayKey("RAW_ADD")
     labels_add = ArrayKey("LABELS_ADD")
     matched_add = gp.PointsKey("MATCHED_ADD")
-    consensus_add = gp.PointsKey("CONSENSUS_ADD")
 
     # debug array keys
     soft_mask = gp.ArrayKey("SOFT_MASK")
@@ -369,42 +372,43 @@ def get_neuron_pair(
     masked_add = gp.ArrayKey("MASKED_ADD")
     mask_maxed = gp.ArrayKey("MASK_MAXED")
 
-    pipeline = (
-        pipeline
-        + GetNeuronPair(
-            matched,
-            raw,
-            labels,
-            (matched_base, matched_add),
-            (raw_base, raw_add),
-            (labels_base, labels_add),
-            output_shape=output_size,
-            seperate_by=seperate_distance,
-            shift_attempts=shift_attempts,
-            request_attempts=request_attempts,
-            nonempty_placeholder=nonempty_placeholder,
-            extra_keys={consensus: (consensus_base, consensus_add)},
-        )
-        + FusionAugment(
-            raw_base,
-            raw_add,
-            labels_base,
-            labels_add,
-            matched_base,
-            matched_add,
-            raw_fused,
-            labels_fused,
-            matched_fused,
-            soft_mask=soft_mask,
-            masked_base=masked_base,
-            masked_add=masked_add,
-            mask_maxed=mask_maxed,
-            blend_mode="labels_mask",  # TODO: Config this
-            blend_smoothness=blend_smoothness * micron_scale,
-            gaussian_smooth_mode="mirror",  # TODO: Config this
-            num_blended_objects=0,  # TODO: Config this
-        )
+    pipeline = pipeline + GetNeuronPair(
+        matched,
+        raw,
+        labels,
+        (matched_base, matched_add),
+        (raw_base, raw_add),
+        (labels_base, labels_add),
+        output_shape=output_size,
+        seperate_by=seperate_distance,
+        shift_attempts=shift_attempts,
+        request_attempts=request_attempts,
+        # nonempty_placeholder=nonempty_placeholder,
+        nonempty_placeholder=nonempty_placeholder,
     )
+    if blend_mode == "add":
+        pipeline = pipeline + scipyCLAHE([raw_add, raw_base], [20, 64, 64])
+    pipeline = pipeline + FusionAugment(
+        raw_base,
+        raw_add,
+        labels_base,
+        labels_add,
+        matched_base,
+        matched_add,
+        raw_fused,
+        labels_fused,
+        matched_fused,
+        soft_mask=soft_mask,
+        masked_base=masked_base,
+        masked_add=masked_add,
+        mask_maxed=mask_maxed,
+        blend_mode=blend_mode,
+        blend_smoothness=blend_smoothness * micron_scale,
+        gaussian_smooth_mode="mirror",  # TODO: Config this
+        num_blended_objects=0,  # TODO: Config this
+    )
+    if blend_mode == "add":
+        pipeline = pipeline + scipyCLAHE([raw_fused], [20, 64, 64])
 
     return (
         pipeline,
@@ -414,11 +418,9 @@ def get_neuron_pair(
         raw_base,
         labels_base,
         matched_base,
-        consensus_base,
         raw_add,
         labels_add,
         matched_add,
-        consensus_add,
         soft_mask,
         masked_base,
         masked_add,
@@ -538,7 +540,7 @@ def add_foreground_prediction(pipeline, setup_config, raw):
 
     pipeline = (
         pipeline
-        + UnSqueeze(raw)
+        + UnSqueeze([raw])
         + Predict(
             model=ForegroundUnet(setup_config),
             checkpoint=checkpoint,
@@ -546,6 +548,7 @@ def add_foreground_prediction(pipeline, setup_config, raw):
             outputs={0: fg_pred},
             array_specs={fg_pred: ArraySpec(dtype=np.float32, voxel_size=voxel_size)},
         )
+        + Squeeze([raw, fg_pred])
     )
 
     return pipeline, fg_pred
@@ -562,12 +565,17 @@ def add_embedding_prediction(pipeline, setup_config, raw):
     # New array keys
     embedding = ArrayKey("EMBEDDING")
 
-    pipeline = pipeline + Predict(
-        model=EmbeddingUnet(setup_config),
-        checkpoint=checkpoint,
-        inputs={"raw": raw},
-        outputs={0: embedding},
-        array_specs={embedding: ArraySpec(dtype=np.float32, voxel_size=voxel_size)},
+    pipeline = (
+        pipeline
+        + UnSqueeze([raw])
+        + Predict(
+            model=EmbeddingUnet(setup_config),
+            checkpoint=checkpoint,
+            inputs={"raw": raw},
+            outputs={0: embedding},
+            array_specs={embedding: ArraySpec(dtype=np.float32, voxel_size=voxel_size)},
+        )
+        + Squeeze([raw, embedding])
     )
 
     return pipeline, embedding
@@ -586,7 +594,12 @@ def add_non_max_suppression(pipeline, setup_config, foreground):
     # New array Key
     maxima = ArrayKey("MAXIMA")
 
-    pipeline = pipeline + NonMaxSuppression(foreground, maxima, window_size, threshold)
+    pipeline = (
+        pipeline
+        + UnSqueeze([foreground])
+        + NonMaxSuppression(foreground, maxima, window_size, threshold)
+        + Squeeze([foreground, maxima])
+    )
 
     return pipeline, maxima
 
@@ -627,8 +640,8 @@ def add_embedding_training(pipeline, setup_config, raw, gt_labels, mask):
     pipeline = (
         pipeline
         + ToInt64(gt_labels)
-        + Squeeze(mask)
-        + Train(
+        + UnSqueeze([raw, gt_labels, mask])
+        + TrainEmbedding(
             model=model,
             optimizer=optimizer,
             loss=loss,
@@ -644,6 +657,7 @@ def add_embedding_training(pipeline, setup_config, raw, gt_labels, mask):
             log_dir=tensorboard_log_dir,
             checkpoint_basename=embedding_net_name,
         )
+        + Squeeze([embedding, embedding_gradient, raw, gt_labels, mask])
     )
 
     return pipeline, embedding, embedding_gradient
@@ -663,14 +677,10 @@ def add_foreground_training(pipeline, setup_config, raw, gt_fg, loss_weights):
     tensorboard_log_dir = setup_config["TENSORBOARD_LOG_DIR"]
 
     voxel_size = Coordinate(setup_config["VOXEL_SIZE"])
-    input_size = Coordinate(setup_config["INPUT_SHAPE"]) * voxel_size
-    output_size = Coordinate(setup_config["OUTPUT_SHAPE"]) * voxel_size
 
     # New array Keys
     fg_pred = ArrayKey("FG_PRED")
-    fg_logits = ArrayKey("FG_LOGITS")
     fg_gradient = ArrayKey("FG_GRADIENT")
-    fg_logits_gradient = ArrayKey("FG_LOGITS_GRADIENT")
 
     # model, optimizer, loss
     model = ForegroundUnet(setup_config)
@@ -685,23 +695,29 @@ def add_foreground_training(pipeline, setup_config, raw, gt_fg, loss_weights):
     else:
         loss = ForegroundBinLoss()
 
-    pipeline = pipeline + TrainForeground(
-        model=model,
-        optimizer=optimizer,
-        loss=loss,
-        inputs={"raw": raw},
-        outputs={0: fg_pred, 1: fg_logits},
-        target=gt_fg,
-        gradients={0: fg_gradient, 1: fg_logits_gradient},
-        save_every=checkpoint_every,
-        log_dir=tensorboard_log_dir,
-        weights=loss_weights,
-        input_size=input_size,
-        output_size=output_size,
-        checkpoint_basename=foreground_net_name,
+    pipeline = (
+        pipeline
+        + UnSqueeze([raw, gt_fg, loss_weights])
+        + Train(
+            model=model,
+            optimizer=optimizer,
+            loss=loss,
+            inputs={"raw": raw},
+            loss_inputs={0: fg_pred, "target": gt_fg, "weights": loss_weights},
+            outputs={0: fg_pred},
+            gradients={0: fg_gradient},
+            array_specs={
+                fg_pred: ArraySpec(dtype=np.float32, voxel_size=voxel_size),
+                fg_gradient: ArraySpec(dtype=np.float32, voxel_size=voxel_size),
+            },
+            save_every=checkpoint_every,
+            log_dir=tensorboard_log_dir,
+            checkpoint_basename=foreground_net_name,
+        )
+        + Squeeze([raw, gt_fg, loss_weights, fg_pred, fg_gradient])
     )
 
-    return pipeline, fg_pred, fg_gradient, fg_logits, fg_logits_gradient
+    return pipeline, fg_pred, fg_gradient
 
 
 def add_snapshot(

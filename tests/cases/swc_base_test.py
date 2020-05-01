@@ -151,7 +151,8 @@ class SWCBaseTest(TestWithTempFiles):
             points,
             edges,
             GraphSpec(
-                roi=Roi(Coordinate((-100, -100, -100)), Coordinate((300, 300, 300)))
+                roi=Roi(Coordinate((-100, -100, -100)), Coordinate((300, 300, 300))),
+                directed=True,
             ),
         )
 

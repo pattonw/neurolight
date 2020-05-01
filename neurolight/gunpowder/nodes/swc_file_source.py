@@ -97,6 +97,10 @@ class SwcFileSource(BatchProvider):
 
             assert len(self.points) == len(self.points_spec)
             for point, point_spec in zip(self.points, self.points_spec):
+                assert (
+                    point_spec.directed is None or point_spec.directed == self.directed
+                )
+                point_spec.directed = self.directed
                 self.provides(point, point_spec)
         else:
             logger.debug("No point spec provided!")
@@ -107,7 +111,11 @@ class SwcFileSource(BatchProvider):
             roi = Roi(min_bb, max_bb - min_bb)
 
             for point in self.points:
-                self.provides(point, GraphSpec(roi=roi))
+                self.provides(point, GraphSpec(roi=roi, directed=self.directed))
+
+        for i, wcc in enumerate(nx.weakly_connected_components(self._graph)):
+            for node in wcc:
+                self._graph.nodes[node]["component"] = i
 
     def provide(self, request: BatchRequest) -> Batch:
 
@@ -142,10 +150,12 @@ class SwcFileSource(BatchProvider):
                 for node, attrs in points_subgraph.nodes.items()
             ]
             edges = [Edge(u, v) for u, v in points_subgraph.edges]
-            return_graph = Graph(nodes, edges, GraphSpec(roi=request[points_key].roi))
-
-            # Handle boundary cases
-            return_graph = return_graph.trim(request[points_key].roi)
+            return_graph = Graph(
+                nodes,
+                edges,
+                GraphSpec(roi=request[points_key].roi, directed=self.directed),
+            )
+            return_graph = return_graph.crop(request[points_key].roi)
 
             batch = Batch()
             batch.graphs[points_key] = return_graph
@@ -193,7 +203,7 @@ class SwcFileSource(BatchProvider):
         logger.debug("placing {} nodes in the kdtree".format(len(data)))
         # place nodes in the kdtree
         self.data = cKDTree(np.array(list(data)))
-        logger.debug("kdtree initialized".format(len(data)))
+        logger.debug("kdtree initialized")
 
     def _query_kdtree(
         self, node: cKDTreeNode, bb: Tuple[np.ndarray, np.ndarray]
@@ -220,28 +230,12 @@ class SwcFileSource(BatchProvider):
             ):
                 return self._query_kdtree(node.greater, bb)
             else:
-                greater_roi = (
-                    substitute_dim(bb[0], node.split_dim, np.floor(node.split)),
-                    bb[1],
+                return self._query_kdtree(node.greater, bb) + self._query_kdtree(
+                    node.lesser, bb
                 )
-                lesser_roi = (
-                    bb[0],
-                    substitute_dim(bb[1], node.split_dim, np.ceil(node.split)),
-                )
-                return self._query_kdtree(
-                    node.greater, greater_roi
-                ) + self._query_kdtree(node.lesser, lesser_roi)
         else:
             # handle leaf node
-            bbox = Roi(
-                Coordinate(bb[0]),
-                Coordinate(
-                    tuple(
-                        y - x if x is not None and y is not None else y
-                        for x, y in zip(*bb)
-                    )
-                ),
-            )
+            bbox = Roi(Coordinate(bb[0]), Coordinate(bb[1]))
             points = [
                 tuple(point) + (self.ind_to_id_map[ind],)
                 for ind, point in zip(node.indices, node.data_points)
@@ -300,7 +294,7 @@ class SwcFileSource(BatchProvider):
             temp, first_label=len(self._graph.nodes)
         )
 
-        self._graph = nx.union(self._graph, temp)
+        self._graph = nx.disjoint_union(self._graph, temp)
         logger.debug("graph has {} nodes".format(len(self._graph.nodes)))
 
     def _subgraph_points(self, nodes: List[int], with_neighbors=False) -> nx.Graph:

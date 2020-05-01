@@ -59,5 +59,6 @@
     "DATA": "train",
     "GUARANTEE_NONEMPTY": true,
     "SAMPLES_PATH": "/nrs/funke/mouselight",
-    "USE_GUROBI": false
+    "USE_GUROBI": false,
+    "BLEND_MODE": "labels_mask"
 }

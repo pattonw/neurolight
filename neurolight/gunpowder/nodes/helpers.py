@@ -178,8 +178,8 @@ class RejectIfEmpty(gp.BatchFilter):
                 )
             batch = self.get_upstream_provider().request_batch(upstream_request)
 
-        if isinstance(self.ensure_nonempty, gp.PointsKey):
-            logger.warning(
+        if isinstance(self.ensure_nonempty, gp.GraphKey):
+            logger.debug(
                 f"{self.ensure_nonempty} has {len(list(batch[self.ensure_nonempty].connected_components))} connected_components"
             )
         return batch
@@ -220,7 +220,7 @@ class ThresholdMask(gp.BatchFilter):
 
     def setup(self):
         mask_spec = copy.deepcopy(self.spec[self.array])
-        mask_spec.dtype = np.uint32
+        mask_spec.dtype = np.float32
         self.provides(self.mask, mask_spec)
         self.enable_autoskip()
 
@@ -230,9 +230,9 @@ class ThresholdMask(gp.BatchFilter):
         return deps
 
     def process(self, batch, request):
-        mask = (batch[self.array].data > self.threshold).astype(np.uint32)
-        mask_spec = copy.deepcopy(batch[self.array].spec)
-        mask_spec.dtype = np.uint32
+        mask = (batch[self.array].data > self.threshold).astype(np.float32)
+        mask_spec = self.spec[self.mask].copy()
+        mask_spec.roi = batch[self.array].spec.roi
         batch[self.mask] = gp.Array(mask, mask_spec)
 
         return batch
@@ -263,9 +263,10 @@ class Mask(gp.BatchFilter):
 
 
 class FilterComponents(gp.BatchFilter):
-    def __init__(self, points, node_offset: int):
+    def __init__(self, points, node_offset: int, centroid_size: gp.Coordinate):
         self.points = points
         self.node_offset = node_offset
+        self.centroid_size = centroid_size
 
     def setup(self):
         points_spec = self.spec[self.points].copy()
@@ -278,9 +279,25 @@ class FilterComponents(gp.BatchFilter):
         return deps
 
     def process(self, batch, request):
+        outputs = gp.Batch()
         graph = batch[self.points]
+
+        full_roi = graph.spec.roi
+        size = full_roi.get_shape()
+        small_roi = full_roi.copy()
+        if self.centroid_size is not None:
+            diff = self.centroid_size - size
+            diff = diff / gp.Coordinate([2] * len(diff))
+            small_roi = small_roi.grow(diff, diff)
+
+        centered_graph = graph.crop(small_roi, copy=True)
+
         wccs = list(graph.connected_components)
         for wcc in wccs:
-            if not all([x < self.node_offset for x in wcc]):
+            fallbacks = [x < self.node_offset for x in wcc]
+            contained = [centered_graph.contains(x) for x in wcc]
+            if not all([a or not b for a, b in zip(fallbacks, contained)]):
                 for node in wcc:
                     graph.remove_node(gp.Node(id=node, location=None))
+
+        outputs[self.points] = graph

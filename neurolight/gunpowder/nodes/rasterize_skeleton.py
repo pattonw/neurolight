@@ -33,11 +33,7 @@ class RasterizeSkeleton(BatchFilter):
         """
 
     def __init__(
-        self,
-        points,
-        array,
-        array_spec,
-        connected_component_labeling: bool = True,
+        self, points, array, array_spec, connected_component_labeling: bool = True
     ):
 
         self.points = points
@@ -87,17 +83,17 @@ class RasterizeSkeleton(BatchFilter):
         graph = points
 
         if self.connected_component_labeling:
-            graph.relabel_connected_components()
-            wccs = list(enumerate(graph.connected_components))
-            binarized = [
-                np.zeros_like(array_data, dtype=bool) for i in range(len(wccs))
-            ]
+            # graph.relabel_connected_components()
+            binarized = {}
             for e in graph.edges:
                 cc = graph.node(e.u).attrs["component"]
+                bin_component = binarized.setdefault(
+                    cc, np.zeros_like(array_data, dtype=bool)
+                )
                 p1 = (graph.node(e.u).location / voxel_size - offset).astype(int)
                 p2 = (graph.node(e.v).location / voxel_size - offset).astype(int)
-                self._rasterize_line_segment(p1, p2, binarized[cc])
-            for i, bined in enumerate(binarized):
+                self._rasterize_line_segment(p1, p2, bin_component)
+            for i, bined in binarized.items():
                 overlap = np.logical_and(
                     np.logical_and(array_data > 0, array_data != i + 1), bined
                 )
@@ -158,8 +154,12 @@ class RasterizeSkeleton(BatchFilter):
         return np.array(np.rint(bline), dtype=start_voxel.dtype)
 
     def _rasterize_line_segment(self, point, parent, skeletonized):
-        point = np.clip(np.floor(point), np.zeros_like(point), np.array(skeletonized.shape)-1)
-        parent = np.clip(np.floor(parent), np.zeros_like(parent), np.array(skeletonized.shape)-1)
+        point = np.clip(
+            np.floor(point), np.zeros_like(point), np.array(skeletonized.shape) - 1
+        )
+        parent = np.clip(
+            np.floor(parent), np.zeros_like(parent), np.array(skeletonized.shape) - 1
+        )
 
         # use Bresenham's line algorithm based on:
         # http://code.activestate.com/recipes/578112-bresenhams-line-algorithm-in-n-dimensions/

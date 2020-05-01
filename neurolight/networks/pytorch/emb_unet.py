@@ -97,4 +97,4 @@ class EmbeddingLoss(torch.nn.Module):
             quadrupel_loss=self.quadrupel_loss,
             constrained_emst=self.constrained_emst,
         )
-        return loss
+        return loss, emst, edges_u, edges_v, dist, ratio_pos, ratio_neg
