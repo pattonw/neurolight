@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 
 from neurolight.networks.pytorch import NMS
 from gunpowder import BatchFilter, ArrayKey, BatchRequest, Array, Coordinate
@@ -27,7 +28,7 @@ class NonMaxSuppression(BatchFilter):
         """
 
     def __init__(
-        self, array: ArrayKey, nms: ArrayKey, window_size: Coordinate, threshold: float
+        self, array: ArrayKey, nms: ArrayKey, window_size: Coordinate, threshold: float = None
     ):
 
         self.array = array
@@ -53,7 +54,14 @@ class NonMaxSuppression(BatchFilter):
         voxel_size = batch[self.array].spec.voxel_size
         window_size = self.window_size / voxel_size
 
-        nms_op = NMS(window_size, self.threshold)
+        if self.threshold is None:
+            data_min = np.min(data)
+            data_med = np.median(data)
+            threshold = (data_min + data_med) / 2
+        else:
+            threshold = self.threshold
+
+        nms_op = NMS(window_size, threshold)
         nms_input = torch.from_numpy(data)
         maxima = nms_op(nms_input)
 

@@ -39,7 +39,7 @@ class SimpleLocalMax(BatchFilter):
         array: ArrayKey,
         maxima: ArrayKey,
         window_size: Coordinate,
-        threshold: float,
+        threshold: float = None,
     ):
 
         self.array = array
@@ -62,12 +62,20 @@ class SimpleLocalMax(BatchFilter):
 
     def process(self, batch, request: BatchRequest):
         data = batch[self.array].data
+
+        if self.threshold is None:
+            data_min = np.min(data)
+            data_med = np.median(data)
+            threshold = (data_min + data_med) / 2
+        else:
+            threshold = self.threshold
+
         voxel_size = batch[self.array].spec.voxel_size
         window_size = self.window_size / voxel_size
 
         window_size = (1,) * (len(data.shape) - len(window_size)) + window_size
         max_filter = maximum_filter(data, window_size)
-        local_maxima = np.logical_and(max_filter == data, data > self.threshold)
+        local_maxima = np.logical_and(max_filter == data, data > threshold)
 
         spec = batch[self.array].spec.copy()
         spec.dtype = bool
@@ -105,7 +113,7 @@ class Skeletonize(BatchFilter):
         array: ArrayKey,
         maxima: ArrayKey,
         sample_distance: float,
-        threshold: float,
+        threshold: float = None,
     ):
 
         self.array = array
@@ -129,7 +137,14 @@ class Skeletonize(BatchFilter):
     def process(self, batch, request: BatchRequest):
         data = batch[self.array].data
 
-        thresholded = data > self.threshold
+        if self.threshold is None:
+            data_min = np.min(data)
+            data_med = np.median(data)
+            threshold = (data_min + data_med) / 2
+        else:
+            threshold = self.threshold
+
+        thresholded = data > threshold
         skeleton = np.squeeze(thresholded)
         skeleton = skeletonize(skeleton)
         skeleton = skeleton > 0
@@ -160,7 +175,11 @@ class Skeletonize(BatchFilter):
             if len(cc) < 2:
                 continue
             cc_graph = chain_g.subgraph(cc)
-            head, tail = [n for n in cc_graph.nodes if cc_graph.degree(n) == 1]
+            try:
+                head, tail = [n for n in cc_graph.nodes if cc_graph.degree(n) == 1]
+            except:
+                head = list(cc_graph.nodes)[0]
+                tail = head
             cable_len = 0
             previous_location = None
             for node in nx.algorithms.dfs_preorder_nodes(cc_graph, source=head):
@@ -171,6 +190,8 @@ class Skeletonize(BatchFilter):
                     cable_len += dist
 
                 previous_location = current_loc
+                if node == tail:
+                    break
 
             num_cuts = cable_len // self.sample_distance
             if num_cuts > 0:
@@ -188,6 +209,9 @@ class Skeletonize(BatchFilter):
                 if seen_cable > every:
                     sampled_nodes.append(node)
                     seen_cable -= every
+
+                if node == tail:
+                    break
         downsampled = g.subgraph(sampled_nodes)
         return Graph.from_nx_graph(downsampled, graph.spec)
 
