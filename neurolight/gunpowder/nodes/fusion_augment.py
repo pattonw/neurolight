@@ -117,7 +117,7 @@ class FusionAugment(BatchFilter):
         self.masked_add = masked_add
         self.mask_maxed = mask_maxed
 
-        assert self.blend_mode in ["intensity", "labels_mask"], (
+        assert self.blend_mode in ["intensity", "labels_mask", "add"], (
             "Unknown blend mode %s." % self.blend_mode
         )
 
@@ -197,7 +197,10 @@ class FusionAugment(BatchFilter):
             raw_fused_array = add_mask * raw_add_array + (1 - add_mask) * raw_base_array
 
         elif self.blend_mode == "add":
-            raw_fused_array = raw_add_array + raw_base_array
+            raw_fused_array = 0.5*raw_add_array / np.max(
+                raw_add_array
+            ) + 0.5*raw_base_array / np.max(raw_base_array)
+            raw_fused_array = np.clip(raw_fused_array, 0, 1)
 
         elif self.blend_mode == "labels_mask":
 
