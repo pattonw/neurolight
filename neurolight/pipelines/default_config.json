@@ -60,5 +60,11 @@
     "GUARANTEE_NONEMPTY": true,
     "SAMPLES_PATH": "/nrs/funke/mouselight",
     "USE_GUROBI": false,
-    "BLEND_MODE": "labels_mask"
+    "BLEND_MODE": "labels_mask",
+    "DISTANCE_ATTRIBUTE": "distance_to_fallback",
+    "MIN_DIST_TO_FALLBACK": 30000,
+    "MAX_RANDOM_LOCATION_POINTS": 1000000,
+    "MONGO_DB_TEMPLATE": "mouselight-{sample}-{source}",
+    "BENCHMARK_DATA_PATH": false,
+    "CLAHE": false
 }
