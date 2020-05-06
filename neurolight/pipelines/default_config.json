@@ -65,6 +65,6 @@
     "MIN_DIST_TO_FALLBACK": 30000,
     "MAX_RANDOM_LOCATION_POINTS": 1000000,
     "MONGO_DB_TEMPLATE": "mouselight-{sample}-{source}",
-    "BENCHMARK_DATA_PATH": false,
+    "BENCHMARK_DATA_PATH": "/groups/mousebrainmicro/mousebrainmicro/benchmarking_datasets/Manual-GT",
     "CLAHE": false
 }
