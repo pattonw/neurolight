@@ -96,7 +96,7 @@ class MiniMax(BatchFilter):
         maxima = batch[self.mask].data
         maxima = maxima.reshape((-1,) + maxima.shape[-spatial_dims:])[0]
 
-        minimax_edges = maximin.maximin_tree_query(intensities, maxima.astype(np.uint8))
+        minimax_edges = maximin.maximin_tree_query(intensities.astype(np.float64), maxima.astype(np.uint8))
         maximin_id = itertools.count(start=0)
 
         nodes = set()
