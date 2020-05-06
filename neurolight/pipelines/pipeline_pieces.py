@@ -442,7 +442,7 @@ def add_data_augmentation(pipeline, raw):
             recompute_missing_points=False,
         )
         # + gp.SimpleAugment(mirror_only=[1, 2], transpose_only=[1, 2])
-        + gp.IntensityAugment(raw, 0.9, 1.1, -0.001, 0.001)
+        + gp.IntensityAugment(raw, 0.8, 1.2, -0.001, 0.001)
     )
     return pipeline
 
