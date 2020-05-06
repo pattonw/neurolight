@@ -112,7 +112,7 @@ class MiniMax(BatchFilter):
 
             nodes.add(Node(a_id, location=a_loc))
             nodes.add(Node(b_id, location=b_loc))
-            edges.append(Edge(a_id, b_id, attrs={self.distance_attr: cost}))
+            edges.append(Edge(a_id, b_id, attrs={self.distance_attr: 1-cost}))
 
         graph_spec = request[self.mst]
         graph_spec.directed = False
