@@ -18,6 +18,8 @@ from .pipeline_pieces import (
     grow_labels,
 )
 
+from neurolight.gunpowder.nodes.clahe import scipyCLAHE
+
 import logging
 
 
@@ -70,6 +72,8 @@ def foreground_pipeline(setup_config, get_data_sources=None):
     ]
 
     pipeline = add_data_augmentation(pipeline, raw)
+    if setup_config["CLAHE"]:
+        pipeline = pipeline + scipyCLAHE([raw], kernel_size=[20, 64, 64])
 
     if setup_config["NUM_WORKERS"] > 1:
         pipeline = add_caching(pipeline, setup_config)
@@ -82,15 +86,15 @@ def foreground_pipeline(setup_config, get_data_sources=None):
 
         snapshot_datasets += [
             # output data
-            (fg_pred, output_size, "volumes/fg_pred"),
+            (fg_pred, output_size, "volumes/fg_pred")
         ]
 
         snapshot_datasets += [
             # gradient debugging
-            (fg_pred_gradient, output_size, "volumes/fg_pred_gradient"),
+            (fg_pred_gradient, output_size, "volumes/fg_pred_gradient")
         ]
 
-        inputs = [gt_fg, loss_weights]
+        inputs = [gt_fg, loss_weights, fg_pred_gradient]
 
         outputs = (raw, fg_pred)
 
@@ -112,7 +116,7 @@ def foreground_pipeline(setup_config, get_data_sources=None):
 
         pipeline = add_snapshot(pipeline, setup_config, snapshot_datasets)
 
-    return (pipeline,) + outputs + (inputs, )
+    return (pipeline,) + outputs + (inputs,)
 
 
 def embedding_pipeline(setup_config, get_data_sources=None):
