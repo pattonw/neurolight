@@ -14,6 +14,7 @@ from neurolight.gunpowder.nodes.daisy_graph_provider import DaisyGraphProvider
 from neurolight.gunpowder.nodes.filtered_daisy_graph_provider import (
     FilteredDaisyGraphProvider,
 )
+from neurolight.gunpowder.nodes.maxima import Skeletonize
 
 from neurolight.gunpowder.pytorch.nodes.train_embedding import TrainEmbedding
 
@@ -29,6 +30,7 @@ from neurolight.gunpowder.nodes import (
     NonMaxSuppression,
     FilterComponents,
 )
+
 # from neurolight.gunpowder.nodes.helpers import UnSqueeze, Squeeze
 from neurolight.gunpowder.nodes.helpers import ToInt64
 from neurolight.gunpowder.pytorch.nodes.helpers import UnSqueeze, Squeeze
@@ -272,7 +274,9 @@ def get_mouselight_data_sources(
             + gp.MergeProvider()
             + random(**kwargs)
             + gp.Normalize(raw)
-            + FilterComponents(matched, node_offset[sample.name], centroid_size=output_size)
+            + FilterComponents(
+                matched, node_offset[sample.name], centroid_size=output_size
+            )
             + RasterizeSkeleton(
                 points=matched,
                 array=labels,
@@ -581,7 +585,7 @@ def add_embedding_prediction(pipeline, setup_config, raw):
     return pipeline, embedding
 
 
-def add_non_max_suppression(pipeline, setup_config, foreground):
+def get_candidates(pipeline, setup_config, foreground):
 
     # Data properties
     voxel_size = gp.Coordinate(setup_config["VOXEL_SIZE"])
@@ -591,15 +595,23 @@ def add_non_max_suppression(pipeline, setup_config, foreground):
     window_size = gp.Coordinate(setup_config["NMS_WINDOW_SIZE"]) * micron_scale
     threshold = setup_config["NMS_THRESHOLD"]
 
+    # Candidate mode
+    mode = setup_config["CANDIDATE_MODE"]
+
     # New array Key
     maxima = ArrayKey("MAXIMA")
 
-    pipeline = (
-        pipeline
-        + UnSqueeze([foreground])
-        + NonMaxSuppression(foreground, maxima, window_size, threshold)
-        + Squeeze([foreground, maxima])
-    )
+    if mode == "skel":
+        pipeline = pipeline + Skeletonize(
+            foreground, maxima, min(window_size), threshold=threshold
+        )
+    else:
+        pipeline = (
+            pipeline
+            + UnSqueeze([foreground])
+            + NonMaxSuppression(foreground, maxima, window_size, threshold)
+            + Squeeze([foreground, maxima])
+        )
 
     return pipeline, maxima
 
