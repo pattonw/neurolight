@@ -10,7 +10,12 @@ from pathlib import Path
 import copy
 import random
 
+from comatch import match_components
+from neurolight_evaluation.graph_matching.comatch.edges_xy import get_edges_xy
+from neurolight_evaluation.graph_metrics import psudo_graph_edit_distance
+
 from scipy.ndimage.filters import maximum_filter
+from sklearn.decomposition import PCA
 
 from neurolight.pipelines import DEFAULT_CONFIG
 
@@ -158,17 +163,21 @@ class MatchSource(neuroglancer.skeleton.SkeletonSource):
         self.init_colors()
 
     def check_ids(self):
-        no_label = max(max(self.labels_y.values()), max(self.labels_x.values())) + 1
-        no_node = max(max(self.nodes_x), max(self.nodes_y)) + 1
+        print("checking ids")
+        no_label = max(list(self.labels_y.values()) + list(self.labels_x.values())) + 1
+        no_node = max(list(self.nodes_x) + list(self.nodes_y)) + 1
 
-        for labels_u, labels_v in self.label_matchings:
-            assert labels_u == no_label or labels_u in self.labels_x.values()
-        for labels_u, labels_v in self.label_matchings:
-            assert labels_v == no_label or labels_v in self.labels_y.values()
-        for node_u, node_v in self.node_matchings:
-            assert node_u in self.nodes_x
-        for node_u, node_v in self.node_matchings:
-            assert node_v in self.nodes_y
+        print(f"number of label matchings: {len(list(self.label_matchings))}")
+        # for labels_u, labels_v in self.label_matchings:
+        #     assert labels_u == no_label or labels_u in self.labels_x.values()
+        # for labels_u, labels_v in self.label_matchings:
+        #     assert labels_v == no_label or labels_v in self.labels_y.values()
+        print(f"number of node matchings: {len(list(self.node_matchings))}")
+        # for node_u, node_v in self.node_matchings:
+        #     assert node_u in self.nodes_x, f"node_u: {node_u}, nodes_x: {self.nodes_x}"
+        # for node_u, node_v in self.node_matchings:
+        #     assert node_v in self.nodes_y
+        print("checking ids done!")
 
     def init_colors(self):
         red = np.array((255, 128, 128)) / 256
@@ -489,9 +498,11 @@ class MatchSource(neuroglancer.skeleton.SkeletonSource):
             # error vis:
             # an gt edge is part of the error vis if its nodes get
             # seperate ids or both nodes are unmatched.
-            err_vis_split_edge = (mst_u_label is not None and mst_v_label is not None) and (
-                mst_u_label != mst_v_label
-            ) or ((mst_u_label is None) != (mst_v_label is None))
+            err_vis_split_edge = (
+                (mst_u_label is not None and mst_v_label is not None)
+                and (mst_u_label != mst_v_label)
+                or ((mst_u_label is None) != (mst_v_label is None))
+            )
             false_neg_edge = mst_u_label is None and mst_v_label is None
             assert err_vis_split_edge + false_neg_edge <= 1
             if false_neg_edge:
@@ -747,10 +758,10 @@ def build_trees(node_ids, locations, edges, node_attrs=None, edge_attrs=None):
         pos_v = daisy.Coordinate(tuple(pbs[v]))
 
         if u not in trees.nodes:
-            u_attrs = {attr: values[u] for attr, values in node_attrs}
+            u_attrs = {attr: values[u] for attr, values in node_attrs.items()}
             trees.add_node(u, location=pos_u, **u_attrs)
         if v not in trees.nodes:
-            v_attrs = {attr: values[v] for attr, values in node_attrs}
+            v_attrs = {attr: values[v] for attr, values in node_attrs.items()}
             trees.add_node(v, location=pos_v, **v_attrs)
 
         trees.add_edge(u, v, **e_attrs)
@@ -841,85 +852,6 @@ def add_trees_no_skeletonization(
     )
 
 
-def add_tree(
-    s, tree, name, visible=False, color=None, node_attrs=None, edge_attrs=None
-):
-
-    dimensions, voxel_offset, voxel_shape = dims_from_guess(tree)
-
-    s.layers.append(
-        name="{}".format(name),
-        layer=neuroglancer.SegmentationLayer(
-            source=[
-                neuroglancer.LocalVolume(
-                    data=np.ones(voxel_shape, dtype=np.uint32),
-                    dimensions=dimensions,
-                    voxel_offset=voxel_offset,
-                ),
-                SkeletonSource(
-                    tree,
-                    dimensions,
-                    voxel_size=[1000, 300, 300],
-                    node_attrs=node_attrs,
-                    edge_attrs=edge_attrs,
-                ),
-            ],
-            skeleton_shader="""
-void main() {
-  emitRGB(colormapJet(0.5));
-}
-""",
-            selected_alpha=0,
-            not_selected_alpha=0,
-        ),
-    )
-
-
-def add_trees(
-    s,
-    trees,
-    node_id,
-    name,
-    dimensions,
-    voxel_offset,
-    voxel_shape,
-    visible=False,
-    color=None,
-    node_attrs=None,
-    edge_attrs=None,
-):
-
-    if trees is None:
-        return None
-
-    s.layers.append(
-        name="{}".format(name),
-        layer=neuroglancer.SegmentationLayer(
-            source=[
-                neuroglancer.LocalVolume(
-                    data=np.ones(voxel_shape, dtype=np.uint32),
-                    dimensions=dimensions,
-                    voxel_offset=voxel_offset,
-                ),
-                SkeletonSource(
-                    trees,
-                    dimensions,
-                    voxel_size=[1000, 300, 300],
-                    node_attrs=node_attrs,
-                    edge_attrs=edge_attrs,
-                ),
-            ],
-            skeleton_shader="""
-void main() {
-  emitRGB(colormapJet(0.5));
-}
-""",
-            selected_alpha=0,
-            not_selected_alpha=0,
-        ),
-    )
-
-
 def add_layer(context, array, name, visible=True, **kwargs):
     array_dims = len(array.shape)
     voxel_size = array.voxel_size
@@ -935,9 +867,15 @@ def add_layer(context, array, name, visible=True, **kwargs):
     offset = np.array((0,) * (array_dims - 3) + array.roi.get_offset())
     offset = offset // attrs[array_dims]["scales"]
 
-    d = np.asarray(array.data)
-    if array.data.dtype == np.dtype(bool):
-        array.data = np.array(d, dtype=np.float32)
+    if len(array.shape) > 3 and array.shape[0] > 3:
+        pca = PCA(n_components=3)
+        flattened = array.data.reshape(array.shape[0], -1).T
+        fitted = pca.fit_transform(flattened).T
+        array.data = fitted.reshape((3,) + array.shape[1:])
+
+    # d = np.asarray(array.data)
+    # if array.data.dtype == np.dtype(bool):
+    #     array.data = np.array(d, dtype=np.float32)
 
     channels = ",".join(
         [
@@ -956,7 +894,7 @@ void main() {
     shader_3d = None
 
     layer = neuroglancer.LocalVolume(
-        data=array.data, dimensions=dimensions, voxel_offset=offset
+        data=array.data, dimensions=dimensions, voxel_offset=tuple(offset)
     )
 
     if array.data.dtype == np.dtype(np.uint64):
@@ -969,6 +907,37 @@ void main() {
             shader=shader_4d if array_dims == 4 else shader_3d,
             **kwargs,
         )
+
+
+def add_trees(s, trees, node_id, name, dimensions, offset, shape, visible=False):
+    if trees is None:
+        return None
+
+    print(f"Adding {name} with {len(trees.nodes)} nodes and {len(trees.edges)} edges")
+
+    s.layers.append(
+        name="{}".format(name),
+        layer=neuroglancer.SegmentationLayer(
+            source=[
+                neuroglancer.LocalVolume(
+                    data=np.ones(shape, dtype=np.uint32),
+                    dimensions=dimensions,
+                    voxel_offset=offset,
+                ),
+                SkeletonSource(trees, dimensions, voxel_size=[1000, 300, 300]),
+            ],
+            skeleton_shader="""
+#uicontrol float showautapse slider(min=0, max=2)
+
+void main() {
+  if (distance > showautapse) discard;
+  emitRGB(colormapJet(distance));
+}
+""",
+            selected_alpha=0,
+            not_selected_alpha=0,
+        ),
+    )
 
 
 def dimensions_from_volume(array):
@@ -1000,8 +969,12 @@ def dimensions_from_guess(dataset, graph):
 
 def dims_from_guess(graph):
     locations = np.array([attrs["location"] for attrs in graph.nodes.values()])
-    lower = locations.min(axis=0)
-    upper = locations.max(axis=0)
+    try:
+        lower = locations.min(axis=0)
+        upper = locations.max(axis=0)
+    except:
+        lower = np.array([0, 0, 0])
+        upper = np.array([0, 0, 0])
     voxel_size = [1000, 300, 300]
     lower -= lower % voxel_size
     upper += voxel_size - upper % voxel_size
@@ -1089,8 +1062,8 @@ def add_snapshot(
                 components,
                 node_id,
                 dimensions=dimensions,
-                voxel_offset=voxel_offset,
-                voxel_shape=voxel_shape,
+                offset=voxel_offset,
+                shape=voxel_shape,
                 name=f"{name_prefix}_{graph}",
                 visible=True,
             )
@@ -1158,11 +1131,13 @@ def add_mst_snapshot_with_stats(
     matching_data,
     mst_snapshot,
     gt,
-    threshold_above=True,
     threshold_inds=None,
     graph_node_attrs=None,
     graph_edge_attrs=None,
+    false_pos_threshold=None,
 ):
+    if false_pos_threshold is None:
+        false_pos_threshold = 0
     mst = tree_from_snapshot(
         mst_snapshot,
         "mst",
@@ -1173,22 +1148,79 @@ def add_mst_snapshot_with_stats(
     label_matchings, node_matchings, node_labels_mst, node_labels_gt, thresholds = (
         matching_data
     )
+    edges_to_add = list(mst.edges.items())
+
+    thresholded_graph = nx.Graph()
     for i, threshold in enumerate(thresholds):
-        for (u, v), attrs in list(mst.edges.items()):
-            if threshold_above:
-                if attrs["distance"] > threshold:
-                    mst.remove_edge(u, v)
-            else:
-                if attrs["distance"] < threshold:
-                    mst.remove_edge(u, v)
-        for node in list(mst.nodes):
-            if mst.degree(node) == 0:
-                mst.remove_node(node)
+        for j, ((u, v), attrs) in reversed(list(enumerate(edges_to_add))):
+            if attrs["distance"] < threshold:
+                thresholded_graph.add_node(u, **mst.nodes[u])
+                thresholded_graph.add_node(v, **mst.nodes[v])
+                thresholded_graph.add_edge(u, v, **attrs)
+                del edges_to_add[j]
 
         if i in threshold_inds:
+
+            temp = copy.deepcopy(thresholded_graph)
+
+            false_pos_nodes = []
+            for cc in nx.connected_components(temp):
+                cc_graph = temp.subgraph(cc)
+                min_loc = None
+                max_loc = None
+                for node, attrs in cc_graph.nodes.items():
+                    node_loc = attrs["location"]
+                    if min_loc is None:
+                        min_loc = node_loc
+                    else:
+                        min_loc = np.min(np.array([node_loc, min_loc]), axis=0)
+                    if max_loc is None:
+                        max_loc = node_loc
+                    else:
+                        max_loc = np.max(np.array([node_loc, max_loc]), axis=0)
+                if np.linalg.norm(min_loc - max_loc) < false_pos_threshold:
+                    false_pos_nodes += list(cc)
+            for node in false_pos_nodes:
+                temp.remove_node(node)
+
+            nodes_x = list(temp.nodes)
+            nodes_y = list(gt.nodes)
+
+            node_labels_x = {
+                node: component
+                for component, nodes in enumerate(nx.connected_components(temp))
+                for node in nodes
+            }
+
+            node_labels_y = {
+                node: component
+                for component, nodes in enumerate(nx.weakly_connected_components(gt))
+                for node in nodes
+            }
+
+            edges_yx = get_edges_xy(
+                gt, temp, location_attr="location", node_match_threshold=4000
+            )
+            edges_xy = [(v, u) for u, v in edges_yx]
+
+            (label_matches, node_matches, splits, merges, fps, fns) = match_components(
+                nodes_x, nodes_y, edges_xy, node_labels_x, node_labels_y
+            )
+
+            erl, details = psudo_graph_edit_distance(
+                node_matches,
+                node_labels_x,
+                node_labels_y,
+                temp,
+                gt,
+                "location",
+                node_spacing=5000,
+                details=True,
+            )
+
             add_match_layers(
                 context,
-                copy.deepcopy(mst),
+                temp,
                 gt,
                 label_matchings[i],
                 node_matchings[i],
@@ -1217,3 +1249,92 @@ def tree_from_snapshot(
             edge_attrs[attr] = dataset["points"][f"{graph}/edge_attrs/{attr}"]
         components = build_trees(node_ids, locations, edges, node_attrs, edge_attrs)
     return components
+
+
+def visualize_hdf5(hdf5_file: Path, dimensions, mst=None, maxima_for=None, skip=None):
+    path_list = str(hdf5_file.absolute()).split("/")
+    setups_dir = Path("/", *path_list[:-3])
+    setup_config = DEFAULT_CONFIG
+    try:
+        setup_config.update(
+            json.load((setups_dir / path_list[-3] / "config.json").open())
+        )
+    except:
+        pass
+    voxel_size = daisy.Coordinate(setup_config["VOXEL_SIZE"])
+    coordinate_scale = (
+        setup_config["COORDINATE_SCALE"] * np.array(voxel_size) / max(voxel_size)
+    )
+    dataset = h5py.File(hdf5_file)
+    volumes = list(dataset.get("volumes", {}).keys())
+    points = list(dataset.get("points", {}).keys())
+    points = set([p.split("-")[0] for p in points])
+
+    node_id = itertools.count(start=1)
+
+    viewer = neuroglancer.Viewer()
+    viewer.dimensions = dimensions
+    with viewer.txn() as s:
+        for volume in volumes:
+            if skip == volume:
+                continue
+            v = daisy.open_ds(str(hdf5_file.absolute()), f"volumes/{volume}")
+            if volume == "embedding":
+                v.materialize()
+                v.data = (v.data + 1) / 2
+            if len(v.data.shape) == 5:
+                v.materialize()
+                v.data = v.data[0]
+                v.n_channel_dims -= 1
+            if v.dtype == np.int64:
+                v.materialize()
+                v.data = v.data.astype(np.uint64)
+            if volume == maxima_for:
+                v.materialize()
+                max_filtered = maximum_filter(v.data, (3, 10, 10))
+                maxima = np.logical_and(max_filtered == v.data, v.data > 0.01).astype(
+                    np.float32
+                )
+                print(maxima.dtype)
+                m = daisy.Array(maxima, v.roi, v.voxel_size)
+                add_layer(s, m, f"{volume}-maxima")
+            if mst is not None and volume == mst[0]:
+                offset = v.roi.get_offset() / voxel_size
+                mst = get_embedding_mst(
+                    v.data,
+                    1,
+                    coordinate_scale,
+                    offset,
+                    daisy.open_ds(
+                        str(hdf5_file.absolute()), f"volumes/{mst[1]}"
+                    ).to_ndarray(),
+                )
+                add_trees(
+                    s,
+                    mst,
+                    node_id,
+                    name="MST",
+                    visible=True,
+                    dimensions=dimensions,
+                    offset=offset,
+                    shape=v.data.shape[-len(offset) :],
+                )
+                v.materialize()
+                v.data = (v.data + 1) / 2
+            add_layer(s, v, volume, visible=False)
+
+        for point_set in points:
+            node_ids = dataset["points"][f"{point_set}-ids"]
+            locations = dataset["points"][f"{point_set}-locations"]
+            edges = dataset["points"][f"{point_set}-edges"]
+            components = build_trees(node_ids, locations, edges)
+            add_trees(
+                s,
+                components,
+                node_id,
+                name=point_set,
+                visible=False,
+                dimensions=dimensions,
+            )
+    print(viewer)
+    input("Hit ENTER to quit!")
