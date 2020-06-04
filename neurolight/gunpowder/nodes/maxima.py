@@ -9,7 +9,14 @@ from skimage.morphology import skeletonize_3d as skeletonize
 import numpy as np
 import networkx as nx
 
+import time
+import random
+import math
+import logging
+
 from .nms import NonMaxSuppression  # noqa
+
+logger = logging.getLogger(__file__)
 
 
 class SimpleLocalMax(BatchFilter):
@@ -146,7 +153,10 @@ class Skeletonize(BatchFilter):
 
         thresholded = data > threshold
         skeleton = np.squeeze(thresholded)
+        t1 = time.time()
         skeleton = skeletonize(skeleton)
+        t2 = time.time()
+        logger.debug(f"SKELETONIZING TOOK {t2-t1} SECONDS!")
         skeleton = skeleton > 0
 
         spec = batch[self.array].spec.copy()
@@ -154,13 +164,25 @@ class Skeletonize(BatchFilter):
 
         skeleton_array = Array(skeleton, spec)
 
+        """
+        t1 = time.time()
         skeleton_graph = self.array_to_graph(skeleton_array)
+        t2 = time.time()
+        logger.debug(f"GRID TO GRAPH TOOK {t2-t1} SECONDS!")
 
-        print(len(list(skeleton_graph.nodes)))
+        t1 = time.time()
         skeleton_graph = self.downsample(skeleton_graph, self.sample_distance)
-        print(len(list(skeleton_graph.nodes)))
+        t2 = time.time()
+        logger.debug(f"DOWNSAMPLING TOOK {t2-t1} SECONDS!")
 
+        t1 = time.time()
         candidates = self.graph_to_array(skeleton_graph, spec)
+        t2 = time.time()
+        logger.debug(f"GRAPH TO GRID TOOK {t2-t1} SECONDS!")
+        """
+        
+        skeleton_array.data = self.candidates_via_sins(skeleton_array)
+        candidates = skeleton_array
         candidates.data = np.expand_dims(candidates.data, 0)
 
         batch.arrays[self.maxima] = candidates
@@ -221,14 +243,21 @@ class Skeletonize(BatchFilter):
 
         s = array.data.shape
         # Identify connectivity
+        t1 = time.time()
         adj_mat = grid_to_graph(n_x=s[0], n_y=s[1], n_z=s[2], mask=array.data)
+        t2 = time.time()
+        logger.debug(f"GRID TO GRAPH TOOK {t2-t1} SECONDS!")
         # Identify order of the voxels
+        t1 = time.time()
         voxel_locs = compute_voxel_locs(
             mask=array.data,
             offset=array.spec.roi.get_begin(),
             scale=array.spec.voxel_size,
         )
+        t2 = time.time()
+        logger.debug(f"COMPUTING VOXEL LOCS TOOK {t2-t1} SECONDS!")
 
+        t1 = time.time()
         nodes = [
             Node(node_id, voxel_loc) for node_id, voxel_loc in enumerate(voxel_locs)
         ]
@@ -240,6 +269,8 @@ class Skeletonize(BatchFilter):
 
         edges = [Edge(a, b) for a, b in zip(adj_mat.row, adj_mat.col) if a != b]
         graph = Graph(nodes, edges, GraphSpec(array.spec.roi, directed=False))
+        t2 = time.time()
+        logger.debug(f"BUILDING GRAPH TOOK {t2-t1} SECONDS!")
         return graph
 
     def graph_to_array(self, graph, array_spec):
@@ -252,6 +283,37 @@ class Skeletonize(BatchFilter):
             ) / array_spec.voxel_size
             data[tuple(int(x) for x in voxel_location)] = 1
         return Array(data, array_spec)
+
+    def candidates_via_sins(self, array):
+
+        voxel_shape = array.spec.roi.get_shape() / array.spec.voxel_size
+        voxel_size = array.spec.voxel_size
+        shifts = tuple(random.random() * 2 * math.pi for _ in range(len(voxel_shape)))
+        sphere_radius = self.sample_distance
+
+        ys = [
+            np.sin(
+                np.linspace(
+                    shifts[i],
+                    shifts[i]
+                    + voxel_shape[i] * (2 * math.pi) * voxel_size[i] / sphere_radius,
+                    voxel_shape[i],
+                )
+            ).reshape(
+                tuple(1 if j != i else voxel_shape[i] for j in range(len(voxel_shape)))
+            )
+            for i in range(len(voxel_shape))
+        ]
+
+        x = np.sum(ys)
+
+        weighted_skel = x * array.data
+
+        candidates = np.logical_and(np.equal(maximum_filter(
+            weighted_skel, size=(3 for _ in voxel_size), mode="nearest"
+        ), weighted_skel), array.data)
+
+        return candidates
 
 
 def compute_voxel_locs(
