@@ -390,7 +390,6 @@ class GetNeuronPair(BatchProvider):
                     roi=self._centered_output_roi(
                         base_batch[self.nonempty_placeholder].spec.roi
                     ),
-                    copy=True,
                 )
                 .trim(
                     roi=self._centered_output_roi(
