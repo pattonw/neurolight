@@ -240,7 +240,7 @@ def validation_data_sources_recomputed(config, blocks):
     raw_n5 = config["RAW_N5"]
     transform_template = "/nrs/mouselight/SAMPLES/{sample}/transform.txt"
 
-    neuron_width = int(config["NEURON_WIDTH"])
+    neuron_width = int(config["NEURON_RADIUS"])
     voxel_size = gp.Coordinate(config["VOXEL_SIZE"])
     input_shape = gp.Coordinate(config["INPUT_SHAPE"])
     output_shape = gp.Coordinate(config["OUTPUT_SHAPE"])
@@ -282,7 +282,7 @@ def validation_data_sources_recomputed(config, blocks):
             (
                 gp.ZarrSource(
                     filename=str(Path(sample_dir, sample, raw_n5).absolute()),
-                    datasets={raw: "volume"},
+                    datasets={raw: "volume-rechunked"},
                     array_specs={
                         raw: gp.ArraySpec(interpolatable=True, voxel_size=voxel_size)
                     },
@@ -462,3 +462,5 @@ def get_embedding_mst(embedding, coordinate_scale, voxel_size, offset, candidate
     for node, attrs in mst.nodes.items():
         assert "location" in attrs
     return mst
+
+
