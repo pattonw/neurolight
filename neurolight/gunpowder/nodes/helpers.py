@@ -203,7 +203,7 @@ class RejectIfEmpty(gp.BatchFilter):
             diff = diff / gp.Coordinate([2] * len(diff))
             small_roi = small_roi.grow(diff, diff)
 
-        dataset = dataset.crop(small_roi, copy=True)
+        dataset = dataset.crop(small_roi)
 
         if isinstance(dataset, gp.Array):
             values = np.unique(dataset.data)
@@ -290,7 +290,7 @@ class FilterComponents(gp.BatchFilter):
             diff = diff / gp.Coordinate([2] * len(diff))
             small_roi = small_roi.grow(diff, diff)
 
-        centered_graph = graph.crop(small_roi, copy=True)
+        centered_graph = graph.crop(small_roi)
 
         wccs = list(graph.connected_components)
         for wcc in wccs:
