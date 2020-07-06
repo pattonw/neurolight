@@ -32,28 +32,48 @@ class scipyCLAHE(BatchFilter):
             See scikit documentation
     """
 
-    def __init__(self, arrays, kernel_size, clip_limit=0.01, nbins=256):
+    def __init__(
+        self,
+        arrays,
+        kernel_size,
+        output_arrays=None,
+        clip_limit=0.01,
+        nbins=256,
+        context=None,
+    ):
         self.arrays = arrays
+        self.output_arrays = output_arrays
+        if self.output_arrays is not None:
+            assert len(output_arrays) == len(arrays)
+        else:
+            self.output_arrays = self.arrays
         self.kernel_size = np.array(kernel_size)
         self.clip_limit = clip_limit
         self.nbins = nbins
+        self.context = context
 
     def setup(self):
         self.enable_autoskip()
-        for key in self.arrays:
-            self.updates(key, self.spec[key])
+        for in_key, out_key in zip(self.arrays, self.output_arrays):
+            if out_key == in_key:
+                self.updates(out_key, self.spec[in_key])
+            else:
+                self.provides(out_key, self.spec[in_key])
 
     def prepare(self, request):
         deps = BatchRequest()
-        for key in self.arrays:
-            spec = request[key].copy()
-            deps[key] = spec
+        for in_key, out_key in zip(self.arrays, self.output_arrays):
+            spec = request[out_key].copy()
+            if self.context is not None:
+                spec.roi = spec.roi.grow(self.context, self.context)
+            deps[in_key] = spec
         return deps
 
     def process(self, batch, request):
         output = Batch()
 
-        for key, array in batch.items():
+        for in_key, out_key in zip(self.arrays, self.output_arrays):
+            array = batch[in_key]
             data = array.data
             d_min = data.min()
             d_max = data.max()
@@ -61,23 +81,25 @@ class scipyCLAHE(BatchFilter):
                 d_min >= 0 and d_max <= 1
             ), f"Clahe expects data in range (0,1), got ({d_min}, {d_max})"
             if np.isclose(d_max, d_min):
-                output[key] = Array(data, array.spec)
+                output[out_key] = Array(data, array.spec)
                 continue
             shape = data.shape
             data_dims = len(shape)
             kernel_dims = len(self.kernel_size)
             extra_dims = data_dims - kernel_dims
+            voxel_size = array.spec.voxel_size
+
             for index in itertools.product(*[range(s) for s in shape[:extra_dims]]):
                 data[index] = equalize_adapthist(
                     data[index],
-                    kernel_size=self.kernel_size,
+                    kernel_size=self.kernel_size / voxel_size,
                     clip_limit=self.clip_limit,
                     nbins=self.nbins,
                 )
             assert (
                 data.min() >= 0 and data.max() <= 1
             ), f"Clahe should output data in range (0,1), got ({data.min()}, {data.max()})"
-            output[key] = Array(data, array.spec)
+            output[out_key] = Array(data, array.spec).crop(request[out_key].roi)
         return output
 
 
@@ -104,6 +126,7 @@ from skimage.exposure import rescale_intensity
 
 
 NR_OF_GREY = 2 ** 14  # number of grayscale levels to use in CLAHE algorithm
+uint16_max = 2**16
 
 
 @adapt_rgb(hsv_value)
@@ -146,8 +169,12 @@ def equalize_adapthist(image, kernel_size=None, clip_limit=0.01, nbins=256):
     .. [1] http://tog.acm.org/resources/GraphicsGems/
     .. [2] https://en.wikipedia.org/wiki/CLAHE#CLAHE
     """
+    print(f"image min: {image.min()}, max: {image.max()}")
     image = img_as_uint(image)
-    image = rescale_intensity(image, out_range=(0, NR_OF_GREY - 1))
+    print(f"image min: {image.min()}, max: {image.max()}")
+    image = (image * (NR_OF_GREY / uint16_max)).astype(np.uint16)
+    print(f"image min: {image.min()}, max: {image.max()}")
+    print(f"Kernel size: {kernel_size}")
 
     if kernel_size is None:
         kernel_size = tuple([image.shape[dim] // 8 for dim in range(image.ndim)])
