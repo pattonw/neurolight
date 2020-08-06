@@ -3,6 +3,7 @@ import numpy as np
 from gunpowder.batch_request import BatchRequest
 from gunpowder.batch import Batch
 from gunpowder.array import Array
+from gunpowder.coordinate import Coordinate
 
 from gunpowder import BatchFilter
 
@@ -40,6 +41,7 @@ class scipyCLAHE(BatchFilter):
         clip_limit=0.01,
         nbins=256,
         context=None,
+        normalize=True,
     ):
         self.arrays = arrays
         self.output_arrays = output_arrays
@@ -51,6 +53,7 @@ class scipyCLAHE(BatchFilter):
         self.clip_limit = clip_limit
         self.nbins = nbins
         self.context = context
+        self.normalize = normalize
 
     def setup(self):
         self.enable_autoskip()
@@ -83,6 +86,8 @@ class scipyCLAHE(BatchFilter):
             if np.isclose(d_max, d_min):
                 output[out_key] = Array(data, array.spec)
                 continue
+            if self.normalize:
+                data = (data - d_min) / (d_max - d_min)
             shape = data.shape
             data_dims = len(shape)
             kernel_dims = len(self.kernel_size)
@@ -92,7 +97,7 @@ class scipyCLAHE(BatchFilter):
             for index in itertools.product(*[range(s) for s in shape[:extra_dims]]):
                 data[index] = clahe(
                     data[index],
-                    kernel_size=self.kernel_size / voxel_size,
+                    kernel_size=Coordinate(self.kernel_size / voxel_size),
                     clip_limit=self.clip_limit,
                     nbins=self.nbins,
                 )
@@ -156,7 +161,9 @@ def clahe(image, kernel_size, clip_limit, nbins):
     # (scaling here is data independent,
     # assumes float input with values in [0, 1])
     image = np.round(
-        rescale_intensity(image, in_range=(0, 1), out_range=(0, NR_OF_GRAY - 1))
+        rescale_intensity(
+            image, in_range=(image.min(), image.max()), out_range=(0, NR_OF_GRAY - 1)
+        )
     ).astype(np.uint16)
     ########################
 
@@ -168,10 +175,15 @@ def clahe(image, kernel_size, clip_limit, nbins):
     # - is preceded by half a kernel size
     pad_start_per_dim = [k // 2 for k in kernel_size]
 
-    pad_end_per_dim = [
-        (k - s % k) % k + int(np.ceil(k / 2.0))
-        for k, s in zip(kernel_size, image.shape)
-    ]
+    try:
+        pad_end_per_dim = [
+            (k - s % k) % k + int(np.ceil(k / 2.0))
+            for k, s in zip(kernel_size, image.shape)
+        ]
+    except ZeroDivisionError as e:
+        raise ZeroDivisionError(
+            f"Trying to use kernel size: {kernel_size} on image with shape: {image.shape}"
+        ) from e
 
     image = np.pad(
         image,
