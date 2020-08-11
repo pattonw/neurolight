@@ -81,7 +81,10 @@ class SwcFileSource(BatchProvider):
         self.scale = scale
         self.connected_component_label = 0
         self.keep_ids = keep_ids
-        self._graph = nx.DiGraph()
+        if directed:
+            self._graph = nx.DiGraph()
+        else:
+            self._graph = nx.Graph()
         self.transpose = transpose
         self.radius = radius
         self.directed = directed
@@ -113,7 +116,11 @@ class SwcFileSource(BatchProvider):
             for point in self.points:
                 self.provides(point, GraphSpec(roi=roi, directed=self.directed))
 
-        for i, wcc in enumerate(nx.weakly_connected_components(self._graph)):
+        if self.directed:
+            ccs = nx.weakly_connected_components(self._graph)
+        else:
+            ccs = nx.connected_components(self._graph)
+        for i, wcc in enumerate(ccs):
             for node in wcc:
                 self._graph.nodes[node]["component"] = i
 
@@ -123,6 +130,12 @@ class SwcFileSource(BatchProvider):
         timing.start()
 
         batch = Batch()
+
+        logger.warning(
+            f"G has {self.g.number_of_nodes()} nodes, "
+            f"{self.g.number_of_edges()} edges, "
+            f"and {len(list(nx.connected_components(self.g)))} components"
+        )
 
         for points_key in self.points:
 
@@ -157,13 +170,11 @@ class SwcFileSource(BatchProvider):
             )
             return_graph = return_graph.crop(request[points_key].roi)
 
-            batch = Batch()
             batch.graphs[points_key] = return_graph
 
             logger.debug(
-                "Swc points source provided {} points for roi: {}".format(
-                    len(list(batch.graphs[points_key].nodes)), request[points_key].roi
-                )
+                f"Swc points source provided {return_graph.num_vertices()} "
+                f"points for {points_key} with roi: {request[points_key].roi}"
             )
 
         timing.stop()
@@ -192,7 +203,12 @@ class SwcFileSource(BatchProvider):
                     self.num_ccs += self._parse_swc(swc_file)
 
         self._graph_to_kdtree()
-        assert len(list(nx.weakly_connected_components(self.g))) == self.num_ccs
+
+        if self.directed:
+            ccs = nx.weakly_connected_components(self.g)
+        else:
+            ccs = nx.connected_components(self.g)
+        assert len(list(ccs)) == self.num_ccs
 
     def _graph_to_kdtree(self) -> None:
         # add node_ids to coordinates to support overlapping nodes in cKDTree
@@ -255,7 +271,12 @@ class SwcFileSource(BatchProvider):
             transpose=self.transpose,
         )
 
-        assert len(list(nx.weakly_connected_components(tree))) == 1
+        if self.directed:
+            ccs = nx.weakly_connected_components(tree)
+        else:
+            tree = tree.to_undirected()
+            ccs = nx.connected_components(tree)
+        assert len(list(ccs)) == 1
 
         points = []
 
@@ -264,7 +285,11 @@ class SwcFileSource(BatchProvider):
             points.append(Node(id=attrs["id"], location=attrs["location"], attrs=attrs))
         self._add_points_to_source(points, set(Edge(u, v) for u, v in tree.edges))
 
-        return len(list(nx.weakly_connected_components(tree)))
+        if self.directed:
+            ccs = nx.weakly_connected_components(tree)
+        else:
+            ccs = nx.connected_components(tree)
+        return len(list(ccs))
 
     def _search_swc_header(
         self, line: str, key: str, default: np.ndarray
