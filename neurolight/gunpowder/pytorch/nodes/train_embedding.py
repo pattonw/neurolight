@@ -2,6 +2,8 @@ from gunpowder import Array
 
 from gunpowder.torch.nodes.train import Train
 from gunpowder.ext import torch
+from gunpowder.profiling import Timing
+
 import numpy as np
 
 import logging
@@ -18,9 +20,23 @@ class TrainEmbedding(Train):
     an easy way of extending the logging functionality.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(
+        self,
+        *args,
+        synchronize_timing=False,
+        cudnn_enabled=True,
+        cudnn_deterministic=False,
+        cudnn_benchmark=True,
+        **kwargs,
+    ):
+
+        self.synchronize_timing = synchronize_timing
 
         super(TrainEmbedding, self).__init__(*args, **kwargs)
+
+        torch.backends.cudnn.enabled = cudnn_enabled
+        torch.backends.cudnn.deterministic = cudnn_deterministic
+        torch.backends.cudnn.benchmark = cudnn_benchmark
 
     def write_csv(self, data):
         log_file = Path("data_log.csv")
@@ -30,6 +46,8 @@ class TrainEmbedding(Train):
             f.write(", ".join([f"{x}" for x in data]) + "\n")
 
     def train_step(self, batch, request):
+        timing_setup = Timing(self, "setup")
+        timing_setup.start()
 
         inputs = self._Train__collect_provided_inputs(batch)
         requested_outputs = self._Train__collect_requested_outputs(request)
@@ -39,9 +57,21 @@ class TrainEmbedding(Train):
             k: torch.as_tensor(v, device=self.device) for k, v in inputs.items()
         }
 
+        logger.debug(f"Model inputs: {device_inputs}")
+
         # get outputs. Keys are tuple indices or model attr names as in self.outputs
         self.optimizer.zero_grad()
+
+        timing_setup.stop()
+
+        timing_forward = Timing(self, "forward")
+        timing_forward.start()
+
         model_outputs = self.model(**device_inputs)
+
+        torch.cuda.synchronize()
+        timing_forward.stop()
+
         if isinstance(model_outputs, tuple):
             outputs = {i: model_outputs[i] for i in range(len(model_outputs))}
         elif isinstance(model_outputs, torch.Tensor):
@@ -87,11 +117,44 @@ class TrainEmbedding(Train):
 
         logger.debug("model outputs: %s", outputs)
         logger.debug(f"loss_inputs: {device_loss_args}, {device_loss_kwargs}")
-        loss, emst, edges_u, edges_v, dist, ratio_pos, ratio_neg = self.loss(
-            *device_loss_args, **device_loss_kwargs
-        )
+
+        timing_loss = Timing(self, "loss")
+        timing_loss.start()
+
+        if self.loss.aux_task:
+            loss, emst, edges_u, edges_v, dist, ratio_pos, ratio_neg, neighborhood_loss = self.loss(
+                *device_loss_args, **device_loss_kwargs
+            )
+
+        else:
+            loss, emst, edges_u, edges_v, dist, ratio_pos, ratio_neg = self.loss(
+                *device_loss_args, **device_loss_kwargs
+            )
+
+        if self.synchronize_timing:
+            torch.cuda.synchronize()
+        timing_loss.stop()
+
+        timing_backward = Timing(self, "backward")
+        timing_backward.start()
+
         loss.backward()
+
+        if self.synchronize_timing:
+            torch.cuda.synchronize()
+        timing_backward.stop()
+
+        timing_optimizer_step = Timing(self, "optimizer")
+        timing_optimizer_step.start()
+
         self.optimizer.step()
+
+        if self.synchronize_timing:
+            torch.cuda.synchronize()
+        timing_optimizer_step.stop()
+
+        timing_requested_outputs = Timing(self, "requested_outs")
+        timing_requested_outputs.start()
 
         # add requested model outputs to batch
         for array_key, array_name in requested_outputs.items():
@@ -100,6 +163,13 @@ class TrainEmbedding(Train):
             batch.arrays[array_key] = Array(
                 outputs[array_name].cpu().detach().numpy(), spec
             )
+
+        if self.synchronize_timing:
+            torch.cuda.synchronize()
+        timing_requested_outputs.stop()
+
+        timing_gradients = Timing(self, "gradients")
+        timing_gradients.start()
 
         for array_name, array_key in self.gradients.items():
             if array_key not in request:
@@ -116,12 +186,12 @@ class TrainEmbedding(Train):
             spec.roi = request[array_key].roi
             batch.arrays[array_key] = Array(tensor.grad.cpu().detach().numpy(), spec)
 
-        for array_key, array_name in requested_outputs.items():
-            spec = self.spec[array_key].copy()
-            spec.roi = request[array_key].roi
-            batch.arrays[array_key] = Array(
-                outputs[array_name].cpu().detach().numpy(), spec
-            )
+        if self.synchronize_timing:
+            torch.cuda.synchronize()
+        timing_gradients.stop()
+
+        timing_checkpoint = Timing(self, "gradients")
+        timing_checkpoint.start()
 
         batch.loss = loss.cpu().detach().numpy()
         self.iteration += 1
@@ -142,6 +212,13 @@ class TrainEmbedding(Train):
                 },
                 checkpoint_name,
             )
+
+        if self.synchronize_timing:
+            torch.cuda.synchronize()
+        timing_checkpoint.stop()
+
+        timing_logging = Timing(self, "logging")
+        timing_logging.start()
 
         # calculate stats:
         dist = dist.detach().numpy()
@@ -213,6 +290,12 @@ class TrainEmbedding(Train):
                 batch.iteration,
             )
 
+            if self.loss.aux_task:
+                self.summary_writer.add_scalar(
+                    "neighborhood_loss", neighborhood_loss.detach().numpy(), batch.iteration
+                )
+                print(f"neighborhood_loss: {neighborhood_loss.detach().numpy()}")
+
             self.write_csv(
                 [
                     batch.iteration,
@@ -227,3 +310,18 @@ class TrainEmbedding(Train):
                     np.mean(ratio_neg * dist),
                 ]
             )
+
+        if self.synchronize_timing:
+            torch.cuda.synchronize()
+        timing_logging.stop()
+
+        batch.profiling_stats.add(timing_setup)
+        batch.profiling_stats.add(timing_requested_outputs)
+        batch.profiling_stats.add(timing_gradients)
+        batch.profiling_stats.add(timing_checkpoint)
+
+        # batch.profiling_stats.add(timing_logging)
+        batch.profiling_stats.add(timing_forward)
+        batch.profiling_stats.add(timing_loss)
+        batch.profiling_stats.add(timing_backward)
+        batch.profiling_stats.add(timing_optimizer_step)
