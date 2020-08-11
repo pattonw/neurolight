@@ -11,7 +11,7 @@ from neurolight.gunpowder.nodes.maxima import Skeletonize
 from neurolight.gunpowder.nodes.minimax import MiniMax, MiniMaxEmbeddings
 from neurolight.gunpowder.nodes.emst import EMST
 from neurolight.gunpowder.nodes.evaluate import Evaluate, MergeGraphs
-from neurolight.gunpowder.nodes.mclahe import mCLAHE
+from neurolight.gunpowder.nodes.clahe import scipyCLAHE
 from neurolight.gunpowder.nodes.score_edges import ScoreEdges
 from neurolight.gunpowder.nodes.threshold_edges import ThresholdEdges
 from neurolight.gunpowder.nodes.rasterize_skeleton import RasterizeSkeleton
@@ -23,8 +23,6 @@ import copy
 from pathlib import Path
 import logging
 import json
-
-logging.basicConfig(level=logging.INFO)
 
 
 class MergeScores(gp.BatchFilter):
@@ -92,10 +90,14 @@ def emb_validation_pipeline(
     component_threshold_0 = config["COMPONENT_THRESHOLD_0"]
     component_threshold_1 = config["COMPONENT_THRESHOLD_1"]
 
+    clip_limit = config["CLAHE_CLIP_LIMIT"]
+    normalize = config["CLAHE_NORMALIZE"]
+
     validation_pipelines = []
     specs = {}
 
     emb_model = get_emb_model(config)
+    emb_model.eval()
 
     for block in blocks:
         validation_dir = get_validation_dir(benchmark_datasets_path, block)
@@ -155,6 +157,16 @@ def emb_validation_pipeline(
             directed=graph_directionality,
             edge_attrs=edge_attrs,
         )
+
+        if config["EVAL_CLAHE"]:
+            raw_source = raw_source + scipyCLAHE(
+                [raw],
+                gp.Coordinate([20, 64, 64]) * voxel_size,
+                clip_limit=clip_limit,
+                normalize=normalize,
+            )
+        else:
+            pass
 
         emb_source, emb, neighborhood = add_emb_pred(
             config, raw_source, raw, block, emb_model
@@ -216,17 +228,15 @@ def emb_validation_pipeline(
         elif config["EVAL_MINIMAX_EMBEDDING_DIST"]:
             # No mst_0 provided, must first calculate mst_0 and dense mst_0
             pipeline += MiniMaxEmbeddings(
-                emb, candidates_1, mst_0, distance_attr=distance_attr
-            )
-            pipeline += MiniMaxEmbeddings(
                 emb,
                 candidates_1,
-                mst_dense_0,
+                decimated=mst_0,
+                dense=mst_dense_0,
                 distance_attr=distance_attr,
-                decimate=False,
             )
 
         else:
+            # mst/mst_dense not provided. Simply use euclidean distance on candidates
             pipeline += EMST(
                 emb,
                 candidates_1,
@@ -272,7 +282,7 @@ def emb_validation_pipeline(
             num_thresholds=num_thresholds,
             threshold_range=threshold_range,
             small_component_threshold=component_threshold_1,
-            connectivity=mst_1,
+            # connectivity=mst_1,
             output_graph=optimal_mst,
         )
 
@@ -285,7 +295,7 @@ def emb_validation_pipeline(
                 mst_dense_0: f"points/mst_dense_0",
                 mst_1: f"points/mst_1",
                 mst_dense_1: f"points/mst_dense_1",
-                mst_2: f"points/mst_2",
+                # mst_2: f"points/mst_2",
                 gt: f"points/gt",
                 details: f"points/details",
                 optimal_mst: f"points/optimal_mst",
@@ -305,8 +315,8 @@ def emb_validation_pipeline(
                     mst_dense_0: [distance_attr],
                     mst_1: [distance_attr],
                     mst_dense_1: [distance_attr],
-                    mst_2: [distance_attr],
-                    optimal_mst: [distance_attr],
+                    # mst_2: [distance_attr],
+                    # optimal_mst: [distance_attr], # it is unclear how to add distances if using connectivity graph
                     # mst_dense_2: [distance_attr],
                     details: ["details", "label_pair"],
                 },
@@ -347,10 +357,16 @@ def fg_validation_pipeline(config, snapshot_file, raw_path, gt_path):
     num_thresholds = config["NUM_EVAL_THRESHOLDS"]
     threshold_range = config["EVAL_THRESHOLD_RANGE"]
 
+    component_threshold = config["COMPONENT_THRESHOLD_1"]
+
+    clip_limit = config["CLAHE_CLIP_LIMIT"]
+    normalize = config["CLAHE_NORMALIZE"]
+
     validation_pipelines = []
     specs = {}
 
     fg_model = get_fg_model(config)
+    fg_model.eval()
 
     for block in blocks:
         validation_dir = get_validation_dir(benchmark_datasets_path, block)
@@ -384,6 +400,16 @@ def fg_validation_pipeline(config, snapshot_file, raw_path, gt_path):
             datasets={gt: gt_path.format(block=block)},
             directed={gt: False},
         )
+
+        if config["EVAL_CLAHE"]:
+            raw_source = raw_source + scipyCLAHE(
+                [raw],
+                gp.Coordinate([20, 64, 64]) * voxel_size,
+                clip_limit=clip_limit,
+                normalize=normalize,
+            )
+        else:
+            pass
 
         fg_source, fg = add_fg_pred(config, raw_source, raw, block, fg_model)
 
@@ -431,6 +457,148 @@ def fg_validation_pipeline(config, snapshot_file, raw_path, gt_path):
             edge_threshold_attr=distance_attr,
             num_thresholds=num_thresholds,
             threshold_range=threshold_range,
+            small_component_threshold=component_threshold,
+        )
+
+        if config["EVAL_SNAPSHOT"]:
+            pipeline += gp.Snapshot(
+                {
+                    raw: f"volumes/raw",
+                    fg: f"volumes/foreground",
+                    candidates: f"volumes/candidates",
+                    mst: f"points/mst",
+                    gt: f"points/gt",
+                    details: f"points/details",
+                },
+                output_dir=config["EVAL_SNAPSHOT_DIR"],
+                output_filename=config["EVAL_SNAPSHOT_NAME"].format(
+                    checkpoint=checkpoint, block=block
+                ),
+                edge_attrs={mst: [distance_attr], details: ["details", "label_pair"]},
+                node_attrs={details: ["details", "label_pair"]},
+                additional_request=additional_request,
+            )
+
+        validation_pipelines.append(pipeline)
+
+    final_score = gp.ArrayKey("SCORE")
+
+    validation_pipeline = (
+        tuple(pipeline for pipeline in validation_pipelines)
+        + gp.MergeProvider()
+        + MergeScores(final_score, specs)
+        + gp.PrintProfilingStats()
+    )
+    return validation_pipeline, final_score
+
+
+def pre_computed_fg_validation_pipeline(
+    config, snapshot_file, raw_path, gt_path, fg_path
+):
+    blocks = config["BLOCKS"]
+    benchmark_datasets_path = Path(config["BENCHMARK_DATA_PATH"])
+    sample = config["VALIDATION_SAMPLES"][0]
+    transform_template = "/nrs/mouselight/SAMPLES/{sample}/transform.txt"
+
+    voxel_size = gp.Coordinate(config["VOXEL_SIZE"])
+    input_shape = gp.Coordinate(config["INPUT_SHAPE"])
+    output_shape = gp.Coordinate(config["OUTPUT_SHAPE"])
+    input_size = voxel_size * input_shape
+    output_size = voxel_size * output_shape
+
+    candidate_spacing = config["CANDIDATE_SPACING"]
+    candidate_threshold = config["CANDIDATE_THRESHOLD"]
+
+    distance_attr = config["DISTANCE_ATTR"]
+    num_thresholds = config["NUM_EVAL_THRESHOLDS"]
+    threshold_range = config["EVAL_THRESHOLD_RANGE"]
+
+    component_threshold = config["COMPONENT_THRESHOLD_1"]
+
+    validation_pipelines = []
+    specs = {}
+
+    for block in blocks:
+        validation_dir = get_validation_dir(benchmark_datasets_path, block)
+        trees = []
+        cube = None
+        for gt_file in validation_dir.iterdir():
+            if gt_file.name[0:4] == "tree" and gt_file.name[-4:] == ".swc":
+                trees.append(gt_file)
+            if gt_file.name[0:4] == "cube" and gt_file.name[-4:] == ".swc":
+                cube = gt_file
+        assert cube.exists()
+
+        cube_roi = get_roi_from_swc(
+            cube,
+            Path(transform_template.format(sample=sample)),
+            np.array(voxel_size[::-1]),
+        )
+
+        candidates = gp.ArrayKey(f"CANDIDATES_{block}")
+        raw = gp.ArrayKey(f"RAW_{block}")
+        mst = gp.GraphKey(f"MST_{block}")
+        gt = gp.GraphKey(f"GT_{block}")
+        fg = gp.ArrayKey(f"FG_{block}")
+        score = gp.ArrayKey(f"SCORE_{block}")
+        details = gp.GraphKey(f"DETAILS_{block}")
+
+        raw_source = SnapshotSource(
+            snapshot_file,
+            datasets={
+                raw: raw_path.format(block=block),
+                fg: fg_path.format(block=block),
+            },
+        )
+        gt_source = SnapshotSource(
+            snapshot_file,
+            datasets={gt: gt_path.format(block=block)},
+            directed={gt: False},
+        )
+
+        input_roi = cube_roi.grow(
+            (input_size - output_size) // 2, (input_size - output_size) // 2
+        )
+        cube_roi_shifted = gp.Roi(
+            (0,) * len(cube_roi.get_shape()), cube_roi.get_shape()
+        )
+        input_roi = cube_roi_shifted.grow(
+            (input_size - output_size) // 2, (input_size - output_size) // 2
+        )
+
+        block_spec = specs.setdefault(block, {})
+        block_spec[raw] = gp.ArraySpec(input_roi)
+        block_spec[candidates] = gp.ArraySpec(cube_roi_shifted)
+        block_spec[fg] = gp.ArraySpec(cube_roi_shifted)
+        block_spec[gt] = gp.GraphSpec(cube_roi_shifted, directed=False)
+        block_spec[mst] = gp.GraphSpec(cube_roi_shifted, directed=False)
+        block_spec[score] = gp.ArraySpec(nonspatial=True)
+
+        additional_request = BatchRequest()
+        additional_request[raw] = gp.ArraySpec(input_roi)
+        additional_request[candidates] = gp.ArraySpec(cube_roi_shifted)
+        additional_request[fg] = gp.ArraySpec(cube_roi_shifted)
+        additional_request[gt] = gp.GraphSpec(cube_roi_shifted, directed=False)
+        additional_request[mst] = gp.GraphSpec(cube_roi_shifted, directed=False)
+        additional_request[details] = gp.GraphSpec(cube_roi_shifted, directed=False)
+
+        pipeline = (
+            (raw_source, gt_source)
+            + gp.MergeProvider()
+            + Skeletonize(fg, candidates, candidate_spacing, candidate_threshold)
+            + MiniMax(fg, candidates, mst, distance_attr=distance_attr)
+        )
+
+        pipeline += Evaluate(
+            gt,
+            mst,
+            score,
+            roi=cube_roi_shifted,
+            details=details,
+            edge_threshold_attr=distance_attr,
+            num_thresholds=num_thresholds,
+            threshold_range=threshold_range,
+            small_component_threshold=component_threshold,
         )
 
         if config["EVAL_SNAPSHOT"]:
@@ -444,9 +612,7 @@ def fg_validation_pipeline(config, snapshot_file, raw_path, gt_path):
                     details: f"points/details",
                 },
                 output_dir="eval_results",
-                output_filename=config["EVAL_SNAPSHOT_NAME"].format(
-                    checkpoint=checkpoint, block=block
-                ),
+                output_filename=config["EVAL_SNAPSHOT_NAME"].format(block=block),
                 edge_attrs={mst: [distance_attr], details: ["details", "label_pair"]},
                 node_attrs={details: ["details", "label_pair"]},
                 additional_request=additional_request,
@@ -565,27 +731,33 @@ def add_emb_pred(config, pipeline, raw, block, model):
 
 def get_fg_model(config):
     model_config = copy.deepcopy(DEFAULT_CONFIG)
-    model_config.update(json.load(open(config["FG_MODEL_CONFIG"])))
+    model_config.update(json.load(open(config["FG_EVAL_MODEL_CONFIG"])))
 
     model = nl.networks.pytorch.ForegroundUnet(model_config)
 
     device = config.get("DEVICE", "cuda")
-    checkpoint_file = config["FG_MODEL_CHECKPOINT"]
     use_cuda = torch.cuda.is_available() and device == "cuda"
     device = torch.device("cuda" if use_cuda else "cpu")
 
-    checkpoint = torch.load(checkpoint_file, map_location=device)
-    if "model_state_dict" in checkpoint:
-        model.load_state_dict(checkpoint["model_state_dict"])
+    if "FG_EVAL_MODEL_CHECKPOINT" in config:
+        checkpoint_file = config["FG_EVAL_MODEL_CHECKPOINT"].format(
+            setup=config["FG_EVAL_SETUP"],
+            checkpoint=config["FG_EVAL_CHECKPOINT"],
+            fg_net_name=config["FOREGROUND_NET_NAME"],
+        )
+
+        checkpoint = torch.load(checkpoint_file, map_location=device)
+        if "model_state_dict" in checkpoint:
+            model.load_state_dict(checkpoint["model_state_dict"])
+        else:
+            model.load_state_dict(checkpoint)
     else:
-        model.load_state_dict()
+        raise Exception()
 
     return model
 
 
 def add_fg_pred(config, pipeline, raw, block, model):
-    checkpoint_file = config["FG_MODEL_CHECKPOINT"]
-
     device = config.get("DEVICE", "cuda")
 
     fg_pred = gp.ArrayKey(f"FG_PRED_{block}")
@@ -594,11 +766,7 @@ def add_fg_pred(config, pipeline, raw, block, model):
         pipeline
         + nl.gunpowder.nodes.helpers.UnSqueeze(raw)
         + gp.torch.Predict(
-            model,
-            inputs={"raw": raw},
-            outputs={0: fg_pred},
-            checkpoint=checkpoint_file,
-            device=device,
+            model, inputs={"raw": raw}, outputs={0: fg_pred}
         )
         + nl.gunpowder.nodes.helpers.Squeeze(raw)
         + nl.gunpowder.nodes.helpers.Squeeze(fg_pred)
