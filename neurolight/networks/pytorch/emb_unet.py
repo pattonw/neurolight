@@ -7,6 +7,9 @@ from .nms import NMS
 from funlib.learn.torch.losses import ultrametric_loss
 
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__file__)
 
 
 class EmbeddingUnet(torch.nn.Module):
@@ -24,8 +27,11 @@ class EmbeddingUnet(torch.nn.Module):
         self.voxel_size = config["VOXEL_SIZE"]
         self.activation = config["ACTIVATION"]
         self.normalize_embeddings = config["NORMALIZE_EMBEDDINGS"]
+        self.aux_task = config["AUX_TASK"]
+        self.neighborhood = config["AUX_NEIGHBORHOOD"]
 
         # LAYERS
+        # UNET
         self.unet = UNet(
             in_channels=2,
             num_fmaps=self.num_fmaps,
@@ -38,22 +44,50 @@ class EmbeddingUnet(torch.nn.Module):
             num_heads=1,
             constant_upsample=True,
         )
+        # FINAL CONV LAYER
         self.conv_layer = ConvPass(
             in_channels=self.num_fmaps,
             out_channels=self.embedding_dims,
             kernel_sizes=[[1 for _ in self.input_shape]],
             activation="Tanh",
         )
+        # AUX LAYER
+        if self.aux_task:
+            self.aux_layer = ConvPass(
+                in_channels=self.num_fmaps,
+                out_channels=self.neighborhood,
+                kernel_sizes=[[1 for _ in self.input_shape]],
+                activation="Tanh",
+            )
 
     def forward(self, raw):
         raw.requires_grad = True
         embedding_logits = self.unet(raw)
         embedding = self.conv_layer(embedding_logits)
         if self.normalize_embeddings:
-            embedding_norms = embedding.norm(dim=1, keepdim=True)
+            embedding_norms = embedding.norm(dim=1, keepdim=True) + 1e-4
             embedding_normalized = embedding / embedding_norms
+            if torch.isnan(embedding_normalized).any():
+                logger.info("ENCOUNTERED NAN IN NORMALIZED EMBEDDINGS!")
+                logger.info(f"raw: {raw}")
+                logger.info(f"nan in raw: {torch.isnan(raw).any()}")
+                logger.info(f"inf in raw: {torch.isinf(raw).any()}")
+                logger.info(f"embedding_logits: {embedding_logits}")
+                # logger.info(f"embeddings: {embedding}")
+                # logger.info(f"norms: {embedding_norms}")
+                # logger.info(f"normalized_embeddings: {embedding_normalized}")
+                torch.save({"model_state_dict": self.state_dict()}, "nan_model")
             embedding = embedding_normalized
-        return embedding
+            logger.info(
+                f"Unet output logits with mean: {torch.mean(embedding_logits)} "
+                f"and std: {torch.std(embedding_logits)}"
+            )
+
+        if self.aux_task:
+            neighborhood = self.aux_layer(embedding_logits)
+            return embedding, neighborhood
+        else:
+            return embedding
 
 
 class EmbeddingLoss(torch.nn.Module):
@@ -80,7 +114,19 @@ class EmbeddingLoss(torch.nn.Module):
         self.constrained_emst = setup_config["CONSTRAINED"]
         self.alpha = setup_config["ALPHA"]
 
-    def forward(self, input, target, mask):
+        self.aux_task = setup_config["AUX_TASK"]
+
+        self.mse_loss = torch.nn.MSELoss()
+
+    def forward(
+        self,
+        input,
+        target,
+        mask,
+        neighborhood=None,
+        neighborhood_mask=None,
+        neighborhood_target=None,
+    ):
         # ultrametric loss is computed on cpu, and no gpu accelerated operations
         # use the outputs.
         input = input.cpu()
@@ -97,4 +143,21 @@ class EmbeddingLoss(torch.nn.Module):
             quadrupel_loss=self.quadrupel_loss,
             constrained_emst=self.constrained_emst,
         )
+
+        if self.aux_task:
+            neighborhood_loss = self.mse_loss(
+                neighborhood * neighborhood_mask, neighborhood_target
+            ).cpu()
+            loss = neighborhood_loss * loss
+            return (
+                loss,
+                emst,
+                edges_u,
+                edges_v,
+                dist,
+                ratio_pos,
+                ratio_neg,
+                neighborhood_loss,
+            )
+
         return loss, emst, edges_u, edges_v, dist, ratio_pos, ratio_neg
