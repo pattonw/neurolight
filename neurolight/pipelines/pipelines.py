@@ -13,43 +13,15 @@ from .pipeline_pieces import (
     add_embedding_training,
     add_foreground_training,
     add_snapshot,
-    add_non_max_suppression,
+    get_candidates,
     guarantee_nonempty,
     grow_labels,
+    add_neighborhood,
 )
 
 from neurolight.gunpowder.nodes.clahe import scipyCLAHE
 
 import logging
-
-
-def data_gen_pipeline(setup_config):
-    pipeline, datasets, raw, labels, matched = get_training_inputs(setup_config)
-
-    if setup_config["SNAPSHOT_EVERY"] > 0:
-
-        pipeline = add_snapshot(pipeline, setup_config, datasets)
-
-    if setup_config["NUM_WORKERS"] > 1:
-        pipeline = add_caching(pipeline, setup_config)
-
-    return pipeline, datasets, raw, labels, matched
-
-
-def data_gen_pipeline_locations(setup_config):
-    pipeline, datasets, raw, labels, matched = get_training_inputs(
-        setup_config, locations=True
-    )
-
-    if setup_config["SNAPSHOT_EVERY"] > 0:
-
-        pipeline = add_snapshot(pipeline, setup_config, datasets)
-
-    if setup_config["NUM_WORKERS"] > 1:
-        pipeline = add_caching(pipeline, setup_config)
-
-    return pipeline, datasets, raw, labels, matched
-
 
 def foreground_pipeline(setup_config, get_data_sources=None):
     input_shape = gp.Coordinate(setup_config["INPUT_SHAPE"])
@@ -73,7 +45,9 @@ def foreground_pipeline(setup_config, get_data_sources=None):
 
     pipeline = add_data_augmentation(pipeline, raw)
     if setup_config["CLAHE"]:
-        pipeline = pipeline + scipyCLAHE([raw], kernel_size=[20, 64, 64])
+        pipeline = pipeline + scipyCLAHE(
+            [raw], kernel_size=gp.Coordinate([20, 64, 64]) * voxel_size, clip_limit=setup_config["CLIP_LIMIT"]
+        )
 
     if setup_config["NUM_WORKERS"] > 1:
         pipeline = add_caching(pipeline, setup_config)
@@ -128,6 +102,11 @@ def embedding_pipeline(setup_config, get_data_sources=None):
         setup_config, get_data_sources
     )
 
+    if setup_config["AUX_TASK"]:
+        pipeline, neighborhood_gt, neighborhood_mask = add_neighborhood(
+            pipeline, setup_config, matched
+        )
+
     pipeline = grow_labels(pipeline, setup_config, labels)
 
     pipeline = add_data_augmentation(pipeline, raw)
@@ -137,7 +116,7 @@ def embedding_pipeline(setup_config, get_data_sources=None):
 
     pipeline, fg_pred = add_foreground_prediction(pipeline, setup_config, raw)
 
-    pipeline, maxima = add_non_max_suppression(pipeline, setup_config, fg_pred)
+    pipeline, maxima = get_candidates(pipeline, setup_config, fg_pred)
 
     snapshot_datasets += [
         (fg_pred, output_size, "volumes/fg_pred", logging.INFO),
@@ -146,22 +125,50 @@ def embedding_pipeline(setup_config, get_data_sources=None):
 
     if setup_config["TRAIN_EMBEDDING"]:
 
-        pipeline, embedding, embedding_gradient = add_embedding_training(
-            pipeline, setup_config, raw, labels, maxima
-        )
-        inputs = (labels, maxima)
+        if setup_config["AUX_TASK"]:
+            pipeline, embedding, embedding_gradient, neighborhood, neighborhood_gradient = add_embedding_training(
+                pipeline,
+                setup_config,
+                raw,
+                labels,
+                maxima,
+                neighborhood_gt,
+                neighborhood_mask,
+            )
+            inputs = (labels, maxima, neighborhood_mask, neighborhood_gt)
 
-        snapshot_datasets += [
-            # output data
-            (embedding, output_size, "volumes/embedding")
-        ]
+            snapshot_datasets += [
+                # output data
+                (embedding, output_size, "volumes/embedding"),
+                (neighborhood, output_size, "volumes/neighborhood"),
+                (neighborhood_gt, output_size, "volumes/neighborhood_gt"),
+                (neighborhood_mask, output_size, "volumes/neighborhood_mask"),
+            ]
 
-        snapshot_datasets += [
-            # gradient debugging
-            (embedding_gradient, output_size, "volumes/embedding_gradient")
-        ]
+            snapshot_datasets += [
+                # gradient debugging
+                (embedding_gradient, output_size, "volumes/embedding_gradient"),
+                (neighborhood_gradient, output_size, "volumes/neighborhood_gradient"),
+            ]
 
-        outputs = (raw, embedding)
+            outputs = (raw, embedding)
+        else:
+            pipeline, embedding, embedding_gradient = add_embedding_training(
+                pipeline, setup_config, raw, labels, maxima
+            )
+            inputs = (labels, maxima)
+
+            snapshot_datasets += [
+                # output data
+                (embedding, output_size, "volumes/embedding")
+            ]
+
+            snapshot_datasets += [
+                # gradient debugging
+                (embedding_gradient, output_size, "volumes/embedding_gradient")
+            ]
+
+            outputs = (raw, embedding)
 
     else:
         pipeline, embedding = add_embedding_prediction(pipeline, setup_config, raw)
