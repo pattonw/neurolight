@@ -60,6 +60,13 @@ class DaisyGraphProvider(BatchProvider):
         )
         self.specs = {key: spec for key, spec in zip(points, specs)}
 
+        self.directed = directed
+        self.nodes_collection = nodes_collection
+        self.edges_collection = edges_collection
+        self.meta_collection = meta_collection
+        self.endpoint_names = endpoint_names
+        self.position_attribute = position_attribute
+
         self.position_attribute = position_attribute
         self.node_attrs = node_attrs
         self.edge_attrs = edge_attrs
@@ -70,25 +77,30 @@ class DaisyGraphProvider(BatchProvider):
         self.node_inclusion = node_inclusion
 
         self.dbname = dbname
+        self.url = url
         self.nodes_collection = nodes_collection
 
         self.fail_on_inconsistent_node = fail_on_inconsistent_node
-        self.graph_provider = MongoDbGraphProvider(
-            dbname,
-            url,
-            mode="r+",
-            directed=directed,
-            total_roi=None,
-            nodes_collection=nodes_collection,
-            edges_collection=edges_collection,
-            meta_collection=meta_collection,
-            endpoint_names=endpoint_names,
-            position_attribute=position_attribute,
-        )
+
+        self.graph_provider = None
 
     def setup(self):
         for key, spec in self.specs.items():
             self.provides(key, spec)
+
+        if self.graph_provider is None:
+        self.graph_provider = MongoDbGraphProvider(
+                self.dbname,
+                self.url,
+            mode="r+",
+                directed=self.directed,
+            total_roi=None,
+                nodes_collection=self.nodes_collection,
+                edges_collection=self.edges_collection,
+                meta_collection=self.meta_collection,
+                endpoint_names=self.endpoint_names,
+                position_attribute=self.position_attribute,
+        )
 
     def provide(self, request):
 
