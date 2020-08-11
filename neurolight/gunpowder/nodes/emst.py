@@ -16,9 +16,10 @@ import mlpack as mlp
 
 import numpy as np
 
-import maximin
-
 import itertools
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class EMST(BatchFilter):
@@ -134,6 +135,6 @@ class EMST(BatchFilter):
         graph_spec.directed = False
 
         outputs[self.mst] = Graph(nodes, edges, graph_spec)
-        print(f"OUTPUTS CONTAINS MST WITH {len(list(outputs[self.mst].nodes))} NODES")
+        logger.debug(f"OUTPUTS CONTAINS MST WITH {len(list(outputs[self.mst].nodes))} NODES")
 
         return outputs
