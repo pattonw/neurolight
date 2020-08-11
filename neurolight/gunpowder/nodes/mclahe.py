@@ -51,6 +51,8 @@ class mCLAHE(BatchFilter):
         nbins=256,
         slice_wise=False,
         adaptive_hist_range=False,
+        output_arrays=None,
+        context=None,
     ):
         self.arrays = arrays
         self.kernel_size = np.array(kernel_size)
@@ -58,23 +60,35 @@ class mCLAHE(BatchFilter):
         self.nbins = nbins
         self.slice_wise = slice_wise
         self.adaptive_hist_range = adaptive_hist_range
+        self.output_arrays = output_arrays
+        if self.output_arrays is not None:
+            assert len(output_arrays) == len(arrays)
+        else:
+            self.output_arrays = self.arrays
+        self.context = context
 
     def setup(self):
         self.enable_autoskip()
-        for key in self.arrays:
-            self.updates(key, self.spec[key])
+        for in_key, out_key in zip(self.arrays, self.output_arrays):
+            if out_key == in_key:
+                self.updates(out_key, self.spec[in_key])
+            else:
+                self.provides(out_key, self.spec[in_key])
 
     def prepare(self, request):
         deps = BatchRequest()
-        for key in self.arrays:
-            spec = request[key].copy()
-            deps[key] = spec
+        for in_key, out_key in zip(self.arrays, self.output_arrays):
+            spec = request[out_key].copy()
+            if self.context is not None:
+                spec.roi = spec.roi.grow(self.context, self.context)
+            deps[in_key] = spec
         return deps
 
     def process(self, batch, request):
         output = Batch()
 
-        for key, array in batch.items():
+        for in_key, out_key in zip(self.arrays, self.output_arrays):
+            array = batch[in_key]
             data = array.data
             shape = data.shape
             data_dims = len(shape)
@@ -99,7 +113,7 @@ class mCLAHE(BatchFilter):
                     kernel_size=full_kernel,
                     clip_limit=self.clip_limit,
                     n_bins=self.nbins,
-                    use_gpu=False,
-                )
-            output[key] = Array(data, array.spec)
+                    # use_gpu=False,
+                ).astype(self.spec[out_key].dtype)
+            output[out_key] = Array(data, array.spec).crop(request[out_key].roi)
         return output
