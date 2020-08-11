@@ -245,7 +245,7 @@ def get_mouselight_data_sources(
             (
                 gp.ZarrSource(
                     filename=str((sample / raw_n5).absolute()),
-                    datasets={raw: "volume"},
+                    datasets={raw: "volume-rechunked"},
                     array_specs={
                         raw: gp.ArraySpec(
                             interpolatable=True, voxel_size=voxel_size, dtype=np.uint16
