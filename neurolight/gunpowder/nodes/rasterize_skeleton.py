@@ -33,13 +33,19 @@ class RasterizeSkeleton(BatchFilter):
         """
 
     def __init__(
-        self, points, array, array_spec, connected_component_labeling: bool = True
+        self,
+        points,
+        array,
+        array_spec,
+        connected_component_labeling: bool = True,
+        interp_lines=True,
     ):
 
         self.points = points
         self.array = array
         self.array_spec = array_spec
         self.connected_component_labeling = connected_component_labeling
+        self.interp_lines = interp_lines
 
     def setup(self):
         self.enable_autoskip()
@@ -161,9 +167,13 @@ class RasterizeSkeleton(BatchFilter):
             np.floor(parent), np.zeros_like(parent), np.array(skeletonized.shape) - 1
         )
 
-        # use Bresenham's line algorithm based on:
-        # http://code.activestate.com/recipes/578112-bresenhams-line-algorithm-in-n-dimensions/
-        line_segment_points = self._bresenhamline(point, parent, max_iter=-1)
+        if self.interp_lines:
+
+            # use Bresenham's line algorithm based on:
+            # http://code.activestate.com/recipes/578112-bresenhams-line-algorithm-in-n-dimensions/
+            line_segment_points = self._bresenhamline(point, parent, max_iter=-1)
+        else:
+            line_segment_points = np.array([point, parent], dtype=int)
 
         if line_segment_points.shape[0] > 0:
             idx = np.transpose(line_segment_points.astype(int))
