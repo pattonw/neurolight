@@ -40,7 +40,7 @@ class TestSource(BatchProvider):
         spec.roi = request[GraphKeys.RAW].roi
         graph = Graph(nodes, edges, spec)
 
-        outputs[GraphKeys.RAW] = graph
+        outputs[GraphKeys.RAW] = graph.crop(spec.roi)
         return outputs
 
 

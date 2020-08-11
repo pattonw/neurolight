@@ -12,12 +12,14 @@ from test_sources import get_test_data_sources
 @pytest.mark.parametrize("blend_mode", ["add"])
 @pytest.mark.parametrize("aux_task", [True, False])
 def test_embedding_pipeline(
-    aux_task, blend_mode, fusion_pipeline, train_embedding, snapshot_every
+    tmpdir, aux_task, blend_mode, fusion_pipeline, train_embedding, snapshot_every
 ):
     setup_config = DEFAULT_CONFIG
     setup_config["FUSION_PIPELINE"] = fusion_pipeline
     setup_config["TRAIN_EMBEDDING"] = train_embedding
     setup_config["SNAPSHOT_EVERY"] = snapshot_every
+    setup_config["TENSORBOARD_LOG_DIR"] = tmpdir
+    setup_config["SNAPSHOT_DIR"] = tmpdir
     setup_config["SNAPSHOT_FILE_NAME"] = "test_snapshot"
     setup_config["MATCHING_FAILURES_DIR"] = None
     setup_config["BLEND_MODE"] = blend_mode

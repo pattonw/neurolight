@@ -11,13 +11,15 @@ from test_sources import get_test_data_sources
 @pytest.mark.parametrize("train_foreground", [True, False])
 @pytest.mark.parametrize("fusion_pipeline", [True, False])
 def test_foreground_pipeline(
-    fusion_pipeline, train_foreground, distance_loss, snapshot_every
+    tmpdir, fusion_pipeline, train_foreground, distance_loss, snapshot_every
 ):
     setup_config = DEFAULT_CONFIG
     setup_config["FUSION_PIPELINE"] = fusion_pipeline
     setup_config["TRAIN_FOREGROUND"] = train_foreground
     setup_config["SNAPSHOT_EVERY"] = snapshot_every
-    setup_config["SNAPSHOT_FILE_NAME"] = None
+    setup_config["TENSORBOARD_LOG_DIR"] = tmpdir
+    setup_config["SNAPSHOT_DIR"] = tmpdir
+    setup_config["SNAPSHOT_FILE_NAME"] = "test_snapshot"
     setup_config["MATCHING_FAILURES_DIR"] = None
     voxel_size = Coordinate(setup_config["VOXEL_SIZE"])
     output_size = Coordinate(setup_config["OUTPUT_SHAPE"]) * voxel_size

@@ -49,12 +49,14 @@ class EnsureCenteredTest(SWCBaseTest):
 
         request = BatchRequest()
         request.add(img, Coordinate((5, 5, 5)))
+        request.add(swc, Coordinate((5, 5, 5)))
 
         with build(pipeline):
-            for i in range(100):
-                batch = pipeline.request_batch(request)
+            batch = pipeline.request_batch(request)
 
             data = batch[img].data
+            g = batch[swc]
+            assert g.num_vertices() > 0
 
             self.assertNotEqual(data[tuple(np.array(data.shape) // 2)], 0)
 

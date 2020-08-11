@@ -20,7 +20,9 @@ def test_emb_unet():
         ],
         "VOXEL_SIZE": [1, 1, 1],
         "ACTIVATION": "ReLU",
-        "NORMALIZE_EMBEDDINGS": True
+        "NORMALIZE_EMBEDDINGS": True,
+        "AUX_TASK": False,
+        "AUX_NEIGHBORHOOD": 6
     }
     embedder = EmbeddingUnet(config)
 
