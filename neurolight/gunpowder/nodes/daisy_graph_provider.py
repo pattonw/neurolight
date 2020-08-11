@@ -43,6 +43,7 @@ class DaisyGraphProvider(BatchProvider):
         edges_filter: Optional[Dict[str, Any]] = None,
         edge_inclusion: str = "either",
         node_inclusion: str = "dangling",
+        fail_on_inconsistent_node: bool = False,
     ):
         self.points = points
         graph_specs = (
@@ -71,6 +72,7 @@ class DaisyGraphProvider(BatchProvider):
         self.dbname = dbname
         self.nodes_collection = nodes_collection
 
+        self.fail_on_inconsistent_node = fail_on_inconsistent_node
         self.graph_provider = MongoDbGraphProvider(
             dbname,
             url,
@@ -109,9 +111,28 @@ class DaisyGraphProvider(BatchProvider):
             logger.debug(
                 f"got {len(requested_graph.nodes)} nodes and {len(requested_graph.edges)} edges"
             )
+
+            failed_nodes = []
+
             for node, attrs in requested_graph.nodes.items():
-                attrs["location"] = np.array(attrs[self.position_attribute], dtype=np.float32)
+                try:
+                    attrs["location"] = np.array(
+                        attrs[self.position_attribute], dtype=np.float32
+                    )
+                except KeyError:
+                    logger.warning(
+                        f"node: {node} was written (probably part of an edge), but never given coordinates!"
+                    )
+                    failed_nodes.append(node)
                 attrs["id"] = node
+
+            for node in failed_nodes:
+                if self.fail_on_inconsistent_node:
+                    raise ValueError(
+                        f"Mongodb contains node {node} without location! "
+                        f"It was probably written as part of an edge"
+                    )
+                requested_graph.remove_node(node)
 
             if spec.directed:
                 requested_graph = requested_graph.to_directed()
