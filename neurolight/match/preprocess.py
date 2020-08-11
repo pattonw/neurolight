@@ -160,8 +160,10 @@ def add_fallback(
         for node_a_index, closest_nodes in itertools.chain(
             *zip(enumerate(spatial_a.query_ball_tree(spatial_b, max_new_edge)))
         ):
+            node_a = wccs[ind_a][node_a_index]
+            closest_node = None
+            shortest_edge = None
             for node_b_index in closest_nodes:
-                node_a = wccs[ind_a][node_a_index]
                 node_b = wccs[ind_b][node_b_index]
                 edge_len = np.linalg.norm(
                     np.array(graph.nodes[node_a][location_attr])
@@ -170,15 +172,22 @@ def add_fallback(
                 if edge_len < max_new_edge:
                     # Add extra penalties to added edges to minimize cable length
                     # assigned to ambiguous ground truth.
-                    graph.add_edge(
-                        node_a,
-                        node_b,
-                        **{
-                            penalty_attr: preprocessed_edge_penalty(
-                                edge_len, expected_edge_len
-                            )
-                        }
-                    )
+                    if closest_node is None:
+                        closest_node = node_b
+                        shortest_edge = edge_len
+                    elif edge_len < shortest_edge:
+                        closest_node = node_b
+                        shortest_edge = edge_len
+            if shortest_edge is not None:
+                graph.add_edge(
+                    node_a,
+                    closest_node,
+                    **{
+                        penalty_attr: preprocessed_edge_penalty(
+                            shortest_edge, expected_edge_len
+                        )
+                    }
+                )
 
     return graph
 
