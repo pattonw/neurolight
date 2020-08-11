@@ -36,6 +36,7 @@ from neurolight.gunpowder.nodes.helpers import ToInt64
 from neurolight.gunpowder.pytorch.nodes.helpers import UnSqueeze, Squeeze
 from neurolight.gunpowder.contrib.nodes import AddDistance, TanhSaturate
 from neurolight.gunpowder.nodes.clahe import scipyCLAHE
+from neurolight.gunpowder.nodes.neighborhood import Neighborhood
 
 from neurolight.networks.pytorch.radam import RAdam
 from neurolight.networks.pytorch import (
@@ -635,7 +636,43 @@ def add_caching(pipeline, setup_config):
     return pipeline
 
 
-def add_embedding_training(pipeline, setup_config, raw, gt_labels, mask):
+def add_neighborhood(pipeline, setup_config, gt):
+
+    # New array Keys
+    neighborhood = ArrayKey("NEIGHBORHOOD_GT")
+    neighborhood_mask = ArrayKey("NEIGHBORHOOD_MASK")
+
+    # Config options
+    distance = float(setup_config["AUX_TASK_DISTANCE"])
+    neighborhood_k = int(setup_config["AUX_NEIGHBORHOOD"])
+
+    # Data details
+    voxel_size = Coordinate(setup_config["VOXEL_SIZE"])
+
+    pipeline = pipeline + Neighborhood(
+        gt,
+        neighborhood,
+        neighborhood_mask,
+        distance,
+        neighborhood_k,
+        array_specs={
+            neighborhood: ArraySpec(voxel_size=voxel_size),
+            neighborhood_mask: ArraySpec(voxel_size=voxel_size),
+        },
+    )
+
+    return pipeline, neighborhood, neighborhood_mask
+
+
+def add_embedding_training(
+    pipeline,
+    setup_config,
+    raw,
+    gt_labels,
+    mask,
+    neighborhood_gt=None,
+    neighborhood_mask=None,
+):
 
     # Network params
     voxel_size = Coordinate(setup_config["VOXEL_SIZE"])
@@ -650,6 +687,8 @@ def add_embedding_training(pipeline, setup_config, raw, gt_labels, mask):
     # New array Keys
     embedding = ArrayKey("EMBEDDING")
     embedding_gradient = ArrayKey("EMBEDDING_GRADIENT")
+    neighborhood = ArrayKey("NEIGHBORHOOD")
+    neighborhood_gradient = ArrayKey("NEIGHBORHOOD_GRADIENT")
 
     # model, optimizer, loss
     model = EmbeddingUnet(setup_config)
@@ -660,6 +699,63 @@ def add_embedding_training(pipeline, setup_config, raw, gt_labels, mask):
         optimizer = torch.optim.Adam(
             model.parameters(), lr=0.5e-5, betas=(0.95, 0.999), eps=1e-8
         )
+
+    if setup_config["AUX_TASK"]:
+        pipeline = (
+            pipeline
+            + ToInt64(gt_labels)
+            + UnSqueeze([raw, gt_labels, mask, neighborhood_gt, neighborhood_mask])
+            + TrainEmbedding(
+                model=model,
+                optimizer=optimizer,
+                loss=loss,
+                inputs={"raw": raw},
+                loss_inputs={
+                    0: embedding,
+                    "target": gt_labels,
+                    "mask": mask,
+                    "neighborhood": neighborhood_gt,
+                    "neighborhood_mask": neighborhood_mask,
+                    "neighborhood_target": neighborhood,
+                },
+                outputs={0: embedding, 1: neighborhood},
+                gradients={0: embedding_gradient, 1: neighborhood_gradient},
+                array_specs={
+                    embedding: ArraySpec(dtype=np.float32, voxel_size=voxel_size),
+                    embedding_gradient: ArraySpec(
+                        dtype=np.float32, voxel_size=voxel_size
+                    ),
+                    neighborhood: ArraySpec(dtype=np.float32, voxel_size=voxel_size),
+                    neighborhood_gradient: ArraySpec(
+                        dtype=np.float32, voxel_size=voxel_size
+                    ),
+                },
+                save_every=checkpoint_every,
+                log_dir=tensorboard_log_dir,
+                checkpoint_basename=embedding_net_name,
+            )
+            + Squeeze(
+                [
+                    embedding,
+                    embedding_gradient,
+                    neighborhood,
+                    neighborhood_gradient,
+                    neighborhood_gt,
+                    neighborhood_mask,
+                    raw,
+                    gt_labels,
+                    mask,
+                ]
+            )
+        )
+        return (
+            pipeline,
+            embedding,
+            embedding_gradient,
+            neighborhood,
+            neighborhood_gradient,
+        )
+    else:
 
     pipeline = (
         pipeline
@@ -675,7 +771,9 @@ def add_embedding_training(pipeline, setup_config, raw, gt_labels, mask):
             gradients={0: embedding_gradient},
             array_specs={
                 embedding: ArraySpec(dtype=np.float32, voxel_size=voxel_size),
-                embedding_gradient: ArraySpec(dtype=np.float32, voxel_size=voxel_size),
+                    embedding_gradient: ArraySpec(
+                        dtype=np.float32, voxel_size=voxel_size
+                    ),
             },
             save_every=checkpoint_every,
             log_dir=tensorboard_log_dir,
