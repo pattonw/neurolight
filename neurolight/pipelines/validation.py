@@ -13,8 +13,6 @@ from pathlib import Path
 import logging
 import json
 
-logging.basicConfig(level=logging.INFO)
-
 # config_file = Path("./config.ini")
 # config = parse_config(config_file)
 #
