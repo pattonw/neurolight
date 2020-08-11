@@ -51,7 +51,7 @@ class DaisyGraphProvider(BatchProvider):
             if graph_specs is not None
             else GraphSpec(
                 Roi(Coordinate([None] * 3), Coordinate([None] * 3)), directed=False
-        )
+            )
         )
         specs = (
             graph_specs
@@ -89,18 +89,18 @@ class DaisyGraphProvider(BatchProvider):
             self.provides(key, spec)
 
         if self.graph_provider is None:
-        self.graph_provider = MongoDbGraphProvider(
+            self.graph_provider = MongoDbGraphProvider(
                 self.dbname,
                 self.url,
-            mode="r+",
+                mode="r+",
                 directed=self.directed,
-            total_roi=None,
+                total_roi=None,
                 nodes_collection=self.nodes_collection,
                 edges_collection=self.edges_collection,
                 meta_collection=self.meta_collection,
                 endpoint_names=self.endpoint_names,
                 position_attribute=self.position_attribute,
-        )
+            )
 
     def provide(self, request):
 
