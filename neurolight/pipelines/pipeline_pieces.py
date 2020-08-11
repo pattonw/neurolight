@@ -54,7 +54,7 @@ import math
 import logging
 import pickle
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 
 class RandomLocations(gp.RandomLocation):
@@ -756,33 +756,32 @@ def add_embedding_training(
             neighborhood_gradient,
         )
     else:
-
-    pipeline = (
-        pipeline
-        + ToInt64(gt_labels)
-        + UnSqueeze([raw, gt_labels, mask])
-        + TrainEmbedding(
-            model=model,
-            optimizer=optimizer,
-            loss=loss,
-            inputs={"raw": raw},
-            loss_inputs={0: embedding, "target": gt_labels, "mask": mask},
-            outputs={0: embedding},
-            gradients={0: embedding_gradient},
-            array_specs={
-                embedding: ArraySpec(dtype=np.float32, voxel_size=voxel_size),
+        pipeline = (
+            pipeline
+            + ToInt64(gt_labels)
+            + UnSqueeze([raw, gt_labels, mask])
+            + TrainEmbedding(
+                model=model,
+                optimizer=optimizer,
+                loss=loss,
+                inputs={"raw": raw},
+                loss_inputs={0: embedding, "target": gt_labels, "mask": mask},
+                outputs={0: embedding},
+                gradients={0: embedding_gradient},
+                array_specs={
+                    embedding: ArraySpec(dtype=np.float32, voxel_size=voxel_size),
                     embedding_gradient: ArraySpec(
                         dtype=np.float32, voxel_size=voxel_size
                     ),
-            },
-            save_every=checkpoint_every,
-            log_dir=tensorboard_log_dir,
-            checkpoint_basename=embedding_net_name,
+                },
+                save_every=checkpoint_every,
+                log_dir=tensorboard_log_dir,
+                checkpoint_basename=embedding_net_name,
+            )
+            + Squeeze([embedding, embedding_gradient, raw, gt_labels, mask])
         )
-        + Squeeze([embedding, embedding_gradient, raw, gt_labels, mask])
-    )
 
-    return pipeline, embedding, embedding_gradient
+        return pipeline, embedding, embedding_gradient
 
 
 def weighted_mse(pred, target, weights):
@@ -851,6 +850,7 @@ def add_snapshot(
     # Config options
     snapshot_every = setup_config["SNAPSHOT_EVERY"]
     snapshot_file_name = setup_config["SNAPSHOT_FILE_NAME"]
+    snapshot_dir = setup_config["SNAPSHOT_DIRECTORY"]
 
     # Snapshot request:
     snapshot_request = gp.BatchRequest()
@@ -859,6 +859,7 @@ def add_snapshot(
 
     pipeline = pipeline + gp.Snapshot(
         additional_request=snapshot_request,
+        output_dir=snapshot_dir,
         output_filename=snapshot_file_name,
         dataset_names={key: location for key, _, location, *_ in datasets},
         every=snapshot_every,
