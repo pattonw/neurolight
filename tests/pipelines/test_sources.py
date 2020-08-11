@@ -108,7 +108,8 @@ class TestPointSource(BatchProvider):
             if points_key in request:
                 spec = request[points_key].copy()
 
-                subgraph = self.graph.crop(roi=spec.roi, copy=True)
+                subgraph = self.graph.crop(roi=spec.roi)
+                subgraph.relabel_connected_components()
 
                 batch[points_key] = subgraph
         return batch
