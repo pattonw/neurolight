@@ -78,6 +78,7 @@ class Neighborhood(BatchFilter):
     
 
     """
+
     def __init__(
         self,
         gt: GraphKey,
@@ -162,7 +163,9 @@ class Neighborhood(BatchFilter):
                     voxel_index = Coordinate(
                         (location - request_roi.get_offset()) // voxel_size
                     )
-                    neighborhood[(slice(None),) + voxel_index] = query_neighbors / self.distance
+                    neighborhood[(slice(None),) + voxel_index] = (
+                        query_neighbors / self.distance
+                    )
                     if neighborhood_mask[voxel_index] == 0:
                         neighborhood_mask[voxel_index] = component_id
                     elif neighborhood_mask[voxel_index] != component_id:
@@ -188,7 +191,7 @@ class Neighborhood(BatchFilter):
                     [
                         (i, j, k)
                         for i, j, k in itertools.product(*((-1, 0, 1),) * 3)
-                        if np.isclose(abs(i + j + k), 1)
+                        if np.isclose(abs(i) + abs(j) + abs(k), 1)
                     ]
                 )
                 * self.distance
