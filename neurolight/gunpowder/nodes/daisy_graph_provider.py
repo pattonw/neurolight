@@ -41,12 +41,16 @@ class DaisyGraphProvider(BatchProvider):
         edge_attrs: Optional[List[str]] = None,
         nodes_filter: Optional[Dict[str, Any]] = None,
         edges_filter: Optional[Dict[str, Any]] = None,
+        edge_inclusion: str = "either",
+        node_inclusion: str = "dangling",
     ):
         self.points = points
         graph_specs = (
             graph_specs
             if graph_specs is not None
-            else GraphSpec(Roi(Coordinate([None] * 3), Coordinate([None] * 3)), directed=False)
+            else GraphSpec(
+                Roi(Coordinate([None] * 3), Coordinate([None] * 3)), directed=False
+        )
         )
         specs = (
             graph_specs
@@ -60,6 +64,12 @@ class DaisyGraphProvider(BatchProvider):
         self.edge_attrs = edge_attrs
         self.nodes_filter = nodes_filter
         self.edges_filter = edges_filter
+
+        self.edge_inclusion = edge_inclusion
+        self.node_inclusion = node_inclusion
+
+        self.dbname = dbname
+        self.nodes_collection = nodes_collection
 
         self.graph_provider = MongoDbGraphProvider(
             dbname,
@@ -89,8 +99,8 @@ class DaisyGraphProvider(BatchProvider):
             logger.debug(f"fetching {key} in roi {spec.roi}")
             requested_graph = self.graph_provider.get_graph(
                 spec.roi,
-                edge_inclusion="either",
-                node_inclusion="dangling",
+                edge_inclusion=self.edge_inclusion,
+                node_inclusion=self.node_inclusion,
                 node_attrs=self.node_attrs,
                 edge_attrs=self.edge_attrs,
                 nodes_filter=self.nodes_filter,
