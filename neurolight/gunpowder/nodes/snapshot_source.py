@@ -1,6 +1,11 @@
 import gunpowder as gp
 import h5py
+import zarr
 import numpy as np
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class SnapshotSource(gp.BatchProvider):
@@ -26,7 +31,12 @@ class SnapshotSource(gp.BatchProvider):
         self.datasets = datasets
 
     def setup(self):
-        data = h5py.File(self.snapshot_file, 'r')
+        if str(self.snapshot_file).endswith(".h5") or str(self.snapshot_file).endswith(
+            ".hdf"
+        ):
+            data = h5py.File(self.snapshot_file, "r")
+        elif str(self.snapshot_file).endswith(".zarr"):
+            data = zarr.open(self.snapshot_file, "r")
         for key, path in self.datasets.items():
             if isinstance(key, gp.ArrayKey):
                 try:
@@ -48,7 +58,12 @@ class SnapshotSource(gp.BatchProvider):
 
     def provide(self, request):
         outputs = gp.Batch()
-        data = h5py.File(self.snapshot_file)
+        if str(self.snapshot_file).endswith(".h5") or str(self.snapshot_file).endswith(
+            ".hdf"
+        ):
+            data = h5py.File(self.snapshot_file, "r")
+        elif str(self.snapshot_file).endswith(".zarr"):
+            data = zarr.open(self.snapshot_file, "r")
         for key, path in self.datasets.items():
             if isinstance(key, gp.ArrayKey):
                 result = self.array_from_path(data, path)
@@ -56,16 +71,21 @@ class SnapshotSource(gp.BatchProvider):
             elif isinstance(key, gp.GraphKey):
                 result = self.graph_from_path(key, data, path)
                 result.relabel_connected_components()
+                logger.debug(
+                    f"Reading graph {key} with {result.num_vertices()} nodes, "
+                    f"{result.num_edges()} edges, and {len(list(result.connected_components))} "
+                    f"connected_components"
+                )
                 outputs[key] = result
 
         outputs = outputs.crop(request)
         return outputs
 
     def spec_from_dataset(self, x):
-        offset = x.attrs["offset"]
-        voxel_size = x.attrs["resolution"]
+        offset = gp.Coordinate(x.attrs["offset"])
+        voxel_size = gp.Coordinate(x.attrs["resolution"])
         spatial_dims = len(voxel_size)
-        shape = x.shape[-spatial_dims:] * voxel_size
+        shape = gp.Coordinate(x.shape[-spatial_dims:]) * voxel_size
         return gp.ArraySpec(roi=gp.Roi(offset, shape), voxel_size=voxel_size)
 
     def array_from_path(self, data, path):
