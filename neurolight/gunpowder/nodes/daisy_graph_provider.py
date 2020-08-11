@@ -156,6 +156,8 @@ class DaisyGraphProvider(BatchProvider):
             points.crop(spec.roi)
             batch[key] = points
 
+            logger.debug(f"{key} with {len(list(points.nodes))} nodes")
+
         timing.stop()
         batch.profiling_stats.add(timing)
 
