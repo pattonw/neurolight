@@ -65,17 +65,17 @@ class EmbeddingUnet(torch.nn.Module):
         embedding_logits = self.unet(raw)
         embedding = self.conv_layer(embedding_logits)
         if self.normalize_embeddings:
-            embedding_norms = embedding.norm(dim=1, keepdim=True) + 1e-4
+            embedding_norms = embedding.norm(dim=1, keepdim=True)
             embedding_normalized = embedding / embedding_norms
             if torch.isnan(embedding_normalized).any():
-                logger.info("ENCOUNTERED NAN IN NORMALIZED EMBEDDINGS!")
-                logger.info(f"raw: {raw}")
-                logger.info(f"nan in raw: {torch.isnan(raw).any()}")
-                logger.info(f"inf in raw: {torch.isinf(raw).any()}")
-                logger.info(f"embedding_logits: {embedding_logits}")
-                # logger.info(f"embeddings: {embedding}")
-                # logger.info(f"norms: {embedding_norms}")
-                # logger.info(f"normalized_embeddings: {embedding_normalized}")
+                logger.warning("ENCOUNTERED NAN IN NORMALIZED EMBEDDINGS!")
+                logger.warning(f"raw: {raw}")
+                logger.warning(f"nan in raw: {torch.isnan(raw).any()}")
+                logger.warning(f"inf in raw: {torch.isinf(raw).any()}")
+                logger.warning(f"embedding_logits: {embedding_logits}")
+                # logger.warning(f"embeddings: {embedding}")
+                # logger.warning(f"norms: {embedding_norms}")
+                # logger.warning(f"normalized_embeddings: {embedding_normalized}")
                 torch.save({"model_state_dict": self.state_dict()}, "nan_model")
             embedding = embedding_normalized
             logger.info(
