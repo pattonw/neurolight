@@ -121,12 +121,14 @@ class Skeletonize(BatchFilter):
         maxima: ArrayKey,
         sample_distance: float,
         threshold: float = None,
+        deterministic_sins: bool = False,
     ):
 
         self.array = array
         self.maxima = maxima
         self.sample_distance = sample_distance
         self.threshold = threshold
+        self.deterministic_sins = deterministic_sins
 
     def setup(self):
         self.enable_autoskip()
@@ -180,7 +182,7 @@ class Skeletonize(BatchFilter):
         t2 = time.time()
         logger.debug(f"GRAPH TO GRID TOOK {t2-t1} SECONDS!")
         """
-        
+
         skeleton_array.data = self.candidates_via_sins(skeleton_array)
         candidates = skeleton_array
         candidates.data = np.expand_dims(candidates.data, 0)
@@ -288,15 +290,28 @@ class Skeletonize(BatchFilter):
 
         voxel_shape = array.spec.roi.get_shape() / array.spec.voxel_size
         voxel_size = array.spec.voxel_size
-        shifts = tuple(random.random() * 2 * math.pi for _ in range(len(voxel_shape)))
         sphere_radius = self.sample_distance
+
+        offset = array.spec.roi.get_offset()
+
+        if self.deterministic_sins:
+            shifts = tuple(0 for _ in range(len(voxel_shape)))
+        else:
+            shifts = tuple(
+                random.random() * 2 * math.pi for _ in range(len(voxel_shape))
+            )
 
         ys = [
             np.sin(
                 np.linspace(
-                    shifts[i],
+                    shifts[i] + (offset[i] * 2 * math.pi / sphere_radius),
                     shifts[i]
-                    + voxel_shape[i] * (2 * math.pi) * voxel_size[i] / sphere_radius,
+                    + (
+                        (offset[i] + voxel_shape[i] * voxel_size[i])
+                        * 2
+                        * math.pi
+                        / sphere_radius
+                    ),
                     voxel_shape[i],
                 )
             ).reshape(
@@ -304,14 +319,20 @@ class Skeletonize(BatchFilter):
             )
             for i in range(len(voxel_shape))
         ]
-
         x = np.sum(ys)
 
         weighted_skel = x * array.data
 
-        candidates = np.logical_and(np.equal(maximum_filter(
-            weighted_skel, size=(3 for _ in voxel_size), mode="nearest"
-        ), weighted_skel), array.data)
+        candidates = np.logical_and(
+            np.equal(
+                maximum_filter(
+                    weighted_skel, size=(3 for _ in voxel_size), mode="nearest"
+                ),
+                weighted_skel,
+            ),
+            array.data,
+        )
+
 
         return candidates
 
