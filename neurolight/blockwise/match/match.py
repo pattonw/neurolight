@@ -139,7 +139,7 @@ def match(
     start_time = time.time()
 
     matcher = GraphToTreeMatcher(
-        skeletonization, consensus, node_costs, edge_costs, timeout=120
+        skeletonization, consensus, node_costs, edge_costs, timeout=2000
     )
     matcher.enforce_expected_assignments(filtered_node_assignments)
     matcher.enforce_expected_assignments(filtered_edge_assignments)
