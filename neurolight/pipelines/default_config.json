@@ -41,6 +41,7 @@
     "TEST_SAMPLES": ["2018-08-01"],
     "VALIDATION_SAMPLES": ["2018-10-01"],
     "SNAPSHOT_FILE_NAME": "snapshot_{iteration}.hdf",
+    "SNAPSHOT_DIRECTORY": "snapshots",
     "FOREGROUND_NET_NAME": "fg_net",
     "EMBEDDING_NET_NAME": "emb_net",
     "TENSORBOARD_LOG_DIR": "tensorboard_logs",
@@ -74,5 +75,9 @@
     "FG_MODEL_CHECKPOINT": "/groups/mousebrainmicro/home/pattonw/Code/Scripts/neurolight_experiments/mouselight/05_torch_foreground/setup_00/fg_net_checkpoint_99500",
     "AUX_TASK": false,
     "AUX_TASK_DISTANCE": 15000,
-    "AUX_NEIGHBORHOOD": 26
+    "AUX_NEIGHBORHOOD": 26,
+    "PRE_CLAHE": true,
+    "POST_CLAHE": true,
+    "CLIP_LIMIT": 0.01,
+    "CLAHE_NORMALIZE": true
 }
