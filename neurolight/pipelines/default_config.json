@@ -50,7 +50,7 @@
     "FUSION_PIPELINE": true,
     "DISTANCES": true,
     "ADD_COORDS": true,
-    "BALANCE_UM_LOSS": true,
+    "BALANCE_UM_LOSS": 0.5,
     "QUADRUPLE_LOSS": false,
     "CONSTRAINED": true,
     "ACTIVATION": "ReLU",
@@ -66,5 +66,13 @@
     "MAX_RANDOM_LOCATION_POINTS": 1000000,
     "MONGO_DB_TEMPLATE": "mouselight-{sample}-{source}",
     "BENCHMARK_DATA_PATH": "/groups/mousebrainmicro/mousebrainmicro/benchmarking_datasets/Manual-GT",
-    "CLAHE": false
+    "CLAHE": false,
+    "CANDIDATE_MODE": "nms",
+    "BLOCKS": [1],
+    "DISTANCE_ATTR": "distance",
+    "FG_MODEL_CONFIG": "/groups/mousebrainmicro/home/pattonw/Code/Scripts/neurolight_experiments/mouselight/05_torch_foreground/setup_00/config.json",
+    "FG_MODEL_CHECKPOINT": "/groups/mousebrainmicro/home/pattonw/Code/Scripts/neurolight_experiments/mouselight/05_torch_foreground/setup_00/fg_net_checkpoint_99500",
+    "AUX_TASK": false,
+    "AUX_TASK_DISTANCE": 15000,
+    "AUX_NEIGHBORHOOD": 26
 }

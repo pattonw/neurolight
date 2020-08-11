@@ -1,0 +1,30 @@
+{
+    "EMB_EVAL_SETUP": "setup_00",
+    "EMB_EVAL_CHECKPOINT": "99500",
+    "EMB_EVAL_MODEL_CONFIG": "/groups/mousebrainmicro/home/pattonw/Code/Scripts/neurolight_experiments/mouselight/06_torch_embedding/{setup}/config.json",
+    "EMB_EVAL_MODEL_CHECKPOINT": "/groups/mousebrainmicro/home/pattonw/Code/Scripts/neurolight_experiments/mouselight/06_torch_embedding/{setup}/{emb_net_name}_checkpoint_{checkpoint}",
+    "FG_EVAL_SETUP": "setup_00",
+    "FG_EVAL_CHECKPOINT": "99500",
+    "FG_EVAL_MODEL_CONFIG": "/groups/mousebrainmicro/home/pattonw/Code/Scripts/neurolight_experiments/mouselight/05_torch_foreground/{setup}/config.json",
+    "FG_EVAL_MODEL_CHECKPOINT": "/groups/mousebrainmicro/home/pattonw/Code/Scripts/neurolight_experiments/mouselight/05_torch_foreground/{setup}/{fg_net_name}_checkpoint_{checkpoint}",
+    "VALIDATION_DATA_FILE": "/groups/mousebrainmicro/home/pattonw/Code/Scripts/neurolight_experiments/mouselight/07_evaluations/validations.hdf",
+    "EVAL_SNAPSHOT": false,
+    "EVAL_SNAPSHOT_DIR": "eval_results",
+    "EVAL_SNAPSHOT_NAME": "{checkpoint}_{block}.zarr",
+    "PERFECT_CANDIDATE_SPACING": 5,
+    "NUM_EVAL_THRESHOLDS": 30,
+    "EVAL_THRESHOLD_RANGE": [
+        0.2,
+        1
+    ],
+    "CANDIDATE_SPACING": 5000,
+    "CANDIDATE_THRESHOLD": 0.1,
+    "EVAL_MINIMAX_EMBEDDING_DIST": false,
+    "EVAL_EDGE_THRESHOLD_0": 0.92,
+    "COMPONENT_THRESHOLD_0": 0,
+    "COMPONENT_THRESHOLD_1": 10000,
+    "EVAL_CLAHE": false,
+    "CLAHE_NORMALIZE": true,
+    "CLAHE_CLIP_LIMIT": 0.01,
+    "CLAHE_MODE": "global"
+}
