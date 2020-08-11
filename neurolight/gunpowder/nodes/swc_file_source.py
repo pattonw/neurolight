@@ -131,10 +131,15 @@ class SwcFileSource(BatchProvider):
 
         batch = Batch()
 
-        logger.warning(
+        if self.directed:
+            cc_func = nx.weakly_connected_components
+        else:
+            cc_func = nx.connected_components
+
+        logger.debug(
             f"G has {self.g.number_of_nodes()} nodes, "
             f"{self.g.number_of_edges()} edges, "
-            f"and {len(list(nx.connected_components(self.g)))} components"
+            f"and {len(list(cc_func(self.g)))} components"
         )
 
         for points_key in self.points:
