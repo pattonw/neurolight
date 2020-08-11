@@ -391,7 +391,13 @@ def get_neuron_pair(
         nonempty_placeholder=nonempty_placeholder,
     )
     if blend_mode == "add":
-        pipeline = pipeline + scipyCLAHE([raw_add, raw_base], [20, 64, 64])
+        if setup_config["PRE_CLAHE"]:
+            pipeline = pipeline + scipyCLAHE(
+                [raw_add, raw_base],
+                gp.Coordinate([20, 64, 64]) * voxel_size,
+                clip_limit=float(setup_config["CLIP_LIMIT"]),
+                normalize=setup_config["CLAHE_NORMALIZE"],
+            )
     pipeline = pipeline + FusionAugment(
         raw_base,
         raw_add,
@@ -412,7 +418,13 @@ def get_neuron_pair(
         num_blended_objects=0,  # TODO: Config this
     )
     if blend_mode == "add":
-        pipeline = pipeline + scipyCLAHE([raw_fused], [20, 64, 64])
+        if setup_config["POST_CLAHE"]:
+            pipeline = pipeline + scipyCLAHE(
+                [raw_add, raw_base],
+                gp.Coordinate([20, 64, 64]) * voxel_size,
+                clip_limit=float(setup_config["CLIP_LIMIT"]),
+                normalize=setup_config["CLAHE_NORMALIZE"],
+            )
 
     return (
         pipeline,
