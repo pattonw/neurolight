@@ -1,5 +1,4 @@
 import gunpowder as gp
-import neurolight as nl
 from gunpowder.coordinate import Coordinate
 from gunpowder.array import ArrayKey
 from gunpowder.array_spec import ArraySpec
@@ -19,7 +18,6 @@ from neurolight.gunpowder.nodes.maxima import Skeletonize
 from neurolight.gunpowder.pytorch.nodes.train_embedding import TrainEmbedding
 
 from neurolight.gunpowder.nodes import (
-    TopologicalMatcher,
     RasterizeSkeleton,
     GrowLabels,
     BinarizeGt,
@@ -47,12 +45,12 @@ from neurolight.networks.pytorch import (
     ForegroundBinLoss,
 )
 
+from omegaconf.dictconfig import DictConfig
 
 from pathlib import Path
-from typing import List, Dict, Any, Tuple, Union
+from typing import List, Tuple, Union
 import math
 import logging
-import pickle
 
 logger = logging.getLogger(__name__)
 
@@ -80,16 +78,21 @@ class RandomLocations(gp.RandomLocation):
         super(RandomLocations, self).process(batch, request)
 
 
-def get_training_inputs(setup_config, get_data_sources=None, locations=True):
-    input_shape = gp.Coordinate(setup_config["INPUT_SHAPE"])
-    output_shape = gp.Coordinate(setup_config["OUTPUT_SHAPE"])
-    voxel_size = gp.Coordinate(setup_config["VOXEL_SIZE"])
-    if setup_config["DATA"] == "train":
-        samples = setup_config["TRAIN_SAMPLES"]
-    elif setup_config["DATA"] == "validation":
-        samples = setup_config["VALIDATION_SAMPLES"]
-    elif setup_config["DATA"] == "test":
-        samples = setup_config["TEST_SAMPLES"]
+def get_training_inputs(
+    setup_config: DictConfig, get_data_sources=None, locations=True
+):
+    assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
+    input_shape = gp.Coordinate(setup_config.data.input_shape)
+    output_shape = gp.Coordinate(setup_config.data.output_shape)
+    voxel_size = gp.Coordinate(setup_config.data.voxel_size)
+    if setup_config.data.data_set.name == "TRAIN":
+        samples = setup_config.data.train_samples
+    elif setup_config.data.data_set.name == "VALIDATE":
+        samples = setup_config.data.validation_samples
+    elif setup_config.data.data_set.name == "TEST":
+        samples = setup_config.data.test_samples
+    else:
+        raise Exception(setup_config.data.data_set)
     logger.info(f"Using samples {samples} to generate data")
 
     input_size = input_shape * voxel_size
@@ -110,7 +113,7 @@ def get_training_inputs(setup_config, get_data_sources=None, locations=True):
             setup_config
         )
 
-    if setup_config.get("FUSION_PIPELINE"):
+    if setup_config.pipeline.fusion_pipeline:
         (
             pipeline,
             raw,
@@ -140,7 +143,7 @@ def get_training_inputs(setup_config, get_data_sources=None, locations=True):
             (matched_add, input_size, "points/matched_add", logging.DEBUG),
         ]
 
-        if setup_config["BLEND_MODE"] == "label_mask":
+        if setup_config.fusion.blend_mode == "label_mask":
             datasets += [
                 # fusion debugging data
                 (soft_mask, input_size, "volumes/soft_mask", logging.DEBUG),
@@ -159,25 +162,26 @@ def get_training_inputs(setup_config, get_data_sources=None, locations=True):
         (matched, input_size, "points/matched", logging.INFO),
     ]
 
-    if setup_config["GUARANTEE_NONEMPTY"]:
+    if setup_config.data_gen.guarantee_nonempty:
         pipeline = guarantee_nonempty(pipeline, setup_config, matched)
 
     return pipeline, datasets, raw, labels, matched
 
 
 def get_mouselight_data_sources(
-    setup_config: Dict[str, Any], source_samples: List[str], locations=False
+    setup_config: DictConfig, source_samples: List[str], locations=False
 ):
+    assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
     # Source Paths and accessibility
-    raw_n5 = setup_config["RAW_N5"]
-    mongo_url = setup_config["MONGO_URL"]
-    samples_path = Path(setup_config["SAMPLES_PATH"])
+    raw_n5 = setup_config.data.raw_n5
+    mongo_url = setup_config.data.mongo_url
+    samples_path = Path(setup_config.data.samples_path)
 
     # specified_locations = setup_config.get("SPECIFIED_LOCATIONS")
 
     # Graph matching parameters
-    point_balance_radius = setup_config["POINT_BALANCE_RADIUS"]
-    matching_failures_dir = setup_config["MATCHING_FAILURES_DIR"]
+    point_balance_radius = setup_config.random_location.point_balance_radius
+    matching_failures_dir = setup_config.matching.matching_failures_dir
     matching_failures_dir = (
         matching_failures_dir
         if matching_failures_dir is None
@@ -185,17 +189,17 @@ def get_mouselight_data_sources(
     )
 
     # Data Properties
-    voxel_size = gp.Coordinate(setup_config["VOXEL_SIZE"])
-    output_shape = gp.Coordinate(setup_config["OUTPUT_SHAPE"])
+    voxel_size = gp.Coordinate(setup_config.data.voxel_size)
+    output_shape = gp.Coordinate(setup_config.fg_model.output_size)
     output_size = output_shape * voxel_size
     micron_scale = voxel_size[0]
 
-    distance_attr = setup_config["DISTANCE_ATTRIBUTE"]
-    target_distance = float(setup_config["MIN_DIST_TO_FALLBACK"])
-    max_nonempty_points = int(setup_config["MAX_RANDOM_LOCATION_POINTS"])
+    distance_attr = setup_config.random_location.distance_attribute
+    target_distance = float(setup_config.random_location.min_dist_to_fallback)
+    max_nonempty_points = int(setup_config.random_location.max_random_location_points)
 
-    mongo_db_template = setup_config["MONGO_DB_TEMPLATE"]
-    matched_source = setup_config.get("MATCHED_SOURCE", "matched")
+    mongo_db_template = setup_config.data.mongo_db_template
+    matched_source = setup_config.data.matched_source
 
     # New array keys
     # Note: These are intended to be requested with size input_size
@@ -294,11 +298,13 @@ def get_mouselight_data_sources(
     return (data_sources, raw, labels, nonempty_placeholder, matched)
 
 
-def get_snapshot_source(setup_config: Dict[str, Any], source_samples: List[str]):
+def get_snapshot_source(setup_config: DictConfig, source_samples: List[str]):
+    raise NotImplementedError("Not yet migrated to refactored configs!")
+    assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
     snapshot = setup_config.get("SNAPSHOT_SOURCE", "snapshots/snapshot_1.hdf")
 
     # Data Properties
-    voxel_size = gp.Coordinate(setup_config["VOXEL_SIZE"])
+    voxel_size = gp.Coordinate(setup_config.data.voxel_size)
 
     # New array keys
     # Note: These are intended to be requested with size input_size
@@ -316,7 +322,6 @@ def get_snapshot_source(setup_config: Dict[str, Any], source_samples: List[str])
             "points/consensus": consensus,
             "points/skeletonization": skeletonization,
             "points/matched": matched,
-            "points/matched": nonempty_placeholder,
             "points/labels": labels,
         },
         voxel_size=voxel_size,
@@ -335,26 +340,32 @@ def get_snapshot_source(setup_config: Dict[str, Any], source_samples: List[str])
 
 def get_neuron_pair(
     pipeline,
-    setup_config,
+    setup_config: DictConfig,
     raw: ArrayKey,
     labels: ArrayKey,
     matched: PointsKey,
     nonempty_placeholder: PointsKey,
 ):
+    assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
 
     # Data Properties
-    output_shape = gp.Coordinate(setup_config["OUTPUT_SHAPE"])
-    voxel_size = gp.Coordinate(setup_config["VOXEL_SIZE"])
+    output_shape = gp.Coordinate(setup_config.data.output_shape)
+    voxel_size = gp.Coordinate(setup_config.data.voxel_size)
     output_size = output_shape * voxel_size
     micron_scale = voxel_size[0]
 
     # Somewhat arbitrary hyperparameters
-    blend_mode = setup_config["BLEND_MODE"]
-    shift_attempts = setup_config["SHIFT_ATTEMPTS"]
-    request_attempts = setup_config["REQUEST_ATTEMPTS"]
-    blend_smoothness = setup_config["BLEND_SMOOTHNESS"]
-    seperate_by = setup_config["SEPERATE_BY"]
+    blend_mode = setup_config.fusion.blend_mode
+    shift_attempts = setup_config.data_gen.shift_attempts
+    request_attempts = setup_config.data_gen.request_attempts
+    blend_smoothness = setup_config.fusion.blend_smoothness
+    seperate_by = setup_config.data_gen.seperate_by
     seperate_distance = (np.array(seperate_by)).tolist()
+
+    clip_limit = float(setup_config.clahe.clip_limit)
+    normalize = setup_config.clahe.normalize
+    pre_fusion = setup_config.clahe.pre_fusion
+    post_fusion = setup_config.clahe.post_fusion
 
     # array keys for fused volume
     raw_fused = ArrayKey("RAW_FUSED")
@@ -392,12 +403,12 @@ def get_neuron_pair(
         nonempty_placeholder=nonempty_placeholder,
     )
     if blend_mode == "add":
-        if setup_config["PRE_CLAHE"]:
+        if pre_fusion:
             pipeline = pipeline + scipyCLAHE(
                 [raw_add, raw_base],
                 gp.Coordinate([20, 64, 64]) * voxel_size,
-                clip_limit=float(setup_config["CLIP_LIMIT"]),
-                normalize=setup_config["CLAHE_NORMALIZE"],
+                clip_limit=clip_limit,
+                normalize=normalize,
             )
     pipeline = pipeline + FusionAugment(
         raw_base,
@@ -419,12 +430,12 @@ def get_neuron_pair(
         num_blended_objects=0,  # TODO: Config this
     )
     if blend_mode == "add":
-        if setup_config["POST_CLAHE"]:
+        if post_fusion:
             pipeline = pipeline + scipyCLAHE(
                 [raw_add, raw_base],
                 gp.Coordinate([20, 64, 64]) * voxel_size,
-                clip_limit=float(setup_config["CLIP_LIMIT"]),
-                normalize=setup_config["CLAHE_NORMALIZE"],
+                clip_limit=clip_limit,
+                normalize=normalize,
             )
 
     return (
@@ -464,22 +475,24 @@ def add_data_augmentation(pipeline, raw):
     return pipeline
 
 
-def add_label_processing(pipeline, setup_config, labels):
-    if setup_config["DISTANCES"]:
+def add_label_processing(pipeline, setup_config: DictConfig, labels):
+    assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
+    if setup_config.pipeline.distances:
         return add_distance_label_processing(pipeline, setup_config, labels)
     else:
         return add_binary_label_processing(pipeline, setup_config, labels)
 
 
-def add_binary_label_processing(pipeline, setup_config, labels):
+def add_binary_label_processing(pipeline, setup_config: DictConfig, labels):
+    assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
 
     # Data Properties
-    voxel_size = gp.Coordinate(setup_config["VOXEL_SIZE"])
+    voxel_size = gp.Coordinate(setup_config.data.voxel_size)
     micron_scale = voxel_size[0]
 
     # Somewhat arbitrary Hyperparameter
-    neuron_radius = setup_config["NEURON_RADIUS"]
-    mask_radius = setup_config["MASK_RADIUS"]
+    neuron_radius = setup_config.data_processing.neuron_radius
+    mask_radius = setup_config.data_processing.mask_radius
 
     # New array keys
     gt_fg = ArrayKey("GT_FG")
@@ -496,10 +509,11 @@ def add_binary_label_processing(pipeline, setup_config, labels):
     return pipeline, gt_fg, loss_weights
 
 
-def guarantee_nonempty(pipeline, setup_config, key):
-    voxel_size = Coordinate(setup_config["VOXEL_SIZE"])
-    output_size = Coordinate(setup_config["OUTPUT_SHAPE"]) * voxel_size
-    num_components = setup_config["NUM_COMPONENTS"]
+def guarantee_nonempty(pipeline, setup_config: DictConfig, key):
+    assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
+    voxel_size = Coordinate(setup_config.data.voxel_size)
+    output_size = Coordinate(setup_config.data.output_shape) * voxel_size
+    num_components = setup_config.data_gen.num_components
 
     pipeline = pipeline + RejectIfEmpty(
         key, centroid_size=output_size, num_components=num_components
@@ -508,15 +522,16 @@ def guarantee_nonempty(pipeline, setup_config, key):
     return pipeline
 
 
-def add_distance_label_processing(pipeline, setup_config, labels):
+def add_distance_label_processing(pipeline, setup_config: DictConfig, labels):
+    assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
 
     # Data Properties
-    voxel_size = gp.Coordinate(setup_config["VOXEL_SIZE"])
+    voxel_size = gp.Coordinate(setup_config.data.voxel_size)
     micron_scale = voxel_size[0]
 
     # Somewhat arbitrary Hyperparameter
-    distance_threshold = setup_config["DISTANCE_THRESHOLD"]  # default 1e-4
-    scale = setup_config["DISTANCE_SCALE"]
+    distance_threshold = setup_config.data_processing.distance_threshold
+    scale = setup_config.data_processing.distance_scale
 
     # New array keys
     gt_fg = ArrayKey("GT_FG")
@@ -531,22 +546,24 @@ def add_distance_label_processing(pipeline, setup_config, labels):
     return pipeline, gt_fg, loss_weights
 
 
-def grow_labels(pipeline, setup_config, labels):
+def grow_labels(pipeline, setup_config: DictConfig, labels):
+    assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
 
     # Data Properties
-    voxel_size = gp.Coordinate(setup_config["VOXEL_SIZE"])
+    voxel_size = gp.Coordinate(setup_config.data.voxel_size)
     micron_scale = voxel_size[0]
 
-    label_radius = setup_config["NEURON_RADIUS"]
+    label_radius = setup_config.data_processing.neuron_radius
 
     pipeline = pipeline + GrowLabels(labels, radii=[label_radius * micron_scale])
 
     return pipeline
 
 
-def add_foreground_prediction(pipeline, setup_config, raw):
-    checkpoint = setup_config.get("FOREGROUND_CHECKPOINT")
-    voxel_size = gp.Coordinate(setup_config["VOXEL_SIZE"])
+def add_foreground_prediction(pipeline, setup_config: DictConfig, raw):
+    assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
+    checkpoint = setup_config.fg_model.checkpoint
+    voxel_size = gp.Coordinate(setup_config.data.voxel_size)
     if checkpoint is None or not Path(checkpoint).exists():
         checkpoint = None
     else:
@@ -571,9 +588,10 @@ def add_foreground_prediction(pipeline, setup_config, raw):
     return pipeline, fg_pred
 
 
-def add_embedding_prediction(pipeline, setup_config, raw):
-    checkpoint = setup_config.get("EMBEDDING_CHECKPOINT")
-    voxel_size = Coordinate(setup_config.get("VOXEL_SIZE"))
+def add_embedding_prediction(pipeline, setup_config: DictConfig, raw):
+    assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
+    checkpoint = setup_config.emb_model.checkpoint
+    voxel_size = Coordinate(setup_config.data.voxel_size)
     if checkpoint is None or not Path(checkpoint).exists():
         checkpoint = None
     else:
@@ -582,34 +600,53 @@ def add_embedding_prediction(pipeline, setup_config, raw):
     # New array keys
     embedding = ArrayKey("EMBEDDING")
 
-    pipeline = (
-        pipeline
-        + UnSqueeze([raw])
-        + Predict(
-            model=EmbeddingUnet(setup_config),
-            checkpoint=checkpoint,
-            inputs={"raw": raw},
-            outputs={0: embedding},
-            array_specs={embedding: ArraySpec(dtype=np.float32, voxel_size=voxel_size)},
+    if setup_config.emb_model.aux_task.enabled:
+        neighborhood = ArrayKey("NEIGHBORHODD")
+        pipeline = (
+            pipeline
+            + UnSqueeze([raw])
+            + Predict(
+                model=EmbeddingUnet(setup_config),
+                checkpoint=checkpoint,
+                inputs={"raw": raw},
+                outputs={0: embedding, 1: neighborhood},
+                array_specs={embedding: ArraySpec(dtype=np.float32, voxel_size=voxel_size)},
+            )
+            + Squeeze([raw, embedding])
         )
-        + Squeeze([raw, embedding])
-    )
 
-    return pipeline, embedding
+        return pipeline, embedding, neighborhood
+
+    else:
+        pipeline = (
+            pipeline
+            + UnSqueeze([raw])
+            + Predict(
+                model=EmbeddingUnet(setup_config),
+                checkpoint=checkpoint,
+                inputs={"raw": raw},
+                outputs={0: embedding},
+                array_specs={embedding: ArraySpec(dtype=np.float32, voxel_size=voxel_size)},
+            )
+            + Squeeze([raw, embedding])
+        )
+
+        return pipeline, embedding
 
 
-def get_candidates(pipeline, setup_config, foreground):
+def get_candidates(pipeline, setup_config: DictConfig, foreground):
+    assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
 
     # Data properties
-    voxel_size = gp.Coordinate(setup_config["VOXEL_SIZE"])
+    voxel_size = gp.Coordinate(setup_config.data.voxel_size)
     micron_scale = voxel_size[0]
 
     # Config options
-    window_size = gp.Coordinate(setup_config["NMS_WINDOW_SIZE"]) * micron_scale
-    threshold = setup_config["NMS_THRESHOLD"]
+    window_size = gp.Coordinate(setup_config.candidates.nms_window_size) * micron_scale
+    threshold = setup_config.candidates.nms_threshold
 
     # Candidate mode
-    mode = setup_config["CANDIDATE_MODE"]
+    mode = setup_config.candidates.mode
 
     # New array Key
     maxima = ArrayKey("MAXIMA")
@@ -630,24 +667,25 @@ def get_candidates(pipeline, setup_config, foreground):
 
 
 def add_caching(pipeline, setup_config):
-    cache_size = setup_config["CACHE_SIZE"]
-    num_workers = setup_config["NUM_WORKERS"]
+    cache_size = setup_config.precache.cache_size
+    num_workers = setup_config.precache.num_workers
     pipeline = pipeline + gp.PreCache(cache_size=cache_size, num_workers=num_workers)
     return pipeline
 
 
-def add_neighborhood(pipeline, setup_config, gt):
+def add_neighborhood(pipeline, setup_config: DictConfig, gt):
+    assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
 
     # New array Keys
     neighborhood = ArrayKey("NEIGHBORHOOD_GT")
     neighborhood_mask = ArrayKey("NEIGHBORHOOD_MASK")
 
     # Config options
-    distance = float(setup_config["AUX_TASK_DISTANCE"])
-    neighborhood_k = int(setup_config["AUX_NEIGHBORHOOD"])
+    distance = setup_config.emb_model.aux_task.distance
+    neighborhood_k = setup_config.emb_model.aux_task.neighborhood.value
 
     # Data details
-    voxel_size = Coordinate(setup_config["VOXEL_SIZE"])
+    voxel_size = Coordinate(setup_config.data.voxel_size)
 
     pipeline = pipeline + Neighborhood(
         gt,
@@ -666,23 +704,22 @@ def add_neighborhood(pipeline, setup_config, gt):
 
 def add_embedding_training(
     pipeline,
-    setup_config,
+    setup_config: DictConfig,
     raw,
     gt_labels,
     mask,
     neighborhood_gt=None,
     neighborhood_mask=None,
 ):
+    assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
 
     # Network params
-    voxel_size = Coordinate(setup_config["VOXEL_SIZE"])
-    input_size = Coordinate(setup_config["INPUT_SHAPE"]) * voxel_size
-    output_size = Coordinate(setup_config["OUTPUT_SHAPE"]) * voxel_size
+    voxel_size = Coordinate(setup_config.data.voxel_size)
 
     # Config options
-    embedding_net_name = setup_config["EMBEDDING_NET_NAME"]
-    checkpoint_every = setup_config["CHECKPOINT_EVERY"]
-    tensorboard_log_dir = setup_config["TENSORBOARD_LOG_DIR"]
+    embedding_net_name = setup_config.emb_model.net_name
+    checkpoint_every = setup_config.training.checkpoint_every
+    tensorboard_log_dir = setup_config.training.tensorboard_log_dir
 
     # New array Keys
     embedding = ArrayKey("EMBEDDING")
@@ -693,14 +730,14 @@ def add_embedding_training(
     # model, optimizer, loss
     model = EmbeddingUnet(setup_config)
     loss = EmbeddingLoss(setup_config)
-    if setup_config.get("RADAM"):
+    if setup_config.optimizer.radam:
         optimizer = RAdam(model.parameters(), lr=0.5e-5, betas=(0.95, 0.999), eps=1e-8)
     else:
         optimizer = torch.optim.Adam(
             model.parameters(), lr=0.5e-5, betas=(0.95, 0.999), eps=1e-8
         )
 
-    if setup_config["AUX_TASK"]:
+    if setup_config.emb_model.aux_task.enabled:
         pipeline = (
             pipeline
             + ToInt64(gt_labels)
@@ -790,14 +827,17 @@ def weighted_mse(pred, target, weights):
     return w_mse.sum()
 
 
-def add_foreground_training(pipeline, setup_config, raw, gt_fg, loss_weights):
+def add_foreground_training(
+    pipeline, setup_config: DictConfig, raw, gt_fg, loss_weights
+):
+    assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
 
     # Config options
-    foreground_net_name = setup_config["FOREGROUND_NET_NAME"]
-    checkpoint_every = setup_config["CHECKPOINT_EVERY"]
-    tensorboard_log_dir = setup_config["TENSORBOARD_LOG_DIR"]
+    foreground_net_name = setup_config.fg_model.net_name
+    checkpoint_every = setup_config.training.checkpoint_every
+    tensorboard_log_dir = setup_config.training.tensorboard_log_dir
 
-    voxel_size = Coordinate(setup_config["VOXEL_SIZE"])
+    voxel_size = Coordinate(setup_config.data.voxel_size)
 
     # New array Keys
     fg_pred = ArrayKey("FG_PRED")
@@ -805,13 +845,13 @@ def add_foreground_training(pipeline, setup_config, raw, gt_fg, loss_weights):
 
     # model, optimizer, loss
     model = ForegroundUnet(setup_config)
-    if setup_config.get("RADAM"):
+    if setup_config.optimizer.radam:
         optimizer = RAdam(model.parameters(), lr=0.5e-5, betas=(0.95, 0.999), eps=1e-8)
     else:
         optimizer = torch.optim.Adam(
             model.parameters(), lr=0.5e-5, betas=(0.95, 0.999), eps=1e-8
         )
-    if setup_config["DISTANCES"]:
+    if setup_config.pipeline.distances:
         loss = ForegroundDistLoss()
     else:
         loss = ForegroundBinLoss()
@@ -843,14 +883,15 @@ def add_foreground_training(pipeline, setup_config, raw, gt_fg, loss_weights):
 
 def add_snapshot(
     pipeline,
-    setup_config,
+    setup_config: DictConfig,
     datasets: List[Tuple[Union[ArrayKey, PointsKey], gp.Coordinate, str]],
 ):
+    assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
 
     # Config options
-    snapshot_every = setup_config["SNAPSHOT_EVERY"]
-    snapshot_file_name = setup_config["SNAPSHOT_FILE_NAME"]
-    snapshot_dir = setup_config["SNAPSHOT_DIRECTORY"]
+    snapshot_every = setup_config.snapshot.every
+    snapshot_file_name = setup_config.snapshot.file_name
+    snapshot_dir = setup_config.snapshot.directory
 
     # Snapshot request:
     snapshot_request = gp.BatchRequest()

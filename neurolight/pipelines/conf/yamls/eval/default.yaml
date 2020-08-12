@@ -1,0 +1,49 @@
+eval:
+  sample: "2018-10-01"
+  distance_attribute: "distance"
+  # coordinate_scale: 0.01
+  num_thresholds: 30
+  threshold_range: [0.2, 1]
+  edge_threshold_fg: 0.92
+  component_threshold_fg: 10000
+  component_threshold_emb: 10000
+  device: "cuda"
+  snapshot: 
+    every: 1
+    directory: "eval_results"
+    file_name: "{checkpoint}_{block}.zarr"
+  clahe:
+    enabled: false
+    pre_fusion: false
+    post_fusion: false
+    clip_limit: 0.01
+    normalize: true
+    kernel_size: [20, 64, 64]
+  blocks:
+    [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+    ]

@@ -13,10 +13,10 @@ from scipy import ndimage
 
 import logging
 import warnings
+from enum import Enum
 from copy import deepcopy
 
 logger = logging.getLogger(__name__)
-
 
 class FusionAugment(BatchFilter):
     """Combine foreground of two volumes.
@@ -116,6 +116,9 @@ class FusionAugment(BatchFilter):
         self.masked_base = masked_base
         self.masked_add = masked_add
         self.mask_maxed = mask_maxed
+
+        if isinstance(self.blend_mode, Enum):
+            self.blend_mode = self.blend_mode.name.lower()
 
         assert self.blend_mode in ["intensity", "labels_mask", "add"], (
             "Unknown blend mode %s." % self.blend_mode

@@ -68,30 +68,32 @@ def emb_validation_pipeline(
     candidates_mst_dense_path=None,
     path_stat="max",
 ):
-    checkpoint = config["EMB_EVAL_CHECKPOINT"]
-    blocks = config["BLOCKS"]
-    benchmark_datasets_path = Path(config["BENCHMARK_DATA_PATH"])
-    sample = config["VALIDATION_SAMPLES"][0]
-    transform_template = "/nrs/mouselight/SAMPLES/{sample}/transform.txt"
+    checkpoint = config.emb_model.checkpoint
+    blocks = config.eval.blocks
+    benchmark_datasets_path = Path(config.data.benchmark_data_path)
+    sample = config.eval.sample
+    transform_template = config.data.transform_template
 
-    voxel_size = gp.Coordinate(config["VOXEL_SIZE"])
+    voxel_size = gp.Coordinate(config.data.voxel_size)
     micron_scale = max(voxel_size)
-    input_shape = gp.Coordinate(config["INPUT_SHAPE"])
-    output_shape = gp.Coordinate(config["OUTPUT_SHAPE"])
+    input_shape = gp.Coordinate(config.model.input_shape)
+    output_shape = gp.Coordinate(config.model.output_shape)
     input_size = voxel_size * input_shape
     output_size = voxel_size * output_shape
 
-    distance_attr = config["DISTANCE_ATTR"]
-    coordinate_scale = config["COORDINATE_SCALE"] * np.array(voxel_size) / micron_scale
-    num_thresholds = config["NUM_EVAL_THRESHOLDS"]
-    threshold_range = config["EVAL_THRESHOLD_RANGE"]
+    distance_attr = config.eval.distance_attribute
+    coordinate_scale = (
+        config.um_loss.coordinate_scale * np.array(voxel_size) / micron_scale
+    )
+    num_thresholds = config.eval.num_thresholds
+    threshold_range = config.eval.threshold_range
 
-    edge_threshold_0 = config["EVAL_EDGE_THRESHOLD_0"]
-    component_threshold_0 = config["COMPONENT_THRESHOLD_0"]
-    component_threshold_1 = config["COMPONENT_THRESHOLD_1"]
+    edge_threshold_fg = config.eva.edge_threshold_fg
+    component_threshold_fg = config.eval.component_threshold_fg
+    component_threshold_emb = config.eval.component_threshold_emb
 
-    clip_limit = config["CLAHE_CLIP_LIMIT"]
-    normalize = config["CLAHE_NORMALIZE"]
+    clip_limit = config.clahe.clip_limit
+    normalize = config.clahe.normalize
 
     validation_pipelines = []
     specs = {}
@@ -223,9 +225,10 @@ def emb_validation_pipeline(
         pipeline = (emb_source, gt_source) + gp.MergeProvider()
 
         if candidates_mst_path is not None and candidates_mst_dense_path is not None:
-            # mst_0 provided, just need to calculate distances.
+            # mst_0 provided, just need to calculate embedding distances.
             pass
         elif config["EVAL_MINIMAX_EMBEDDING_DIST"]:
+            raise NotImplementedError("Depricated. This method does not work well")
             # No mst_0 provided, must first calculate mst_0 and dense mst_0
             pipeline += MiniMaxEmbeddings(
                 emb,
@@ -236,7 +239,9 @@ def emb_validation_pipeline(
             )
 
         else:
+            raise NotImplementedError("Depricated. This method does not work well")
             # mst/mst_dense not provided. Simply use euclidean distance on candidates
+            # embedding + physical coordinates (makes ComponentWiseEMST redundant)
             pipeline += EMST(
                 emb,
                 candidates_1,
@@ -254,8 +259,8 @@ def emb_validation_pipeline(
 
         pipeline += ThresholdEdges(
             (mst_0, mst_1),
-            edge_threshold_0,
-            component_threshold_0,
+            edge_threshold_fg,
+            component_threshold_fg,
             msts_dense=(mst_dense_0, mst_dense_1),
             distance_attr=distance_attr,
         )
@@ -281,12 +286,12 @@ def emb_validation_pipeline(
             edge_threshold_attr=distance_attr,
             num_thresholds=num_thresholds,
             threshold_range=threshold_range,
-            small_component_threshold=component_threshold_1,
+            small_component_threshold=component_threshold_emb,
             # connectivity=mst_1,
             output_graph=optimal_mst,
         )
 
-        if config["EVAL_SNAPSHOT"]:
+        if config.eval.snapshot:
             snapshot_datasets = {
                 raw: f"volumes/raw",
                 emb: f"volumes/embeddings",
@@ -304,8 +309,8 @@ def emb_validation_pipeline(
                 snapshot_datasets[neighborhood] = f"volumes/neighborhood"
             pipeline += gp.Snapshot(
                 snapshot_datasets,
-                output_dir=config["EVAL_SNAPSHOT_DIR"],
-                output_filename=config["EVAL_SNAPSHOT_NAME"].format(
+                output_dir=config.eval.snapshot.directory,
+                output_filename=config.eval.snapshot.file_name.format(
                     checkpoint=checkpoint,
                     block=block,
                     coordinate_scale=",".join([str(x) for x in coordinate_scale]),
@@ -338,29 +343,29 @@ def emb_validation_pipeline(
 
 
 def fg_validation_pipeline(config, snapshot_file, raw_path, gt_path):
-    checkpoint = config["FG_EVAL_CHECKPOINT"]
-    blocks = config["BLOCKS"]
-    benchmark_datasets_path = Path(config["BENCHMARK_DATA_PATH"])
-    sample = config["VALIDATION_SAMPLES"][0]
-    transform_template = "/nrs/mouselight/SAMPLES/{sample}/transform.txt"
+    checkpoint = config.fg_model.checkpoint
+    blocks = config.eval.blocks
+    benchmark_datasets_path = Path(config.data.benchmark_data_path)
+    sample = config.eval.sample
+    transform_template = config.data.transform_template
 
-    voxel_size = gp.Coordinate(config["VOXEL_SIZE"])
-    input_shape = gp.Coordinate(config["INPUT_SHAPE"])
-    output_shape = gp.Coordinate(config["OUTPUT_SHAPE"])
+    voxel_size = gp.Coordinate(config.data.voxel_size)
+    input_shape = gp.Coordinate(config.model.input_shape)
+    output_shape = gp.Coordinate(config.model.output_shape)
     input_size = voxel_size * input_shape
     output_size = voxel_size * output_shape
 
-    candidate_spacing = config["CANDIDATE_SPACING"]
-    candidate_threshold = config["CANDIDATE_THRESHOLD"]
+    candidate_spacing = config.candidates.spacing
+    candidate_threshold = config.candidates.threshold
 
-    distance_attr = config["DISTANCE_ATTR"]
-    num_thresholds = config["NUM_EVAL_THRESHOLDS"]
-    threshold_range = config["EVAL_THRESHOLD_RANGE"]
+    distance_attr = config.eval.distance_attribute
+    num_thresholds = config.eval.num_thresholds
+    threshold_range = config.eval.threshold_range
 
-    component_threshold = config["COMPONENT_THRESHOLD_1"]
+    component_threshold = config.eval.component_threshold_fg
 
-    clip_limit = config["CLAHE_CLIP_LIMIT"]
-    normalize = config["CLAHE_NORMALIZE"]
+    clip_limit = config.clahe.clip_limit
+    normalize = config.clahe.normalize
 
     validation_pipelines = []
     specs = {}
@@ -401,7 +406,7 @@ def fg_validation_pipeline(config, snapshot_file, raw_path, gt_path):
             directed={gt: False},
         )
 
-        if config["EVAL_CLAHE"]:
+        if config.eval.clahe.enabled:
             raw_source = raw_source + scipyCLAHE(
                 [raw],
                 gp.Coordinate([20, 64, 64]) * voxel_size,
@@ -460,7 +465,7 @@ def fg_validation_pipeline(config, snapshot_file, raw_path, gt_path):
             small_component_threshold=component_threshold,
         )
 
-        if config["EVAL_SNAPSHOT"]:
+        if config.eval.snapshot.enabled:
             pipeline += gp.Snapshot(
                 {
                     raw: f"volumes/raw",
@@ -470,8 +475,8 @@ def fg_validation_pipeline(config, snapshot_file, raw_path, gt_path):
                     gt: f"points/gt",
                     details: f"points/details",
                 },
-                output_dir=config["EVAL_SNAPSHOT_DIR"],
-                output_filename=config["EVAL_SNAPSHOT_NAME"].format(
+                output_dir=config.eval.snapshot.directory,
+                output_filename=config.eval.snapshot.file_name.format(
                     checkpoint=checkpoint, block=block
                 ),
                 edge_attrs={mst: [distance_attr], details: ["details", "label_pair"]},
@@ -495,25 +500,25 @@ def fg_validation_pipeline(config, snapshot_file, raw_path, gt_path):
 def pre_computed_fg_validation_pipeline(
     config, snapshot_file, raw_path, gt_path, fg_path
 ):
-    blocks = config["BLOCKS"]
-    benchmark_datasets_path = Path(config["BENCHMARK_DATA_PATH"])
-    sample = config["VALIDATION_SAMPLES"][0]
-    transform_template = "/nrs/mouselight/SAMPLES/{sample}/transform.txt"
+    blocks = config.eval.blocks
+    benchmark_datasets_path = Path(config.data.benchmark_data_path)
+    sample = config.eval.sample
+    transform_template = config.data.transform_template
 
-    voxel_size = gp.Coordinate(config["VOXEL_SIZE"])
-    input_shape = gp.Coordinate(config["INPUT_SHAPE"])
-    output_shape = gp.Coordinate(config["OUTPUT_SHAPE"])
+    voxel_size = gp.Coordinate(config.data.voxel_size)
+    input_shape = gp.Coordinate(config.model.input_shape)
+    output_shape = gp.Coordinate(config.model.output_shape)
     input_size = voxel_size * input_shape
     output_size = voxel_size * output_shape
 
-    candidate_spacing = config["CANDIDATE_SPACING"]
-    candidate_threshold = config["CANDIDATE_THRESHOLD"]
+    candidate_spacing = config.candidates.spacing
+    candidate_threshold = config.candidates.threshold
 
-    distance_attr = config["DISTANCE_ATTR"]
-    num_thresholds = config["NUM_EVAL_THRESHOLDS"]
-    threshold_range = config["EVAL_THRESHOLD_RANGE"]
+    distance_attr = config.eval.distance_attribute
+    num_thresholds = config.eval.num_thresholds
+    threshold_range = config.eval.threshold_range
 
-    component_threshold = config["COMPONENT_THRESHOLD_1"]
+    component_threshold = config.eval.component_threshold_fg
 
     validation_pipelines = []
     specs = {}
@@ -601,7 +606,7 @@ def pre_computed_fg_validation_pipeline(
             small_component_threshold=component_threshold,
         )
 
-        if config["EVAL_SNAPSHOT"]:
+        if config.eval.snapshot.enabled:
             pipeline += gp.Snapshot(
                 {
                     raw: f"volumes/raw",
@@ -611,8 +616,8 @@ def pre_computed_fg_validation_pipeline(
                     gt: f"points/gt",
                     details: f"points/details",
                 },
-                output_dir="eval_results",
-                output_filename=config["EVAL_SNAPSHOT_NAME"].format(block=block),
+                output_dir=config.eval.snapshot.directory,
+                output_filename=config.eval.snapshot.file_name.format(block=block),
                 edge_attrs={mst: [distance_attr], details: ["details", "label_pair"]},
                 node_attrs={details: ["details", "label_pair"]},
                 additional_request=additional_request,
@@ -670,31 +675,34 @@ def get_validation_dir(benchmark_datasets_path, block):
 
 
 def get_emb_model(config):
+    # default model config
     model_config = copy.deepcopy(DEFAULT_CONFIG)
-    if "EMB_EVAL_MODEL_CONFIG" in config:
-        model_config.update(json.load(open(config["EMB_EVAL_MODEL_CONFIG"])))
+
+    # update with setup model config
+    setup = config.emb_model.setup
+    model_config_file = Path(config.emb_model.directory, setup, "config.yaml")
+    model_config.update(json.load(model_config_file.open()))
 
     model = nl.networks.pytorch.EmbeddingUnet(model_config)
 
-    device = config.get("DEVICE", "cuda")
+    device = config.eval.device
     use_cuda = torch.cuda.is_available() and device == "cuda"
     device = torch.device("cuda" if use_cuda else "cpu")
 
-    if "EMB_EVAL_MODEL_CHECKPOINT" in config:
-        checkpoint_file = config["EMB_EVAL_MODEL_CHECKPOINT"].format(
-            setup=config["EMB_EVAL_SETUP"],
-            checkpoint=config["EMB_EVAL_CHECKPOINT"],
-            emb_net_name=config["EMBEDDING_NET_NAME"],
-        )
-        print(f"Loading checkpoint: {checkpoint_file}")
+    checkpoint_file = Path(
+        config.emb_model.directory,
+        setup,
+        f"{config.emb_model.net_name}_checkpoint_{config.emb_model.checkpoint}",
+    )
 
+    if checkpoint_file.exists():
         checkpoint = torch.load(checkpoint_file, map_location=device)
         if "model_state_dict" in checkpoint:
             model.load_state_dict(checkpoint["model_state_dict"])
         else:
             model.load_state_dict(checkpoint)
     else:
-        raise Exception()
+        raise ValueError(f"Checkpoint {checkpoint_file} does not exist!")
 
     return model
 
@@ -702,7 +710,7 @@ def get_emb_model(config):
 def add_emb_pred(config, pipeline, raw, block, model):
 
     emb_pred = gp.ArrayKey(f"EMB_PRED_{block}")
-    if config["AUX_TASK"]:
+    if config.emb_model.aux_task.enabled:
         neighborhood = gp.ArrayKey(f"NEIGHBORHOOD_{block}")
     else:
         neighborhood = None
@@ -731,43 +739,42 @@ def add_emb_pred(config, pipeline, raw, block, model):
 
 def get_fg_model(config):
     model_config = copy.deepcopy(DEFAULT_CONFIG)
-    model_config.update(json.load(open(config["FG_EVAL_MODEL_CONFIG"])))
+
+    setup = config.fg_model.setup
+    model_config_file = Path(config.fg_model.directory, setup, "config.yaml")
+    model_config.update(json.load(model_config_file.open()))
 
     model = nl.networks.pytorch.ForegroundUnet(model_config)
 
-    device = config.get("DEVICE", "cuda")
+    device = config.eval.device
     use_cuda = torch.cuda.is_available() and device == "cuda"
     device = torch.device("cuda" if use_cuda else "cpu")
 
-    if "FG_EVAL_MODEL_CHECKPOINT" in config:
-        checkpoint_file = config["FG_EVAL_MODEL_CHECKPOINT"].format(
-            setup=config["FG_EVAL_SETUP"],
-            checkpoint=config["FG_EVAL_CHECKPOINT"],
-            fg_net_name=config["FOREGROUND_NET_NAME"],
-        )
+    checkpoint_file = Path(
+        config.fg_model.directory,
+        setup,
+        f"{config.fg_model.net_name}_checkpoint_{config.fg_model.checkpoint}",
+    )
 
+    if checkpoint_file.exists():
         checkpoint = torch.load(checkpoint_file, map_location=device)
         if "model_state_dict" in checkpoint:
             model.load_state_dict(checkpoint["model_state_dict"])
         else:
             model.load_state_dict(checkpoint)
     else:
-        raise Exception()
+        raise ValueError(f"Checkpoint {checkpoint_file} does not exist!")
 
     return model
 
 
 def add_fg_pred(config, pipeline, raw, block, model):
-    device = config.get("DEVICE", "cuda")
-
     fg_pred = gp.ArrayKey(f"FG_PRED_{block}")
 
     pipeline = (
         pipeline
         + nl.gunpowder.nodes.helpers.UnSqueeze(raw)
-        + gp.torch.Predict(
-            model, inputs={"raw": raw}, outputs={0: fg_pred}
-        )
+        + gp.torch.Predict(model, inputs={"raw": raw}, outputs={0: fg_pred})
         + nl.gunpowder.nodes.helpers.Squeeze(raw)
         + nl.gunpowder.nodes.helpers.Squeeze(fg_pred)
     )
@@ -791,22 +798,23 @@ def validation_pipeline(config):
         gt -> rasterize        -> merge -> candidates -> trees
     } -> merge -> comatch + evaluate
     """
+    raise NotImplementedError("This seems redundant, but not sure if I can delete it yet")
     blocks = config["BLOCKS"]
-    benchmark_datasets_path = Path(config["BENCHMARK_DATA_PATH"])
-    sample = config["VALIDATION_SAMPLES"][0]
+    benchmark_datasets_path = Path(config.data.benchmark_data_path)
+    sample = config.eval.sample
     sample_dir = Path(config["SAMPLES_PATH"])
     raw_n5 = config["RAW_N5"]
-    transform_template = "/nrs/mouselight/SAMPLES/{sample}/transform.txt"
+    transform_template = config.data.transform_template
 
     neuron_width = int(config["NEURON_RADIUS"])
-    voxel_size = gp.Coordinate(config["VOXEL_SIZE"])
+    voxel_size = gp.Coordinate(config.data.voxel_size)
     micron_scale = max(voxel_size)
-    input_shape = gp.Coordinate(config["INPUT_SHAPE"])
-    output_shape = gp.Coordinate(config["OUTPUT_SHAPE"])
+    input_shape = gp.Coordinate(config.model.input_shape)
+    output_shape = gp.Coordinate(config.model.output_shape)
     input_size = voxel_size * input_shape
     output_size = voxel_size * output_shape
 
-    distance_attr = config["DISTANCE_ATTR"]
+    distance_attr = config.eval.distance_attribute
     candidate_threshold = config["NMS_THRESHOLD"]
     candidate_spacing = min(config["NMS_WINDOW_SIZE"]) * micron_scale
     coordinate_scale = config["COORDINATE_SCALE"] * np.array(voxel_size) / micron_scale

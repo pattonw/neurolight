@@ -117,11 +117,13 @@ class TestPointSource(BatchProvider):
 
 def get_test_data_sources(setup_config):
 
-    input_shape = Coordinate(setup_config["INPUT_SHAPE"])
-    voxel_size = Coordinate(setup_config["VOXEL_SIZE"])
+    input_shape = Coordinate(setup_config.data.input_shape)
+    voxel_size = Coordinate(setup_config.data.voxel_size)
     input_size = input_shape * voxel_size
 
     micron_scale = voxel_size[0]
+
+    use_gurobi = setup_config.matching.use_gurobi
 
     # New array keys
     # Note: These are intended to be requested with size input_size
@@ -131,9 +133,8 @@ def get_test_data_sources(setup_config):
     matched = GraphKey("MATCHED")
     nonempty_placeholder = GraphKey("NONEMPTY")
     labels = ArrayKey("LABELS")
-    use_gurobi = setup_config["USE_GUROBI"]
 
-    if setup_config["FUSION_PIPELINE"]:
+    if setup_config.pipeline.fusion_pipeline:
         ensure_nonempty = nonempty_placeholder
     else:
         ensure_nonempty = consensus

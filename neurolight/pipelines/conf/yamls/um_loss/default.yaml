@@ -1,0 +1,7 @@
+um_loss:
+  alpha: 1.4142
+  coordinate_scale: 0.01
+  add_coords: true
+  balance_um_loss: true
+  quadruple_loss: false
+  constrained: true

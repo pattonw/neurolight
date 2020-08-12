@@ -1,0 +1,5 @@
+training:
+  num_iterations: 1
+  checkpoint_every: 10000
+  profile_every: 1
+  tensorboard_log_dir: "tensorboard_logs"
