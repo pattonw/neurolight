@@ -1,0 +1,34 @@
+emb_model:
+  net_name: "emb_net"
+  directory: "${HOME}/Code/Scripts/neurolight_experiments/mouselight/06_torch_embedding"
+  setup: "???"
+  embedding_dims: 3
+  num_fmaps: 2
+  fmap_inc_factors: 2
+  normalize_embeddings: true
+  checkpoint: null
+  aux_task:
+    enabled: false
+    distance: 15000
+    neighborhood: 26
+
+fg_model:
+  net_name: "fg_net"
+  directory: "${HOME}/Code/Scripts/neurolight_experiments/mouselight/05_torch_foreground"
+  setup: "???"
+  num_fmaps: 2
+  fmap_inc_factors: 2
+  checkpoint: null
+
+model:
+  input_shape: [80, 256, 256]
+  output_shape: [32, 120, 120]
+  downsample_factors: [[1, 3, 3], [2, 2, 2], [2, 2, 2]]
+  kernel_size_up:
+    [
+      [[3, 3, 3], [3, 3, 3]],
+      [[3, 3, 3], [3, 3, 3]],
+      [[3, 3, 3], [3, 3, 3]],
+      [[3, 3, 3], [3, 3, 3]],
+    ]
+  activation: "ReLU"

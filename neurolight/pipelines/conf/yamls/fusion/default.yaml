@@ -1,0 +1,3 @@
+fusion:
+  blend_mode: "labels_mask"
+  blend_smoothness: 3.0

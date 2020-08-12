@@ -1,0 +1,7 @@
+clahe:
+  enabled: true
+  pre_fusion: true
+  post_fusion: true
+  clip_limit: 0.01
+  normalize: true
+  kernel_size: [20, 64, 64]

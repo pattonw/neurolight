@@ -121,9 +121,9 @@ class Neighborhood(BatchFilter):
     def prepare(self, request):
         deps = BatchRequest()
 
-        request[
-            self.neighborhood_mask
-        ].roi, f"Requested {self.neighborhood} and {self.neighborhood_mask} with different roi's"
+        assert (
+            request[self.neighborhood_mask].roi == request[self.neighborhood].roi
+        ), f"Requested {self.neighborhood} and {self.neighborhood_mask} with different roi's"
 
         request_roi = request[self.neighborhood].roi
         grow_distance = Coordinate(

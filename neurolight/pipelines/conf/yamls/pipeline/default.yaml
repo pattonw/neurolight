@@ -1,0 +1,5 @@
+pipeline:
+  train_embedding: false
+  train_foreground: false
+  fusion_pipeline: true
+  distances: true

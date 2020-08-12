@@ -14,23 +14,18 @@ def test_foreground_pipeline(
     tmpdir, fusion_pipeline, train_foreground, distance_loss, snapshot_every
 ):
     setup_config = DEFAULT_CONFIG
-    setup_config["FUSION_PIPELINE"] = fusion_pipeline
-    setup_config["TRAIN_FOREGROUND"] = train_foreground
-    setup_config["SNAPSHOT_EVERY"] = snapshot_every
-    setup_config["TENSORBOARD_LOG_DIR"] = tmpdir
-    setup_config["SNAPSHOT_DIR"] = tmpdir
-    setup_config["SNAPSHOT_FILE_NAME"] = "test_snapshot"
-    setup_config["MATCHING_FAILURES_DIR"] = None
-    voxel_size = Coordinate(setup_config["VOXEL_SIZE"])
-    output_size = Coordinate(setup_config["OUTPUT_SHAPE"]) * voxel_size
-    input_size = Coordinate(setup_config["INPUT_SHAPE"]) * voxel_size
-    pipeline, raw, output, inputs = foreground_pipeline(setup_config, get_test_data_sources)
+    setup_config.training.profile_every = 1
+    setup_config.pipeline.fusion_pipeline = fusion_pipeline
+    setup_config.pipeline.train_foreground = train_foreground
+    setup_config.snapshot.every = snapshot_every
+    setup_config.training.tensorboard_log_dir = str(tmpdir)
+    setup_config.snapshot.directory = str(tmpdir)
+    setup_config.snapshot.file_name = "test_snapshot"
+    pipeline, requests = foreground_pipeline(
+        setup_config, get_test_data_sources
+    )
     request = BatchRequest()
-    request.add(raw, input_size)
-    request.add(output, output_size)
-    for key in inputs:
-        request.add(key, output_size)
+    for key, shape in requests:
+        request.add(key, shape)
     with build(pipeline):
-        batch = pipeline.request_batch(request)
-        assert output in batch
-        assert raw in batch
+        pipeline.request_batch(request)

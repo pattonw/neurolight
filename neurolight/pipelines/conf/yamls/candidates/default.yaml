@@ -1,0 +1,6 @@
+candidates:
+  spacing: 5000
+  threshold: 0.1
+  nms_window_size: [3, 3, 3]
+  nms_threshold: 0.1
+  mode: "skel"

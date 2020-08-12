@@ -1,0 +1,5 @@
+random_location:
+  point_balance_radius: 70
+  min_dist_to_fallback: 30000
+  max_random_location_points: 1000000
+  distance_attribute: "distance_to_fallback"

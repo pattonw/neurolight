@@ -21,12 +21,16 @@ from .pipeline_pieces import (
 
 from neurolight.gunpowder.nodes.clahe import scipyCLAHE
 
+from omegaconf.dictconfig import DictConfig
+
 import logging
 
-def foreground_pipeline(setup_config, get_data_sources=None):
-    input_shape = gp.Coordinate(setup_config["INPUT_SHAPE"])
-    output_shape = gp.Coordinate(setup_config["OUTPUT_SHAPE"])
-    voxel_size = gp.Coordinate(setup_config["VOXEL_SIZE"])
+
+def foreground_pipeline(setup_config: DictConfig, get_data_sources=None):
+    assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
+    input_shape = gp.Coordinate(setup_config.data.input_shape)
+    output_shape = gp.Coordinate(setup_config.data.output_shape)
+    voxel_size = gp.Coordinate(setup_config.data.voxel_size)
 
     input_size = input_shape * voxel_size
     output_size = output_shape * voxel_size
@@ -44,15 +48,17 @@ def foreground_pipeline(setup_config, get_data_sources=None):
     ]
 
     pipeline = add_data_augmentation(pipeline, raw)
-    if setup_config["CLAHE"]:
+    if setup_config.clahe.enabled:
         pipeline = pipeline + scipyCLAHE(
-            [raw], kernel_size=gp.Coordinate([20, 64, 64]) * voxel_size, clip_limit=setup_config["CLIP_LIMIT"]
+            [raw],
+            kernel_size=gp.Coordinate(setup_config.clahe.kernel_size) * voxel_size,
+            clip_limit=setup_config.clahe.clip_limit,
         )
 
-    if setup_config["NUM_WORKERS"] > 1:
+    if setup_config.precache.num_workers > 1:
         pipeline = add_caching(pipeline, setup_config)
 
-    if setup_config["TRAIN_FOREGROUND"]:
+    if setup_config.pipeline.train_foreground:
 
         pipeline, fg_pred, fg_pred_gradient = add_foreground_training(
             pipeline, setup_config, raw, gt_fg, loss_weights
@@ -68,9 +74,13 @@ def foreground_pipeline(setup_config, get_data_sources=None):
             (fg_pred_gradient, output_size, "volumes/fg_pred_gradient")
         ]
 
-        inputs = [gt_fg, loss_weights, fg_pred_gradient]
-
-        outputs = (raw, fg_pred)
+        requests = (
+            (raw, input_size),
+            (fg_pred, output_size),
+            (gt_fg, output_size),
+            (loss_weights, output_size),
+            (fg_pred_gradient, output_size),
+        )
 
     else:
         pipeline, fg_pred = add_foreground_prediction(pipeline, setup_config, raw)
@@ -79,30 +89,37 @@ def foreground_pipeline(setup_config, get_data_sources=None):
             # output data
             (fg_pred, output_size, "volumes/fg_pred")
         ]
-        inputs = []
 
-        outputs = (raw, fg_pred)
+        requests = ((raw, input_size), (fg_pred, output_size))
 
-    if setup_config["PROFILE_EVERY"] > 0:
-        pipeline += gp.PrintProfilingStats(every=int(setup_config["PROFILE_EVERY"]))
+    if setup_config.training.profile_every > 0:
+        pipeline += gp.PrintProfilingStats(
+            every=int(setup_config.training.profile_every)
+        )
 
-    if setup_config["SNAPSHOT_EVERY"] > 0:
+    if setup_config.snapshot.every > 0:
 
         pipeline = add_snapshot(pipeline, setup_config, snapshot_datasets)
 
-    return (pipeline,) + outputs + (inputs,)
+    return (pipeline, requests)
 
 
-def embedding_pipeline(setup_config, get_data_sources=None):
-    output_shape = gp.Coordinate(setup_config["OUTPUT_SHAPE"])
-    voxel_size = gp.Coordinate(setup_config["VOXEL_SIZE"])
+def embedding_pipeline(setup_config: DictConfig, get_data_sources=None):
+    assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
+    output_shape = gp.Coordinate(setup_config.data.output_shape)
+    input_shape = gp.Coordinate(setup_config.data.input_shape)
+    voxel_size = gp.Coordinate(setup_config.data.voxel_size)
     output_size = output_shape * voxel_size
+    input_size = input_shape * voxel_size
 
     pipeline, snapshot_datasets, raw, labels, matched = get_training_inputs(
         setup_config, get_data_sources
     )
 
-    if setup_config["AUX_TASK"]:
+    if (
+        setup_config.emb_model.aux_task.enabled
+        and setup_config.pipeline.train_embedding
+    ):
         pipeline, neighborhood_gt, neighborhood_mask = add_neighborhood(
             pipeline, setup_config, matched
         )
@@ -111,7 +128,7 @@ def embedding_pipeline(setup_config, get_data_sources=None):
 
     pipeline = add_data_augmentation(pipeline, raw)
 
-    if setup_config["NUM_WORKERS"] > 1:
+    if setup_config.precache.num_workers > 1:
         pipeline = add_caching(pipeline, setup_config)
 
     pipeline, fg_pred = add_foreground_prediction(pipeline, setup_config, raw)
@@ -123,9 +140,9 @@ def embedding_pipeline(setup_config, get_data_sources=None):
         (maxima, output_size, "volumes/fg_maxima", logging.INFO),
     ]
 
-    if setup_config["TRAIN_EMBEDDING"]:
+    if setup_config.pipeline.train_embedding:
 
-        if setup_config["AUX_TASK"]:
+        if setup_config.emb_model.aux_task.enabled:
             pipeline, embedding, embedding_gradient, neighborhood, neighborhood_gradient = add_embedding_training(
                 pipeline,
                 setup_config,
@@ -135,7 +152,6 @@ def embedding_pipeline(setup_config, get_data_sources=None):
                 neighborhood_gt,
                 neighborhood_mask,
             )
-            inputs = (labels, maxima, neighborhood_mask, neighborhood_gt)
 
             snapshot_datasets += [
                 # output data
@@ -151,12 +167,18 @@ def embedding_pipeline(setup_config, get_data_sources=None):
                 (neighborhood_gradient, output_size, "volumes/neighborhood_gradient"),
             ]
 
-            outputs = (raw, embedding)
+            requests = (
+                (raw, input_size),
+                (embedding, output_size),
+                (labels, output_size),
+                (maxima, output_size),
+                (neighborhood_mask, output_size),
+                (neighborhood_gt, output_size),
+            )
         else:
             pipeline, embedding, embedding_gradient = add_embedding_training(
                 pipeline, setup_config, raw, labels, maxima
             )
-            inputs = (labels, maxima)
 
             snapshot_datasets += [
                 # output data
@@ -168,23 +190,48 @@ def embedding_pipeline(setup_config, get_data_sources=None):
                 (embedding_gradient, output_size, "volumes/embedding_gradient")
             ]
 
-            outputs = (raw, embedding)
+            requests = (
+                (raw, input_size),
+                (labels, output_size),
+                (maxima, output_size),
+                (embedding, output_size),
+            )
 
     else:
-        pipeline, embedding = add_embedding_prediction(pipeline, setup_config, raw)
-        inputs = tuple()
+        if setup_config.emb_model.aux_task.enabled:
+            pipeline, embedding, neighborhood = add_embedding_prediction(
+                pipeline, setup_config, raw
+            )
 
-        snapshot_datasets += [
-            # output data
-            (embedding, output_size, "volumes/embedding")
-        ]
+            snapshot_datasets += [
+                # output data
+                (embedding, output_size, "volumes/embedding"),
+                (neighborhood, output_size, "volumes/neighborhood"),
+            ]
 
-        outputs = (raw, embedding)
+            requests = (
+                (raw, input_size),
+                (embedding, output_size),
+                (neighborhood, output_size),
+            )
 
-    if setup_config["SNAPSHOT_EVERY"] > 0:
+        else:
+            pipeline, embedding = add_embedding_prediction(pipeline, setup_config, raw)
+
+            snapshot_datasets += [
+                # output data
+                (embedding, output_size, "volumes/embedding")
+            ]
+
+            requests = ((raw, input_size), (embedding, output_size))
+
+    if setup_config.snapshot.every > 0:
         pipeline = add_snapshot(pipeline, setup_config, snapshot_datasets)
 
-    if setup_config["PROFILE_EVERY"] > 0:
-        pipeline += gp.PrintProfilingStats(every=int(setup_config["PROFILE_EVERY"]))
+    if setup_config.training.profile_every > 0:
+        pipeline += gp.PrintProfilingStats(
+            every=int(setup_config.training.profile_every)
+        )
 
-    return (pipeline,) + outputs + (inputs,)
+    return (pipeline, requests)
+

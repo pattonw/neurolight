@@ -1,0 +1,7 @@
+data_processing:
+  neuron_radius: 1.5
+  mask_radius: 1
+  blend_smoothness: 3
+  clahe: false
+  distance_threshold: 1e-4
+  distance_scale: 1

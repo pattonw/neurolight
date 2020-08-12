@@ -1,0 +1,4 @@
+snapshot:
+  every: 0
+  file_name: "snapshot_{iteration}.hdf"
+  directory: "snapshots"
