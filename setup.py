@@ -9,5 +9,9 @@ setup(
         author='Lisa Mais',
         author_email='Lisa.Mais@mdc-berlin.de',
         license='MIT',
+        entry_points='''
+            [console_scripts]
+            neurolight=neurolight.cli.cli:neurolight
+        ''',
         packages=find_packages()
 )
