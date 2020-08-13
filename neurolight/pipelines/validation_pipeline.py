@@ -18,6 +18,7 @@ from neurolight.gunpowder.nodes.rasterize_skeleton import RasterizeSkeleton
 from neurolight.gunpowder.nodes.emst_components import ComponentWiseEMST
 
 import torch
+from omegaconf import OmegaConf
 
 import copy
 from pathlib import Path
@@ -76,8 +77,8 @@ def emb_validation_pipeline(
 
     voxel_size = gp.Coordinate(config.data.voxel_size)
     micron_scale = max(voxel_size)
-    input_shape = gp.Coordinate(config.model.input_shape)
-    output_shape = gp.Coordinate(config.model.output_shape)
+    input_shape = gp.Coordinate(config.data.input_shape)
+    output_shape = gp.Coordinate(config.data.output_shape)
     input_size = voxel_size * input_shape
     output_size = voxel_size * output_shape
 
@@ -88,7 +89,7 @@ def emb_validation_pipeline(
     num_thresholds = config.eval.num_thresholds
     threshold_range = config.eval.threshold_range
 
-    edge_threshold_fg = config.eva.edge_threshold_fg
+    edge_threshold_fg = config.eval.edge_threshold_fg
     component_threshold_fg = config.eval.component_threshold_fg
     component_threshold_emb = config.eval.component_threshold_emb
 
@@ -160,7 +161,7 @@ def emb_validation_pipeline(
             edge_attrs=edge_attrs,
         )
 
-        if config["EVAL_CLAHE"]:
+        if config.eval.clahe.enabled:
             raw_source = raw_source + scipyCLAHE(
                 [raw],
                 gp.Coordinate([20, 64, 64]) * voxel_size,
@@ -350,8 +351,8 @@ def fg_validation_pipeline(config, snapshot_file, raw_path, gt_path):
     transform_template = config.data.transform_template
 
     voxel_size = gp.Coordinate(config.data.voxel_size)
-    input_shape = gp.Coordinate(config.model.input_shape)
-    output_shape = gp.Coordinate(config.model.output_shape)
+    input_shape = gp.Coordinate(config.data.input_shape)
+    output_shape = gp.Coordinate(config.data.output_shape)
     input_size = voxel_size * input_shape
     output_size = voxel_size * output_shape
 
@@ -506,8 +507,8 @@ def pre_computed_fg_validation_pipeline(
     transform_template = config.data.transform_template
 
     voxel_size = gp.Coordinate(config.data.voxel_size)
-    input_shape = gp.Coordinate(config.model.input_shape)
-    output_shape = gp.Coordinate(config.model.output_shape)
+    input_shape = gp.Coordinate(config.data.input_shape)
+    output_shape = gp.Coordinate(config.data.output_shape)
     input_size = voxel_size * input_shape
     output_size = voxel_size * output_shape
 
@@ -681,7 +682,9 @@ def get_emb_model(config):
     # update with setup model config
     setup = config.emb_model.setup
     model_config_file = Path(config.emb_model.directory, setup, "config.yaml")
-    model_config.update(json.load(model_config_file.open()))
+    model_config = OmegaConf.merge(
+        model_config, OmegaConf.load(model_config_file.open())
+    )
 
     model = nl.networks.pytorch.EmbeddingUnet(model_config)
 
@@ -798,7 +801,9 @@ def validation_pipeline(config):
         gt -> rasterize        -> merge -> candidates -> trees
     } -> merge -> comatch + evaluate
     """
-    raise NotImplementedError("This seems redundant, but not sure if I can delete it yet")
+    raise NotImplementedError(
+        "This seems redundant, but not sure if I can delete it yet"
+    )
     blocks = config["BLOCKS"]
     benchmark_datasets_path = Path(config.data.benchmark_data_path)
     sample = config.eval.sample
@@ -809,8 +814,8 @@ def validation_pipeline(config):
     neuron_width = int(config["NEURON_RADIUS"])
     voxel_size = gp.Coordinate(config.data.voxel_size)
     micron_scale = max(voxel_size)
-    input_shape = gp.Coordinate(config.model.input_shape)
-    output_shape = gp.Coordinate(config.model.output_shape)
+    input_shape = gp.Coordinate(config.data.input_shape)
+    output_shape = gp.Coordinate(config.data.output_shape)
     input_size = voxel_size * input_shape
     output_size = voxel_size * output_shape
 

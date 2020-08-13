@@ -44,7 +44,8 @@ class UNet:
 class Embedding(UNet):
     net_name: str = "emb_net"
     directory: str = (
-        "${HOME}/Code/Scripts/neurolight_experiments/mouselight/06_torch_embedding"
+        "/groups/mousebrainmicro/home/pattonw/Code/Scripts/"
+        "neurolight_experiments/mouselight/06_torch_embedding"
     )
     setup: str = "???"
     checkpoint: Optional[int] = None
@@ -59,7 +60,8 @@ class Embedding(UNet):
 class Foreground(UNet):
     net_name: str = "fg_net"
     directory: str = (
-        "${HOME}/Code/Scripts/neurolight_experiments/mouselight/05_torch_foreground"
+        "/groups/mousebrainmicro/home/pattonw/Code/Scripts/"
+        "neurolight_experiments/mouselight/05_torch_foreground"
     )
     setup: str = "???"
     checkpoint: Optional[int] = None

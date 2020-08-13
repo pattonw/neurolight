@@ -190,7 +190,7 @@ def get_mouselight_data_sources(
 
     # Data Properties
     voxel_size = gp.Coordinate(setup_config.data.voxel_size)
-    output_shape = gp.Coordinate(setup_config.fg_model.output_size)
+    output_shape = gp.Coordinate(setup_config.data.output_shape)
     output_size = output_shape * voxel_size
     micron_scale = voxel_size[0]
 
