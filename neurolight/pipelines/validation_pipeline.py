@@ -7,6 +7,10 @@ from neurolight.gunpowder.nodes.snapshot_source import SnapshotSource
 from neurolight.pipelines import DEFAULT_CONFIG
 
 from neurolight.gunpowder.nodes.maxima import Skeletonize
+from neurolight.gunpowder.nodes.skeletonize_candidates import (
+    Skeletonize as Skeletonize_V2,
+    SinSample,
+)
 
 from neurolight.gunpowder.nodes.minimax import MiniMax, MiniMaxEmbeddings
 from neurolight.gunpowder.nodes.emst import EMST
@@ -62,12 +66,12 @@ class MergeScores(gp.BatchFilter):
 def emb_validation_pipeline(
     config,
     snapshot_file,
-    candidates_path,
     raw_path,
     gt_path,
+    candidates_path=None,
     candidates_mst_path=None,
     candidates_mst_dense_path=None,
-    path_stat="max",
+    fg_pred_path=None,
 ):
     checkpoint = config.emb_model.checkpoint
     blocks = config.eval.blocks
@@ -88,6 +92,8 @@ def emb_validation_pipeline(
     )
     num_thresholds = config.eval.num_thresholds
     threshold_range = config.eval.threshold_range
+
+    candidate_threshold = config.candidates.threshold
 
     edge_threshold_fg = config.eval.edge_threshold_fg
     component_threshold_fg = config.eval.component_threshold_fg
@@ -119,9 +125,12 @@ def emb_validation_pipeline(
             np.array(voxel_size[::-1]),
         )
 
+        raw = gp.ArrayKey(f"RAW_{block}")
+        fg_pred = gp.ArrayKey(f"FG_PRED_{block}")
+
+        skeleton = gp.ArrayKey(f"SKELETON_{block}")
         candidates_1 = gp.ArrayKey(f"CANDIDATES_1_{block}")
 
-        raw = gp.ArrayKey(f"RAW_{block}")
         mst_0 = gp.GraphKey(f"MST_0_{block}")
         mst_dense_0 = gp.GraphKey(f"MST_DENSE_0_{block}")
         mst_1 = gp.GraphKey(f"MST_1_{block}")
@@ -134,23 +143,24 @@ def emb_validation_pipeline(
         optimal_mst = gp.GraphKey(f"OPTIMAL_MST_{block}")
 
         # Volume Source
-        raw_source = SnapshotSource(
-            snapshot_file,
-            datasets={
-                raw: raw_path.format(block=block),
-                candidates_1: candidates_path.format(block=block),
-            },
-        )
+        array_datasets = {raw: raw_path.format(block=block)}
+        if candidates_path is not None:
+            array_datasets[candidates_1] = candidates_path.format(block=block)
+        if fg_pred_path is not None:
+            array_datasets[fg_pred] = fg_pred_path.format(block=block)
+        raw_source = SnapshotSource(snapshot_file, datasets=array_datasets)
+
 
         # Graph Source
         graph_datasets = {gt: gt_path.format(block=block)}
         graph_directionality = {gt: False}
         edge_attrs = {}
-        if candidates_mst_path is not None:
+        if candidates_mst_path is not None and candidates_mst_dense_path is not None:
+            raise Exception(candidates_mst_path, candidates_mst_dense_path)
             graph_datasets[mst_0] = candidates_mst_path.format(block=block)
             graph_directionality[mst_0] = False
             edge_attrs[mst_0] = [distance_attr]
-        if candidates_mst_dense_path is not None:
+            
             graph_datasets[mst_dense_0] = candidates_mst_dense_path.format(block=block)
             graph_directionality[mst_dense_0] = False
             edge_attrs[mst_dense_0] = [distance_attr]
@@ -175,11 +185,39 @@ def emb_validation_pipeline(
             config, raw_source, raw, block, emb_model
         )
 
-        reference_sizes = {raw: input_size, emb: output_size, candidates_1: output_size}
+        reference_sizes = {
+            raw: input_size,
+            emb: output_size,
+            # candidates_1: output_size,
+            fg_pred: output_size,
+            # skeleton: output_size,
+        }
         if neighborhood is not None:
             reference_sizes[neighborhood] = output_size
 
         emb_source = add_scan(emb_source, reference_sizes)
+
+        if candidates_path is None:
+            assert (
+                fg_pred_path is not None
+            ), "Must provide fg_pred_path if candidates_path is None"
+            emb_source += Skeletonize_V2(fg_pred, skeleton, config.candidates.threshold)
+            emb_source += SinSample(
+                skeleton,
+                candidates_1,
+                sample_distance=config.candidates.spacing,
+                deterministic_sins=True,
+            )
+
+        if candidates_mst_path is None or candidates_mst_dense_path is None:
+            emb_source += MiniMax(
+                intensities=fg_pred,
+                mask=candidates_1,
+                mst=mst_0,
+                dense_mst=mst_dense_0,
+                distance_attr="distance",
+                threshold=candidate_threshold,
+            )
 
         input_roi = cube_roi.grow(
             (input_size - output_size) // 2, (input_size - output_size) // 2
@@ -211,6 +249,9 @@ def emb_validation_pipeline(
         additional_request[raw] = gp.ArraySpec(input_roi)
         additional_request[candidates_1] = gp.ArraySpec(cube_roi_shifted)
         additional_request[emb] = gp.ArraySpec(cube_roi_shifted)
+        if fg_pred_path is not None:
+            additional_request[fg_pred] = gp.ArraySpec(cube_roi_shifted)
+            additional_request[skeleton] = gp.ArraySpec(cube_roi_shifted)
         if neighborhood is not None:
             additional_request[neighborhood] = gp.ArraySpec(cube_roi_shifted)
         additional_request[gt] = gp.GraphSpec(cube_roi_shifted, directed=False)
@@ -224,39 +265,6 @@ def emb_validation_pipeline(
         additional_request[optimal_mst] = gp.GraphSpec(cube_roi_shifted, directed=False)
 
         pipeline = (emb_source, gt_source) + gp.MergeProvider()
-
-        if candidates_mst_path is not None and candidates_mst_dense_path is not None:
-            # mst_0 provided, just need to calculate embedding distances.
-            pass
-        elif config["EVAL_MINIMAX_EMBEDDING_DIST"]:
-            raise NotImplementedError("Depricated. This method does not work well")
-            # No mst_0 provided, must first calculate mst_0 and dense mst_0
-            pipeline += MiniMaxEmbeddings(
-                emb,
-                candidates_1,
-                decimated=mst_0,
-                dense=mst_dense_0,
-                distance_attr=distance_attr,
-            )
-
-        else:
-            raise NotImplementedError("Depricated. This method does not work well")
-            # mst/mst_dense not provided. Simply use euclidean distance on candidates
-            # embedding + physical coordinates (makes ComponentWiseEMST redundant)
-            pipeline += EMST(
-                emb,
-                candidates_1,
-                mst_0,
-                distance_attr=distance_attr,
-                coordinate_scale=coordinate_scale,
-            )
-            pipeline += EMST(
-                emb,
-                candidates_1,
-                mst_dense_0,
-                distance_attr=distance_attr,
-                coordinate_scale=coordinate_scale,
-            )
 
         pipeline += ThresholdEdges(
             (mst_0, mst_1),
@@ -288,14 +296,16 @@ def emb_validation_pipeline(
             num_thresholds=num_thresholds,
             threshold_range=threshold_range,
             small_component_threshold=component_threshold_emb,
-            # connectivity=mst_1,
+            connectivity=mst_1,
             output_graph=optimal_mst,
         )
 
-        if config.eval.snapshot:
+        if config.eval.snapshot.every > 0:
             snapshot_datasets = {
                 raw: f"volumes/raw",
                 emb: f"volumes/embeddings",
+                fg_pred: f"volumes/fg_pred",
+                skeleton: f"volumes/skeleton",
                 candidates_1: f"volumes/candidates_1",
                 mst_0: f"points/mst_0",
                 mst_dense_0: f"points/mst_dense_0",
@@ -312,9 +322,7 @@ def emb_validation_pipeline(
                 snapshot_datasets,
                 output_dir=config.eval.snapshot.directory,
                 output_filename=config.eval.snapshot.file_name.format(
-                    checkpoint=checkpoint,
-                    block=block,
-                    coordinate_scale=",".join([str(x) for x in coordinate_scale]),
+                    checkpoint=checkpoint, block=block
                 ),
                 edge_attrs={
                     mst_0: [distance_attr],
@@ -466,7 +474,7 @@ def fg_validation_pipeline(config, snapshot_file, raw_path, gt_path):
             small_component_threshold=component_threshold,
         )
 
-        if config.eval.snapshot.enabled:
+        if config.eval.snapshot.every > 0:
             pipeline += gp.Snapshot(
                 {
                     raw: f"volumes/raw",
@@ -607,7 +615,7 @@ def pre_computed_fg_validation_pipeline(
             small_component_threshold=component_threshold,
         )
 
-        if config.eval.snapshot.enabled:
+        if config.eval.snapshot.every > 0:
             pipeline += gp.Snapshot(
                 {
                     raw: f"volumes/raw",
@@ -745,7 +753,9 @@ def get_fg_model(config):
 
     setup = config.fg_model.setup
     model_config_file = Path(config.fg_model.directory, setup, "config.yaml")
-    model_config.update(json.load(model_config_file.open()))
+    model_config.update(
+        OmegaConf.merge(model_config, OmegaConf.load(model_config_file.open()))
+    )
 
     model = nl.networks.pytorch.ForegroundUnet(model_config)
 

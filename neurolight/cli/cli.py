@@ -59,10 +59,136 @@ def train_fg(setup, secrets, num_iterations):
 
 @neurolight.command()
 @click.argument("setup", type=click.Path(exists=True, file_okay=False, writable=True))
-@click.argument("secrets", type=click.Path(exists=True, dir_okay=False))
-@click.option("-n", "--num-iterations", "num_iterations", type=int, default=1)
-def grid_search_fg():
-    print("grid_search_fg")
+@click.option("--checkpoint-range", type=(int, int), default=(-1, -1))
+@click.option("--test", type=bool, default=False)
+def grid_search_fg(setup, checkpoint_range, test):
+    from neurolight.pipelines.validation_pipeline import fg_validation_pipeline
+    from neurolight.pipelines import DEFAULT_CONFIG, DEFAULT_EVAL_CONFIG
+
+    from gunpowder import build, BatchRequest, ArraySpec
+
+    import json
+    from pathlib import Path
+    import sys
+    import pickle
+    import numpy as np
+    import itertools
+
+    with working_directory(setup):
+        logging.basicConfig(level=logging.INFO, filename="grid_search.log")
+
+        all_checkpoints = [
+            int(x.name.split("_")[-1])
+            for x in Path(__file__).resolve().parent.iterdir()
+            if x.name.startswith("fg_net_checkpoint")
+        ]
+        latest_checkpoint = max(all_checkpoints)
+
+        checkpoints = [int(x) for x in sys.argv[1:]]
+        if len(checkpoints) == 0:
+            checkpoints = [latest_checkpoint]
+        if len(checkpoints) == 1 and checkpoints[0] == -1:
+            checkpoints = all_checkpoints
+        setup = str(Path(__file__).resolve().parent.name)
+
+        snapshot_file = (
+            "/groups/mousebrainmicro/home/pattonw/Code/Scripts"
+            + "/neurolight_experiments/mouselight/07_evaluations/validations.zarr"
+        )
+        raw_path = "volumes/{block}/raw"
+        raw_clahe_path = "volumes/{block}/raw_clahe"
+        gt_path = "points/{block}/ground_truth"
+
+        grid_search_parameters = [("eval.component_threshold_fg", [10000, 30000])]
+
+        for checkpoint in checkpoints:
+            grid_search_keys = [k for k, v in grid_search_parameters]
+            for grid_search_values in itertools.product(
+                *[v for k, v in grid_search_parameters]
+            ):
+                config = {}
+                config.update(DEFAULT_CONFIG)
+                config.update(DEFAULT_EVAL_CONFIG)
+                config.update(json.load(open("config.json", "r")))
+
+                config.fg_model.setup = setup
+                config.fg_model.checkpoint = checkpoint
+
+                config.data.input_shape = tuple(
+                    a + b
+                    for a, b in zip(
+                        config.data.input_shape, [6 * x for x in [4, 12, 12]]
+                    )
+                )
+                config.data.output_shape = tuple(
+                    a + b
+                    for a, b in zip(
+                        config.data.output_shape, [6 * x for x in [4, 12, 12]]
+                    )
+                )
+
+                config.eval.snapshot.every = int(
+                    checkpoint == latest_checkpoint or len(checkpoints) == 1
+                )
+                prefix = "test_" if test else ""
+                output_dir = (
+                    f"eval_grid_search/{prefix}"
+                    f"{'-'.join([k.split('.')[-1].lower() for k, _ in grid_search_parameters])}"
+                )
+                config.eval.snapshot.directory = f"{output_dir}/snapshots"
+                if not Path(config.eval.snapshot.directory).exists():
+                    Path(config.eval.snapshot.directory).mkdir(parents=True)
+
+                grid_iter_name = f"{'-'.join([str(x) for x in grid_search_values])}"
+                config.eval.snapshot.file_name = (
+                    f"{{checkpoint}}_{{block}}_{grid_iter_name}.zarr"
+                )
+
+                # to add clahe to the raw data:
+                config.eval.clahe.enabled = False
+                if config.clahe.enabled:
+                    raw_path = raw_clahe_path
+
+                scores_file = f"{{checkpoint}}_{grid_iter_name}.obj"
+                if Path(output_dir, scores_file.format(checkpoint=checkpoint)).exists():
+                    logger.info(f"skipping checkpoint: {checkpoint}")
+                    continue
+                logger.info(f"evaluating checkpoint: {checkpoint}")
+
+                config.eval.blocks = list(range(1, 26))
+                if test:
+                    config.eval.blocks = [8]
+                # config["COORDINATE_SCALE"] = 1
+
+                for k, v in zip(grid_search_keys, grid_search_values):
+                    config[k] = v
+
+                pipeline, score_key = fg_validation_pipeline(
+                    config, snapshot_file, raw_path, gt_path
+                )
+                request = BatchRequest()
+                request[score_key] = ArraySpec(nonspatial=True)
+                with build(pipeline):
+                    batch = pipeline.request_batch(request)
+                    scores = batch[score_key].data
+
+                    distances = scores[0, 0, :]
+                    optimal_threshold = np.argmin(distances)
+                    optimal_score = distances[optimal_threshold]
+                    np.set_printoptions(precision=3)
+                    np.set_printoptions(suppress=True)
+                    if config.eval.snapshot.every:
+                        logger.info(
+                            f"Optimal score: {optimal_score} at {scores[0,1,optimal_threshold]}"
+                        )
+                        logger.info(scores)
+
+                pickle.dump(
+                    scores,
+                    Path(output_dir, scores_file.format(checkpoint=checkpoint)).open(
+                        "wb"
+                    ),
+                )
 
 
 @neurolight.command()
@@ -99,7 +225,8 @@ def train_emb(setup, secrets, num_iterations):
 @neurolight.command()
 @click.argument("setup", type=click.Path(exists=True, file_okay=False, writable=True))
 @click.option("--checkpoint-range", type=(int, int), default=(-1, -1))
-def grid_search_emb(setup, checkpoint_range):
+@click.option("--test", type=bool, default=False)
+def grid_search_emb(setup, checkpoint_range, test):
     from neurolight.pipelines.validation_pipeline import emb_validation_pipeline
     from neurolight.pipelines import DEFAULT_CONFIG
 
@@ -139,14 +266,18 @@ def grid_search_emb(setup, checkpoint_range):
             "/groups/mousebrainmicro/home/pattonw/Code/Scripts"
             + "/neurolight_experiments/mouselight/07_evaluations/validations.zarr"
         )
-        candidates_path = "predicted_volumes/candidates/unet/setup_00/99500/{block}"
+        candidates_path = "predicted_volumes/candidates/unet/setup_02/301000/{block}"
+        fg_pred_path = "predicted_volumes/fg/unet/setup_02/301000/{block}"
         raw_path = "volumes/{block}/raw"
+        raw_clahe_path = "volumes/{block}/raw_clahe"
         gt_path = "points/{block}/ground_truth"
-        mst_path = "predicted_volumes/mst/unet/setup_00/99500/{block}"
-        dense_mst_path = "predicted_volumes/mst_dense/unet/setup_00/99500/{block}"
-
-        grid_search_parameters = [("eval.component_threshold_fg", [10000, 30000])]
-        # grid_search_parameters = [("COMPONENT_THRESHOLD_1", [10000])]
+        mst_path = "predicted_volumes/mst/unet/setup_02/301000/{block}"
+        dense_mst_path = "predicted_volumes/mst_dense/unet/setup_02/301000/{block}"
+        grid_search_parameters = [
+            ("candidates.spacing", [5000, 10000, 20000]),
+            ("um_loss.coordinate_scale", [0.01, 0.05, 10]),
+        ]
+        # grid_search_parameters = [("eval.clahe_mode", ["blockwise", "global"])]
 
         for checkpoint in checkpoints:
             grid_search_keys = [k for k, v in grid_search_parameters]
@@ -157,7 +288,7 @@ def grid_search_emb(setup, checkpoint_range):
                 config = copy.deepcopy(DEFAULT_CONFIG)
                 config = OmegaConf.merge(config, OmegaConf.load(open(f"config.yaml")))
 
-                config.emb_model.setup = setup
+                config.emb_model.setup = Path.cwd().name
                 config.emb_model.checkpoint = checkpoint
 
                 config.data.input_shape = tuple(
@@ -176,20 +307,26 @@ def grid_search_emb(setup, checkpoint_range):
                 config.eval.snapshot.every = int(
                     checkpoint == latest_checkpoint or len(checkpoints) == 1
                 )
-                config.eval.snapshot.directory = (
-                    "eval_grid_search/"
-                    f"{'-'.join([k.lower() for k, v in grid_search_parameters])}"
+                prefix = "test_" if test else ""
+                output_dir = (
+                    f"eval_grid_search/{prefix}"
+                    f"{'-'.join([k.split('.')[-1].lower() for k, _ in grid_search_parameters])}"
                 )
+                config.eval.snapshot.directory = f"{output_dir}/snapshots"
                 if not Path(config.eval.snapshot.directory).exists():
                     Path(config.eval.snapshot.directory).mkdir(parents=True)
 
                 grid_iter_name = f"{'-'.join([str(x) for x in grid_search_values])}"
+                if test:
+                    grid_iter_name += "_test"
                 config.eval.snapshot.file_name = (
                     f"{{checkpoint}}_{{block}}_{grid_iter_name}.zarr"
                 )
 
                 # to add clahe to the raw data:
                 config.eval.clahe.enabled = False
+                if config.clahe.enabled:
+                    raw_path = raw_clahe_path
 
                 # if candidates_mst_path and candidates_mst_path_dense not supplied, you
                 # can calculate the mst based on the embedding gradients. (This doesn't work well)
@@ -197,16 +334,18 @@ def grid_search_emb(setup, checkpoint_range):
 
                 scores_file = f"{{checkpoint}}_{grid_iter_name}.obj"
 
-                if Path(
-                    config.eval.snapshot.directory,
-                    scores_file.format(checkpoint=checkpoint),
-                ).exists():
+                if Path(output_dir, scores_file.format(checkpoint=checkpoint)).exists():
                     logger.info(f"skipping checkpoint: {checkpoint}")
-                    continue
+                    if test:
+                        pass
+                    else:
+                        continue
+
                 logger.info(f"evaluating checkpoint: {checkpoint}")
 
-                # config["BLOCKS"] = [8]
                 config.eval.blocks = list(range(1, 26))
+                if test:
+                    config.eval.blocks = [8]
 
                 for k, v in zip(grid_search_keys, grid_search_values):
                     OmegaConf.update(config, k, v)
@@ -214,11 +353,12 @@ def grid_search_emb(setup, checkpoint_range):
                 pipeline, score_key = emb_validation_pipeline(
                     config,
                     snapshot_file,
-                    candidates_path,
                     raw_path,
                     gt_path,
-                    candidates_mst_path=mst_path,
-                    candidates_mst_dense_path=dense_mst_path,
+                    # candidates_mst_path=mst_path,
+                    # candidates_mst_dense_path=dense_mst_path,
+                    # candidates_path=candidates_path,
+                    fg_pred_path=fg_pred_path,
                 )
                 request = BatchRequest()
                 request[score_key] = ArraySpec(nonspatial=True)
@@ -231,7 +371,7 @@ def grid_search_emb(setup, checkpoint_range):
                     optimal_score = distances[optimal_threshold]
                     np.set_printoptions(precision=3)
                     np.set_printoptions(suppress=True)
-                    if config.eval.snapshot.every == 1 or len(checkpoints) == 1:
+                    if config.eval.snapshot.every:
                         logger.info(
                             f"Optimal score: {optimal_score} at {scores[0,1,optimal_threshold]}"
                         )
@@ -239,8 +379,8 @@ def grid_search_emb(setup, checkpoint_range):
 
                 pickle.dump(
                     scores,
-                    Path(
-                        config.eval.snapshot.directory,
-                        scores_file.format(checkpoint=checkpoint),
-                    ).open("wb"),
+                    Path(output_dir, scores_file.format(checkpoint=checkpoint)).open(
+                        "wb"
+                    ),
                 )
+
