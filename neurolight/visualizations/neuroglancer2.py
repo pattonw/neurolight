@@ -639,6 +639,7 @@ def add_layer(context, array, name, visible=True, **kwargs):
     array_dims = len(array.shape)
     voxel_size = array.voxel_size
     attrs = {
+        2: {"names": ["y", "x"], "units": "nm", "scales": voxel_size},
         3: {"names": ["z", "y", "x"], "units": "nm", "scales": voxel_size},
         4: {
             "names": ["c^", "z", "y", "x"],
@@ -649,6 +650,8 @@ def add_layer(context, array, name, visible=True, **kwargs):
     dimensions = neuroglancer.CoordinateSpace(**attrs[array_dims])
     offset = np.array((0,) * (array_dims - 3) + array.roi.get_offset())
     offset = offset // attrs[array_dims]["scales"]
+    # if len(offset) == 2:
+    #     offset = (0,) + tuple(offset)
 
     if len(array.shape) > 3 and array.shape[0] > 3:
         pca = PCA(n_components=3)
@@ -656,9 +659,9 @@ def add_layer(context, array, name, visible=True, **kwargs):
         fitted = pca.fit_transform(flattened).T
         array.data = fitted.reshape((3,) + array.shape[1:])
 
-    # d = np.asarray(array.data)
-    # if array.data.dtype == np.dtype(bool):
-    #     array.data = np.array(d, dtype=np.float32)
+    d = np.asarray(array.data)
+    if array.data.dtype == np.dtype(bool):
+        array.data = np.array(d, dtype=np.float32)
 
     channels = ",".join(
         [
@@ -692,7 +695,17 @@ void main() {
         )
 
 
-def add_trees(s, trees, node_id, name, dimensions, offset, shape, visible=False):
+def add_trees(
+    s,
+    trees,
+    node_id,
+    name,
+    dimensions,
+    offset,
+    shape,
+    visible=False,
+    voxel_size=(1000, 300, 300),
+):
     if trees is None:
         return None
 
@@ -714,7 +727,7 @@ def add_trees(s, trees, node_id, name, dimensions, offset, shape, visible=False)
                         dimensions=dimensions,
                         voxel_offset=offset,
                     ),
-                    MatchSource(trees, dimensions, voxel_size=[1000, 300, 300]),
+                    MatchSource(trees, dimensions, voxel_size=voxel_size),
                 ],
                 skeleton_shader="""
 // coloring options:
@@ -750,7 +763,7 @@ void main() {
                         dimensions=dimensions,
                         voxel_offset=offset,
                     ),
-                    SkeletonSource(trees, dimensions, voxel_size=[1000, 300, 300]),
+                    SkeletonSource(trees, dimensions, voxel_size=voxel_size),
                 ],
                 skeleton_shader="""
 #uicontrol float showautapse slider(min=0, max=2)
