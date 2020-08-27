@@ -375,6 +375,7 @@ def fg_validation_pipeline(config, snapshot_file, raw_path, gt_path):
 
     clip_limit = config.clahe.clip_limit
     normalize = config.clahe.normalize
+    kernel_size = gp.Coordinate(config.clahe.kernel_size)
 
     validation_pipelines = []
     specs = {}
@@ -415,10 +416,10 @@ def fg_validation_pipeline(config, snapshot_file, raw_path, gt_path):
             directed={gt: False},
         )
 
-        if config.eval.clahe.enabled:
+        if config.clahe.enabled:
             raw_source = raw_source + scipyCLAHE(
                 [raw],
-                gp.Coordinate([20, 64, 64]) * voxel_size,
+                kernel_size=kernel_size * voxel_size,
                 clip_limit=clip_limit,
                 normalize=normalize,
             )

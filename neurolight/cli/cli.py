@@ -60,36 +60,40 @@ def train_fg(setup, secrets, num_iterations):
 @neurolight.command()
 @click.argument("setup", type=click.Path(exists=True, file_okay=False, writable=True))
 @click.option("--checkpoint-range", type=(int, int), default=(-1, -1))
-@click.option("--test", type=bool, default=False)
+@click.option("--test", type=bool, default=False, is_flag=True)
 def grid_search_fg(setup, checkpoint_range, test):
     from neurolight.pipelines.validation_pipeline import fg_validation_pipeline
-    from neurolight.pipelines import DEFAULT_CONFIG, DEFAULT_EVAL_CONFIG
+    from neurolight.pipelines import DEFAULT_CONFIG
 
     from gunpowder import build, BatchRequest, ArraySpec
 
-    import json
     from pathlib import Path
     import sys
     import pickle
     import numpy as np
     import itertools
+    import copy
 
     with working_directory(setup):
         logging.basicConfig(level=logging.INFO, filename="grid_search.log")
 
         all_checkpoints = [
             int(x.name.split("_")[-1])
-            for x in Path(__file__).resolve().parent.iterdir()
+            for x in Path.cwd().iterdir()
             if x.name.startswith("fg_net_checkpoint")
         ]
         latest_checkpoint = max(all_checkpoints)
-
-        checkpoints = [int(x) for x in sys.argv[1:]]
-        if len(checkpoints) == 0:
+        
+        if checkpoint_range == (-1, -1):
             checkpoints = [latest_checkpoint]
-        if len(checkpoints) == 1 and checkpoints[0] == -1:
+        elif checkpoint_range == (0, -1):
             checkpoints = all_checkpoints
-        setup = str(Path(__file__).resolve().parent.name)
+        else:
+            checkpoints = [
+                checkpoint
+                for checkpoint in checkpoints
+                if checkpoint_range[0] <= checkpoint <= checkpoint_range[1]
+            ]
 
         snapshot_file = (
             "/groups/mousebrainmicro/home/pattonw/Code/Scripts"
@@ -106,12 +110,11 @@ def grid_search_fg(setup, checkpoint_range, test):
             for grid_search_values in itertools.product(
                 *[v for k, v in grid_search_parameters]
             ):
-                config = {}
-                config.update(DEFAULT_CONFIG)
-                config.update(DEFAULT_EVAL_CONFIG)
-                config.update(json.load(open("config.json", "r")))
 
-                config.fg_model.setup = setup
+                config = copy.deepcopy(DEFAULT_CONFIG)
+                config = OmegaConf.merge(config, OmegaConf.load(open(f"config.yaml")))
+
+                config.fg_model.setup = Path.cwd().name
                 config.fg_model.checkpoint = checkpoint
 
                 config.data.input_shape = tuple(
@@ -145,14 +148,18 @@ def grid_search_fg(setup, checkpoint_range, test):
                 )
 
                 # to add clahe to the raw data:
-                config.eval.clahe.enabled = False
-                if config.clahe.enabled:
-                    raw_path = raw_clahe_path
+                # config.eval.clahe.enabled = False
+                # if config.clahe.enabled:
+                #     raw_path = raw_clahe_path
 
                 scores_file = f"{{checkpoint}}_{grid_iter_name}.obj"
                 if Path(output_dir, scores_file.format(checkpoint=checkpoint)).exists():
-                    logger.info(f"skipping checkpoint: {checkpoint}")
-                    continue
+                    logger.info(f"Scores file exists for checkpoint: {checkpoint}")
+                    if test:
+                        pass
+                    else:
+                        logger.info(f"skipping checkpoint: {checkpoint}")
+                        continue
                 logger.info(f"evaluating checkpoint: {checkpoint}")
 
                 config.eval.blocks = list(range(1, 26))
@@ -161,7 +168,7 @@ def grid_search_fg(setup, checkpoint_range, test):
                 # config["COORDINATE_SCALE"] = 1
 
                 for k, v in zip(grid_search_keys, grid_search_values):
-                    config[k] = v
+                    OmegaConf.update(config, k, v)
 
                 pipeline, score_key = fg_validation_pipeline(
                     config, snapshot_file, raw_path, gt_path
@@ -225,7 +232,7 @@ def train_emb(setup, secrets, num_iterations):
 @neurolight.command()
 @click.argument("setup", type=click.Path(exists=True, file_okay=False, writable=True))
 @click.option("--checkpoint-range", type=(int, int), default=(-1, -1))
-@click.option("--test", type=bool, default=False)
+@click.option("--test", type=bool, default=False, is_flag=True)
 def grid_search_emb(setup, checkpoint_range, test):
     from neurolight.pipelines.validation_pipeline import emb_validation_pipeline
     from neurolight.pipelines import DEFAULT_CONFIG
@@ -335,10 +342,11 @@ def grid_search_emb(setup, checkpoint_range, test):
                 scores_file = f"{{checkpoint}}_{grid_iter_name}.obj"
 
                 if Path(output_dir, scores_file.format(checkpoint=checkpoint)).exists():
-                    logger.info(f"skipping checkpoint: {checkpoint}")
+                    logger.info(f"Scores file exists for checkpoint: {checkpoint}")
                     if test:
                         pass
                     else:
+                        logger.info(f"skipping checkpoint: {checkpoint}")
                         continue
 
                 logger.info(f"evaluating checkpoint: {checkpoint}")
