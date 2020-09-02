@@ -141,6 +141,7 @@ class Evaluate(gp.BatchFilter):
         outputs = gp.Batch()
 
         gt_graph = batch[self.gt].to_nx_graph().to_undirected()
+        assert gt_graph.number_of_nodes() > 0, "GT cannot be empty!"
         mst_graph = batch[self.mst].to_nx_graph().to_undirected()
         if self.connectivity is not None:
             connectivity_graph = batch[self.connectivity].to_nx_graph().to_undirected()
@@ -149,27 +150,30 @@ class Evaluate(gp.BatchFilter):
 
         if self.details is not None:
             matching_details_graph = nx.Graph()
-            if mst_graph.number_of_nodes() == 0:
-                node_offset = max([node for node in mst_graph.nodes]+[-1]) + 1
-                label_offset = len(list(nx.connected_components(mst_graph))) + 1
+            if mst_graph.number_of_nodes() > 0:
+                node_offset = max([node for node in mst_graph.nodes] + [-1]) + 1
+            else:
+                node_offset = 0
 
-                for node, attrs in mst_graph.nodes.items():
-                    matching_details_graph.add_node(node, **copy.deepcopy(attrs))
-                for edge, attrs in mst_graph.edges.items():
-                    matching_details_graph.add_edge(
-                        edge[0], edge[1], **copy.deepcopy(attrs)
-                    )
-                for node, attrs in gt_graph.nodes.items():
-                    matching_details_graph.add_node(
-                        node + node_offset, **copy.deepcopy(attrs)
-                    )
-                    matching_details_graph.nodes[node + node_offset]["id"] = (
-                        node + node_offset
-                    )
-                for edge, attrs in gt_graph.edges.items():
-                    matching_details_graph.add_edge(
-                    edge[0] + node_offset, edge[1] + node_offset, **copy.deepcopy(attrs)
-                    )
+            for node, attrs in mst_graph.nodes.items():
+                matching_details_graph.add_node(node, **copy.deepcopy(attrs))
+            for edge, attrs in mst_graph.edges.items():
+                matching_details_graph.add_edge(
+                    edge[0], edge[1], **copy.deepcopy(attrs)
+                )
+            for node, attrs in gt_graph.nodes.items():
+                matching_details_graph.add_node(
+                    node + node_offset, **copy.deepcopy(attrs)
+                )
+                matching_details_graph.nodes[node + node_offset]["id"] = (
+                    node + node_offset
+                )
+            for edge, attrs in gt_graph.edges.items():
+                matching_details_graph.add_edge(
+                    edge[0] + node_offset,
+                    edge[1] + node_offset,
+                    **copy.deepcopy(attrs),
+                )
 
         edges = [
             (edge, attrs[self.edge_threshold_attr])
@@ -518,6 +522,10 @@ class Evaluate(gp.BatchFilter):
                 best_graph, gp.GraphSpec(roi=batch[self.gt].spec.roi, directed=False)
             )
         if self.details is not None:
+            logger.warning(
+                f"Details has: {matching_details_graph.number_of_nodes()} nodes and "
+                f"{matching_details_graph.number_of_edges()} edges!"
+            )
             outputs[self.details] = gp.Graph.from_nx_graph(
                 matching_details_graph,
                 gp.GraphSpec(roi=batch[self.gt].spec.roi, directed=False),
