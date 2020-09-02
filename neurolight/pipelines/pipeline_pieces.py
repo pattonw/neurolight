@@ -8,12 +8,13 @@ import numpy as np
 import torch
 import daisy
 
-from gunpowder.nodes.random_location import RandomLocation
 from neurolight.gunpowder.nodes.daisy_graph_provider import DaisyGraphProvider
 from neurolight.gunpowder.nodes.filtered_daisy_graph_provider import (
     FilteredDaisyGraphProvider,
 )
 from neurolight.gunpowder.nodes.maxima import Skeletonize
+
+from neurolight.gunpowder.nodes.random_location import CustomRandomLocation
 
 from neurolight.gunpowder.pytorch.nodes.train_embedding import TrainEmbedding
 
@@ -224,26 +225,12 @@ def get_mouselight_data_sources(
         if sample.name in source_samples
     }
 
-    # if specified_locations is not None:
-    #     centers = pickle.load(open(specified_locations, "rb"))
-    #     random = gp.SpecifiedLocation
-    #     kwargs = {"locations": centers, "choose_randomly": True}
-    #     logger.info(f"Using specified locations from {specified_locations}")
-    # elif locations:
-    #     random = RandomLocations
-    #     kwargs = {
-    #         "ensure_nonempty": ensure_nonempty,
-    #         "ensure_centered": True,
-    #         "point_balance_radius": point_balance_radius * micron_scale,
-    #         "loc": gp.ArrayKey("RANDOM_LOCATION"),
-    #     }
-    # else:
-
-    random = RandomLocation
+    random = CustomRandomLocation
     kwargs = {
         "ensure_nonempty": ensure_nonempty,
         "ensure_centered": True,
         "point_balance_radius": point_balance_radius * micron_scale,
+        "balance_degrees": [0.5, 0.45]
     }
 
     data_sources = (
