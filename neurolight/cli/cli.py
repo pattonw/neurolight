@@ -53,7 +53,7 @@ def train_fg(setup, secrets, num_iterations):
         for key, shape in requests:
             request.add(key, shape)
         with gp.build(pipeline):
-            for i in range(setup_config["NUM_ITERATIONS"]):
+            for i in num_iterations:
                 pipeline.request_batch(request)
 
 
@@ -225,7 +225,7 @@ def train_emb(setup, secrets, num_iterations):
         for key, shape in requests:
             request.add(key, shape)
         with gp.build(pipeline):
-            for i in range(setup_config["NUM_ITERATIONS"]):
+            for i in range(num_iterations):
                 pipeline.request_batch(request)
 
 
