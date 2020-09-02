@@ -104,6 +104,7 @@ class EmbeddingLoss(torch.nn.Module):
         self.quadrupel_loss = setup_config.um_loss.quadruple_loss
         self.constrained_emst = setup_config.um_loss.constrained
         self.alpha = setup_config.um_loss.alpha
+        self.loss_mode = setup_config.um_loss.loss_mode.name.lower()
 
         self.aux_task = setup_config.emb_model.aux_task.enabled
 
@@ -133,6 +134,7 @@ class EmbeddingLoss(torch.nn.Module):
             balance=self.balance,
             quadrupel_loss=self.quadrupel_loss,
             constrained_emst=self.constrained_emst,
+            loss_mode=self.loss_mode,
         )
 
         if self.aux_task:
