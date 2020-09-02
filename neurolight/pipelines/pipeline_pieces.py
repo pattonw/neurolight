@@ -177,7 +177,9 @@ def get_mouselight_data_sources(
     mongo_url = setup_config.data.mongo_url
     samples_path = Path(setup_config.data.samples_path)
 
-    # specified_locations = setup_config.get("SPECIFIED_LOCATIONS")
+    # Set the total roi so examples are only picked from a designated region
+    total_roi = gp.Roi(setup_config.data.roi.offset, setup_config.data.roi.shape)
+    logger.warning(f"Cropping inputs to roi: {total_roi}")
 
     # Graph matching parameters
     point_balance_radius = setup_config.random_location.point_balance_radius
@@ -277,6 +279,9 @@ def get_mouselight_data_sources(
                 ),
             )
             + gp.MergeProvider()
+            + gp.Crop(matched, total_roi)
+            + gp.Crop(nonempty_placeholder, total_roi)
+            + gp.Crop(raw, total_roi)
             + random(**kwargs)
             + gp.Normalize(raw)
             + FilterComponents(

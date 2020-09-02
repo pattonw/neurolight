@@ -1,13 +1,19 @@
 from dataclasses import dataclass, field
 from enum import Enum
 
-from typing import List
+from typing import List, Optional
 
 
 class Dataset(Enum):
     TRAIN = 0
     VALIDATE = 1
     TEST = 2
+
+
+@dataclass
+class Roi:
+    offset: List[int] = "???"
+    shape: List[int] = "???"
 
 
 @dataclass
@@ -28,3 +34,5 @@ class Data:
     matched_source: str = "matched"
     input_shape: List[int] = field(default_factory=lambda: [80, 256, 256])
     output_shape: List[int] = field(default_factory=lambda: [32, 120, 120])
+
+    roi: Roi = Roi(offset=[None, None, None], shape=[None, None, None])
