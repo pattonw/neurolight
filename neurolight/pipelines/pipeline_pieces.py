@@ -360,7 +360,7 @@ def get_neuron_pair(
     micron_scale = voxel_size[0]
 
     # Somewhat arbitrary hyperparameters
-    blend_mode = setup_config.fusion.blend_mode
+    blend_mode = setup_config.fusion.blend_mode.name.lower()
     shift_attempts = setup_config.data_gen.shift_attempts
     request_attempts = setup_config.data_gen.request_attempts
     blend_smoothness = setup_config.fusion.blend_smoothness
@@ -571,7 +571,7 @@ def add_foreground_prediction(pipeline, setup_config: DictConfig, raw):
     voxel_size = gp.Coordinate(setup_config.data.voxel_size)
 
     checkpoint_file = (
-        f"{setup_config.fg_model.directory}/{setup_config.fg_model.setup}"
+        f"{setup_config.fg_model.directory}/{setup_config.fg_model.setup}/"
         f"{setup_config.fg_model.net_name}_checkpoint_{setup_config.fg_model.checkpoint}"
     )
     if checkpoint is None:
@@ -602,10 +602,15 @@ def add_embedding_prediction(pipeline, setup_config: DictConfig, raw):
     assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
     checkpoint = setup_config.emb_model.checkpoint
     voxel_size = Coordinate(setup_config.data.voxel_size)
-    if checkpoint is None or not Path(checkpoint).exists():
+    
+    checkpoint_file = (
+        f"{setup_config.emb_model.directory}/{setup_config.emb_model.setup}/"
+        f"{setup_config.emb_model.net_name}_checkpoint_{setup_config.emb_model.checkpoint}"
+    )
+    if checkpoint is None:
         checkpoint = None
     else:
-        checkpoint = Path(checkpoint)
+        checkpoint = Path(checkpoint_file)
 
     # New array keys
     embedding = ArrayKey("EMBEDDING")
