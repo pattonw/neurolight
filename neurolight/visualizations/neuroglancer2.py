@@ -43,6 +43,9 @@ class SkeletonSource(neuroglancer.skeleton.SkeletonSource):
         self.vertex_attributes["component"] = neuroglancer.skeleton.VertexAttributeInfo(
             data_type=np.float32, num_components=3
         )
+        self.vertex_attributes["connected_component"] = neuroglancer.skeleton.VertexAttributeInfo(
+            data_type=np.float32, num_components=3
+        )
         self.vertex_attributes[
             "component_size"
         ] = neuroglancer.skeleton.VertexAttributeInfo(
@@ -54,6 +57,12 @@ class SkeletonSource(neuroglancer.skeleton.SkeletonSource):
             assert "location" in attrs
 
         self.component_ids = {}
+        self.connected_component_ids = {}
+
+        for i, component in enumerate(nx.connected_components(self.cc)):
+            for node in component:
+                self.cc.nodes[node]["connected_component_id"] = i
+
 
     def get_skeleton(self, i):
 
@@ -64,6 +73,7 @@ class SkeletonSource(neuroglancer.skeleton.SkeletonSource):
         edge_len = []
         component = []
         component_size = []
+        connected_component = []
 
         print(
             f"rendering nodes and edges with {len(self.cc.nodes)} nodes and {len(self.cc.edges)} edges"
@@ -97,6 +107,26 @@ class SkeletonSource(neuroglancer.skeleton.SkeletonSource):
             component.append(
                 self.component_ids.setdefault(
                     self.cc.nodes[n].get("component_id", 0),
+                    (
+                        random.randint(0, 255) / 256,
+                        random.randint(0, 255) / 256,
+                        random.randint(0, 255) / 256,
+                    ),
+                )
+            )
+            connected_component.append(
+                self.component_ids.setdefault(
+                    self.cc.nodes[n].get("component_id", 0),
+                    (
+                        random.randint(0, 255) / 256,
+                        random.randint(0, 255) / 256,
+                        random.randint(0, 255) / 256,
+                    ),
+                )
+            )
+            connected_component.append(
+                self.connected_component_ids.setdefault(
+                    self.cc.nodes[n].get("connected_component_id", 0),
                     (
                         random.randint(0, 255) / 256,
                         random.randint(0, 255) / 256,
@@ -143,6 +173,26 @@ class SkeletonSource(neuroglancer.skeleton.SkeletonSource):
                     ),
                 )
             )
+            connected_component.append(
+                self.connected_component_ids.setdefault(
+                    self.cc.nodes[u].get("connected_component_id", 0),
+                    (
+                        random.randint(0, 255) / 256,
+                        random.randint(0, 255) / 256,
+                        random.randint(0, 255) / 256,
+                    ),
+                )
+            )
+            connected_component.append(
+                self.connected_component_ids.setdefault(
+                    self.cc.nodes[v].get("connected_component_id", 0),
+                    (
+                        random.randint(0, 255) / 256,
+                        random.randint(0, 255) / 256,
+                        random.randint(0, 255) / 256,
+                    ),
+                )
+            )
             component_size.append(self.cc.nodes[u].get("component_size", 0))
             component_size.append(self.cc.nodes[v].get("component_size", 0))
 
@@ -155,6 +205,7 @@ class SkeletonSource(neuroglancer.skeleton.SkeletonSource):
                 edge_len=edge_len,
                 component=component,
                 component_size=component_size,
+                connected_component=connected_component,
             ),
             # edge_attribues=dict(distances=distances),
         )
@@ -548,6 +599,7 @@ def build_trees(node_ids, locations, edges, node_attrs=None, edge_attrs=None):
             trees.add_node(node_ids[v], location=pos_v, **v_attrs)
 
         trees.add_edge(node_ids[u], node_ids[v], **e_attrs)
+
     return trees
 
 
