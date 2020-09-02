@@ -564,10 +564,15 @@ def add_foreground_prediction(pipeline, setup_config: DictConfig, raw):
     assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
     checkpoint = setup_config.fg_model.checkpoint
     voxel_size = gp.Coordinate(setup_config.data.voxel_size)
-    if checkpoint is None or not Path(checkpoint).exists():
+
+    checkpoint_file = (
+        f"{setup_config.fg_model.directory}/{setup_config.fg_model.setup}"
+        f"{setup_config.fg_model.net_name}_checkpoint_{setup_config.fg_model.checkpoint}"
+    )
+    if checkpoint is None:
         checkpoint = None
     else:
-        checkpoint = Path(checkpoint)
+        checkpoint = Path(checkpoint_file)
 
     # New array keys
     fg_pred = ArrayKey("FG_PRED")
@@ -610,7 +615,9 @@ def add_embedding_prediction(pipeline, setup_config: DictConfig, raw):
                 checkpoint=checkpoint,
                 inputs={"raw": raw},
                 outputs={0: embedding, 1: neighborhood},
-                array_specs={embedding: ArraySpec(dtype=np.float32, voxel_size=voxel_size)},
+                array_specs={
+                    embedding: ArraySpec(dtype=np.float32, voxel_size=voxel_size)
+                },
             )
             + Squeeze([raw, embedding])
         )
@@ -626,7 +633,9 @@ def add_embedding_prediction(pipeline, setup_config: DictConfig, raw):
                 checkpoint=checkpoint,
                 inputs={"raw": raw},
                 outputs={0: embedding},
-                array_specs={embedding: ArraySpec(dtype=np.float32, voxel_size=voxel_size)},
+                array_specs={
+                    embedding: ArraySpec(dtype=np.float32, voxel_size=voxel_size)
+                },
             )
             + Squeeze([raw, embedding])
         )
