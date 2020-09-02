@@ -68,7 +68,6 @@ def grid_search_fg(setup, checkpoint_range, test):
     from gunpowder import build, BatchRequest, ArraySpec
 
     from pathlib import Path
-    import sys
     import pickle
     import numpy as np
     import itertools
@@ -148,9 +147,9 @@ def grid_search_fg(setup, checkpoint_range, test):
                 )
 
                 # to add clahe to the raw data:
-                # config.eval.clahe.enabled = False
-                # if config.clahe.enabled:
-                #     raw_path = raw_clahe_path
+                config.eval.clahe.enabled = False
+                if config.clahe.enabled:
+                    raw_path = raw_clahe_path
 
                 scores_file = f"{{checkpoint}}_{grid_iter_name}.obj"
                 if Path(output_dir, scores_file.format(checkpoint=checkpoint)).exists():
@@ -363,9 +362,9 @@ def grid_search_emb(setup, checkpoint_range, test):
                     snapshot_file,
                     raw_path,
                     gt_path,
-                    # candidates_mst_path=mst_path,
-                    # candidates_mst_dense_path=dense_mst_path,
-                    # candidates_path=candidates_path,
+                    candidates_mst_path=mst_path,
+                    candidates_mst_dense_path=dense_mst_path,
+                    candidates_path=candidates_path,
                     fg_pred_path=fg_pred_path,
                 )
                 request = BatchRequest()
