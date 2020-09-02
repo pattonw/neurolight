@@ -131,12 +131,12 @@ def emb_validation_pipeline(
         skeleton = gp.ArrayKey(f"SKELETON_{block}")
         candidates_1 = gp.ArrayKey(f"CANDIDATES_1_{block}")
 
-        mst_0 = gp.GraphKey(f"MST_0_{block}")
-        mst_dense_0 = gp.GraphKey(f"MST_DENSE_0_{block}")
-        mst_1 = gp.GraphKey(f"MST_1_{block}")
-        mst_dense_1 = gp.GraphKey(f"MST_DENSE_1_{block}")
-        mst_2 = gp.GraphKey(f"MST_2_{block}")
-        mst_dense_2 = gp.GraphKey(f"MST_DENSE_2_{block}")
+        fg_mst_full = gp.GraphKey(f"FG_MST_FULL_{block}")
+        fg_mst_dense_full = gp.GraphKey(f"FG_MST_DENSE_FULL_{block}")
+        fg_mst_thresholded = gp.GraphKey(f"FG_MST_THRESHOLDED_{block}")
+        fg_mst_dense_thresholded = gp.GraphKey(f"FG_MST_DENSE_THRESHOLDED_{block}")
+        emb_mst = gp.GraphKey(f"EMB_MST_{block}")
+        # mst_dense_2 = gp.GraphKey(f"MST_DENSE_2_{block}")
         gt = gp.GraphKey(f"GT_{block}")
         score = gp.ArrayKey(f"SCORE_{block}")
         details = gp.GraphKey(f"DETAILS_{block}")
@@ -157,13 +157,13 @@ def emb_validation_pipeline(
         edge_attrs = {}
         if candidates_mst_path is not None and candidates_mst_dense_path is not None:
             raise Exception(candidates_mst_path, candidates_mst_dense_path)
-            graph_datasets[mst_0] = candidates_mst_path.format(block=block)
-            graph_directionality[mst_0] = False
-            edge_attrs[mst_0] = [distance_attr]
+            graph_datasets[fg_mst_full] = candidates_mst_path.format(block=block)
+            graph_directionality[fg_mst_full] = False
+            edge_attrs[fg_mst_full] = [distance_attr]
             
-            graph_datasets[mst_dense_0] = candidates_mst_dense_path.format(block=block)
-            graph_directionality[mst_dense_0] = False
-            edge_attrs[mst_dense_0] = [distance_attr]
+            graph_datasets[fg_mst_dense_full] = candidates_mst_dense_path.format(block=block)
+            graph_directionality[fg_mst_dense_full] = False
+            edge_attrs[fg_mst_dense_full] = [distance_attr]
         gt_source = SnapshotSource(
             snapshot_file,
             datasets=graph_datasets,
@@ -213,8 +213,8 @@ def emb_validation_pipeline(
             emb_source += MiniMax(
                 intensities=fg_pred,
                 mask=candidates_1,
-                mst=mst_0,
-                dense_mst=mst_dense_0,
+                mst=fg_mst_full,
+                dense_mst=fg_mst_dense_full,
                 distance_attr="distance",
                 threshold=candidate_threshold,
             )
@@ -236,11 +236,11 @@ def emb_validation_pipeline(
         if neighborhood is not None:
             block_spec[neighborhood] = gp.ArraySpec(cube_roi_shifted)
         block_spec[gt] = gp.GraphSpec(cube_roi_shifted, directed=False)
-        block_spec[mst_0] = gp.GraphSpec(cube_roi_shifted, directed=False)
-        block_spec[mst_dense_0] = gp.GraphSpec(cube_roi_shifted, directed=False)
-        block_spec[mst_1] = gp.GraphSpec(cube_roi_shifted, directed=False)
-        block_spec[mst_dense_1] = gp.GraphSpec(cube_roi_shifted, directed=False)
-        block_spec[mst_2] = gp.GraphSpec(cube_roi_shifted, directed=False)
+        block_spec[fg_mst_full] = gp.GraphSpec(cube_roi_shifted, directed=False)
+        block_spec[fg_mst_dense_full] = gp.GraphSpec(cube_roi_shifted, directed=False)
+        block_spec[fg_mst_thresholded] = gp.GraphSpec(cube_roi_shifted, directed=False)
+        block_spec[fg_mst_dense_thresholded] = gp.GraphSpec(cube_roi_shifted, directed=False)
+        block_spec[emb_mst] = gp.GraphSpec(cube_roi_shifted, directed=False)
         # block_spec[mst_dense_2] = gp.GraphSpec(cube_roi_shifted, directed=False)
         block_spec[score] = gp.ArraySpec(nonspatial=True)
         block_spec[optimal_mst] = gp.GraphSpec(cube_roi_shifted, directed=False)
@@ -255,11 +255,11 @@ def emb_validation_pipeline(
         if neighborhood is not None:
             additional_request[neighborhood] = gp.ArraySpec(cube_roi_shifted)
         additional_request[gt] = gp.GraphSpec(cube_roi_shifted, directed=False)
-        additional_request[mst_0] = gp.GraphSpec(cube_roi_shifted, directed=False)
-        additional_request[mst_dense_0] = gp.GraphSpec(cube_roi_shifted, directed=False)
-        additional_request[mst_1] = gp.GraphSpec(cube_roi_shifted, directed=False)
-        additional_request[mst_dense_1] = gp.GraphSpec(cube_roi_shifted, directed=False)
-        additional_request[mst_2] = gp.GraphSpec(cube_roi_shifted, directed=False)
+        additional_request[fg_mst_full] = gp.GraphSpec(cube_roi_shifted, directed=False)
+        additional_request[fg_mst_dense_full] = gp.GraphSpec(cube_roi_shifted, directed=False)
+        additional_request[fg_mst_thresholded] = gp.GraphSpec(cube_roi_shifted, directed=False)
+        additional_request[fg_mst_dense_thresholded] = gp.GraphSpec(cube_roi_shifted, directed=False)
+        additional_request[emb_mst] = gp.GraphSpec(cube_roi_shifted, directed=False)
         # additional_request[mst_dense_2] = gp.GraphSpec(cube_roi_shifted, directed=False)
         additional_request[details] = gp.GraphSpec(cube_roi_shifted, directed=False)
         additional_request[optimal_mst] = gp.GraphSpec(cube_roi_shifted, directed=False)
@@ -267,17 +267,17 @@ def emb_validation_pipeline(
         pipeline = (emb_source, gt_source) + gp.MergeProvider()
 
         pipeline += ThresholdEdges(
-            (mst_0, mst_1),
+            (fg_mst_full, fg_mst_thresholded),
             edge_threshold_fg,
             component_threshold_fg,
-            msts_dense=(mst_dense_0, mst_dense_1),
+            msts_dense=(fg_mst_dense_full, fg_mst_dense_thresholded),
             distance_attr=distance_attr,
         )
 
         pipeline += ComponentWiseEMST(
             emb,
-            mst_1,
-            mst_2,
+            fg_mst_thresholded,
+            emb_mst,
             distance_attr=distance_attr,
             coordinate_scale=coordinate_scale,
         )
@@ -288,7 +288,7 @@ def emb_validation_pipeline(
 
         pipeline += Evaluate(
             gt,
-            mst_2,
+            emb_mst,
             score,
             roi=cube_roi_shifted,
             details=details,
@@ -296,7 +296,7 @@ def emb_validation_pipeline(
             num_thresholds=num_thresholds,
             threshold_range=threshold_range,
             small_component_threshold=component_threshold_emb,
-            connectivity=mst_1,
+            connectivity=fg_mst_thresholded,
             output_graph=optimal_mst,
         )
 
@@ -307,11 +307,11 @@ def emb_validation_pipeline(
                 fg_pred: f"volumes/fg_pred",
                 skeleton: f"volumes/skeleton",
                 candidates_1: f"volumes/candidates_1",
-                mst_0: f"points/mst_0",
-                mst_dense_0: f"points/mst_dense_0",
-                mst_1: f"points/mst_1",
-                mst_dense_1: f"points/mst_dense_1",
-                # mst_2: f"points/mst_2",
+                fg_mst_full: f"points/fg_mst_full",
+                fg_mst_dense_full: f"points/fg_mst_dense_full",
+                fg_mst_thresholded: f"points/fg_mst_thresholded",
+                fg_mst_dense_thresholded: f"points/fg_mst_dense_thresholded",
+                emb_mst: f"points/emb_mst",
                 gt: f"points/gt",
                 details: f"points/details",
                 optimal_mst: f"points/optimal_mst",
@@ -325,11 +325,11 @@ def emb_validation_pipeline(
                     checkpoint=checkpoint, block=block
                 ),
                 edge_attrs={
-                    mst_0: [distance_attr],
-                    mst_dense_0: [distance_attr],
-                    mst_1: [distance_attr],
-                    mst_dense_1: [distance_attr],
-                    # mst_2: [distance_attr],
+                    fg_mst_full: [distance_attr],
+                    fg_mst_dense_full: [distance_attr],
+                    fg_mst_thresholded: [distance_attr],
+                    fg_mst_dense_thresholded: [distance_attr],
+                    emb_mst: [distance_attr],
                     # optimal_mst: [distance_attr], # it is unclear how to add distances if using connectivity graph
                     # mst_dense_2: [distance_attr],
                     details: ["details", "label_pair"],
