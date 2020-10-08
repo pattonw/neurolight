@@ -5,6 +5,7 @@ from .clahe import Clahe
 from .data import Data
 from .data_gen import DataGen
 from .data_processing import DataProcessing
+from .data_augmentation import DataAugmentation
 from .eval import Eval
 from .fusion import Fusion
 from .matching import Matching
@@ -25,6 +26,7 @@ class Config:
     data: Data = Data()
     data_gen: DataGen = DataGen()
     data_processing: DataProcessing = DataProcessing()
+    data_augmentation: DataAugmentation = DataAugmentation()
     eval: Eval = Eval()
     fusion: Fusion = Fusion()
     matching: Matching = Matching()

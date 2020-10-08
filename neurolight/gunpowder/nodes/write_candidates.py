@@ -86,9 +86,6 @@ class MongoWriteGraph(gp.BatchFilter):
     def prepare(self, request):
         deps = gp.BatchRequest()
         deps[self.mst] = request[self.mst].copy()
-        assert (
-            request[self.mst].roi.get_shape() == self.read_size
-        ), f"Got wrong size graph in request"
         return deps
 
     def process(self, batch, request):

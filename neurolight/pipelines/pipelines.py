@@ -47,11 +47,12 @@ def foreground_pipeline(setup_config: DictConfig, get_data_sources=None):
         (loss_weights, output_size, "volumes/loss_weights"),
     ]
 
-    pipeline = add_data_augmentation(pipeline, raw)
+    pipeline = add_data_augmentation(pipeline, setup_config, raw)
     if setup_config.clahe.enabled:
         pipeline = pipeline + scipyCLAHE(
             [raw],
             kernel_size=gp.Coordinate(setup_config.clahe.kernel_size) * voxel_size,
+            normalize=setup_config.clahe.normalize,
             clip_limit=setup_config.clahe.clip_limit,
         )
 
@@ -126,7 +127,7 @@ def embedding_pipeline(setup_config: DictConfig, get_data_sources=None):
 
     pipeline = grow_labels(pipeline, setup_config, labels)
 
-    pipeline = add_data_augmentation(pipeline, raw)
+    pipeline = add_data_augmentation(pipeline, setup_config, raw)
 
     if setup_config.precache.num_workers > 1:
         pipeline = add_caching(pipeline, setup_config)

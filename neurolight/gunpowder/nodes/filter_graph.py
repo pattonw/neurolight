@@ -59,7 +59,6 @@ class FilterSmallBranches(BatchFilter):
         outputs = Batch()
 
         g = batch[self.graph].to_nx_graph()
-        logger.debug(f"g has {len(g.nodes())} nodes pre filtering")
 
         cc_func = (
             nx.weakly_connected_components
@@ -69,42 +68,75 @@ class FilterSmallBranches(BatchFilter):
 
         ccs = cc_func(g)
         for cc in list(ccs):
-            finished = False
-            while not finished:
-                finished = True
-                g_component = g.subgraph(cc)
-
-                branch_points = [
-                    n for n in g_component.nodes if g_component.degree(n) > 2
-                ]
-                logger.debug(
-                    f"Connected component has {len(g_component.nodes)} nodes and {len(branch_points)} branch points"
-                )
-                removed = 0
-                for i, branch_point in enumerate(branch_points):
-                    remaining = [n for n in cc if n != branch_point]
-                    remaining_g = g_component.subgraph(remaining)
-
-                    remaining_ccs = list(cc_func(remaining_g))
-                    logger.debug(
-                        f"After removing branch point {i}, cc is broken into pieces sized: {[len(x) for x in remaining_ccs]}"
-                    )
-                    for remaining_cc in list(remaining_ccs):
-                        if (
-                            self.cable_len(g, list(remaining_cc) + [branch_point])
-                            <= self.node_threshold
-                        ):
-                            for n in remaining_cc:
-                                g.remove_node(n)
-                                finished = False
-                                removed += 1
-                logger.debug(f"Removed {removed} nodes from this cc")
-        logger.debug(f"g has {len(g.nodes())} nodes post filtering")
+            self.remove_spines_from_leaves(cc, g, cc_func)
+        logger.warning(f"g has {len(g.nodes())} nodes post filtering")
 
         outputs[self.graph] = Graph.from_nx_graph(g, batch[self.graph].spec.copy())
         return outputs
 
-    def cable_len(self, g, nodes):
+    def remove_spines(self, cc, g, cc_func):
+        finished = False
+        while not finished:
+            finished = True
+            g_component = g.subgraph(cc)
+
+            branch_points = [n for n in g_component.nodes if g_component.degree(n) > 2]
+            removed = 0
+            for i, branch_point in enumerate(branch_points):
+                remaining = [n for n in cc if n != branch_point]
+                remaining_g = g_component.subgraph(remaining)
+
+                remaining_ccs = list(cc_func(remaining_g))
+                for remaining_cc in list(remaining_ccs):
+                    if (
+                        self.cable_len(
+                            g,
+                            list(remaining_cc) + [branch_point],
+                            limit=self.node_threshold,
+                        )
+                        <= self.node_threshold
+                    ):
+                        for n in remaining_cc:
+                            g.remove_node(n)
+                            finished = False
+                            removed += 1
+
+    def remove_spines_from_leaves(self, cc, g, cc_func):
+        finished = False
+        g_component = g.subgraph(cc)
+        leaves_to_keep = set()
+
+        while not finished:
+            finished = True
+            leaves = set([n for n in g_component.nodes if g_component.degree(n) == 1])
+            leaves = leaves.difference(leaves_to_keep)
+
+            removed = 0
+            for i, leaf in enumerate(leaves):
+                dist_to_branch = 0
+                to_remove = []
+
+                for u, v in nx.dfs_edges(g_component, leaf):
+                    dist_to_branch += np.linalg.norm(
+                        g_component.nodes[u]["location"]
+                        - g_component.nodes[v]["location"]
+                    )
+                    to_remove.append(u)
+                    # stop or append to to_remove
+                    if (
+                        dist_to_branch > self.node_threshold
+                        or g_component.degree(v) > 2
+                    ):
+                        break
+                if dist_to_branch < self.node_threshold:
+                    for node in to_remove:
+                        g.remove_node(node)
+                        removed += 1
+                else:
+                    leaves_to_keep.add(leaf)
+            finished = removed == 0
+
+    def cable_len(self, g, nodes, limit=float("inf")):
         sub_g = g.subgraph(nodes)
         cable_len = 0
         for u, v in sub_g.edges():
@@ -112,6 +144,8 @@ class FilterSmallBranches(BatchFilter):
             v_loc = sub_g.nodes[v]["location"]
             edge_len = np.linalg.norm(u_loc - v_loc)
             cable_len += edge_len
+            if cable_len > limit:
+                return limit + 1
         return cable_len
 
 

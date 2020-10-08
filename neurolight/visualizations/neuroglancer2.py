@@ -714,6 +714,8 @@ def add_layer(context, array, name, visible=True, **kwargs):
     d = np.asarray(array.data)
     if array.data.dtype == np.dtype(bool):
         array.data = np.array(d, dtype=np.float32)
+    if array.data.dtype == np.uint16:
+        array.data = d.astype(np.uint8)
 
     channels = ",".join(
         [
@@ -730,6 +732,8 @@ void main() {
         % channels
     )
     shader_3d = None
+
+    print(array.data.shape, dimensions, array.data.dtype, kwargs)
 
     layer = neuroglancer.LocalVolume(
         data=array.data, dimensions=dimensions, voxel_offset=tuple(offset)
@@ -811,7 +815,7 @@ void main() {
             layer=neuroglancer.SegmentationLayer(
                 source=[
                     neuroglancer.LocalVolume(
-                        data=np.ones(shape, dtype=np.uint32),
+                        data=np.ones((1, 1, 1), dtype=np.uint32),
                         dimensions=dimensions,
                         voxel_offset=offset,
                     ),

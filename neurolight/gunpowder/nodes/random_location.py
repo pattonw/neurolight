@@ -9,7 +9,7 @@ from skimage.transform import integral_image, integrate
 from gunpowder.batch_request import BatchRequest
 from gunpowder.coordinate import Coordinate
 from gunpowder.roi import Roi
-from .batch_filter import BatchFilter
+from gunpowder.nodes.batch_filter import BatchFilter
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,13 @@ class CustomRandomLocation(BatchFilter):
             probability of picking p is inversely related to the number of
             other points within a distance of ``point_balance_radius`` to p.
             This helps avoid oversampling of dense regions of the graph, and
-            undersampling of sparse regions. 
+            undersampling of sparse regions.
+
+        balance_degrees (``dict`` ``int``->``float``, optional):
+
+            Balance the selection of points s.t. the probability of selecting
+            a point of degree k is equal to balance_degrees[k]. If not provided
+            then degree is not factored in.
     """
 
     def __init__(
@@ -81,6 +87,7 @@ class CustomRandomLocation(BatchFilter):
         p_nonempty=1.0,
         ensure_centered=None,
         point_balance_radius=1,
+        balance_degrees=None,
     ):
 
         self.min_masked = min_masked
@@ -95,6 +102,12 @@ class CustomRandomLocation(BatchFilter):
         self.ensure_centered = ensure_centered
         self.point_balance_radius = point_balance_radius
 
+        self.balance_degrees = balance_degrees
+        if self.balance_degrees is not None:
+            assert (
+                0 <= sum(self.balance_degrees.values()) <= 1
+            ), "balance degrees cannot be satisfied!"
+
     def setup(self):
 
         upstream = self.get_upstream_provider()
@@ -103,7 +116,8 @@ class CustomRandomLocation(BatchFilter):
         if self.mask and self.min_masked > 0:
 
             assert self.mask in self.upstream_spec, (
-                "Upstream provider does not have %s"%self.mask)
+                "Upstream provider does not have %s" % self.mask
+            )
             self.mask_spec = self.upstream_spec.array_specs[self.mask]
 
             logger.info("requesting complete mask...")
@@ -116,9 +130,9 @@ class CustomRandomLocation(BatchFilter):
             mask_data = mask_batch.arrays[self.mask].data
             mask_integral_dtype = np.uint64
             logger.debug("mask size is %s", mask_data.size)
-            if mask_data.size < 2**32:
+            if mask_data.size < 2 ** 32:
                 mask_integral_dtype = np.uint32
-            if mask_data.size < 2**16:
+            if mask_data.size < 2 ** 16:
                 mask_integral_dtype = np.uint16
             logger.debug("chose %s as integral array dtype", mask_integral_dtype)
 
@@ -128,9 +142,9 @@ class CustomRandomLocation(BatchFilter):
         if self.ensure_nonempty:
 
             assert self.ensure_nonempty in self.upstream_spec, (
-                "Upstream provider does not have %s"%self.ensure_nonempty)
+                "Upstream provider does not have %s" % self.ensure_nonempty
+            )
             graph_spec = self.upstream_spec.graph_specs[self.ensure_nonempty]
-
 
             logger.info("requesting all %s points...", self.ensure_nonempty)
 
@@ -141,12 +155,44 @@ class CustomRandomLocation(BatchFilter):
                 [p.location for p in nonempty_batch[self.ensure_nonempty].nodes]
             )
 
-            point_counts = self.points.query_ball_point(
-                [p.location for p in nonempty_batch[self.ensure_nonempty].nodes],
-                r=self.point_balance_radius,
-            )
-            weights = [1 / len(point_count) for point_count in point_counts]
-            self.cumulative_weights = list(itertools.accumulate(weights))
+            non_empty_g = nonempty_batch[self.ensure_nonempty].to_nx_graph()
+
+            if self.balance_degrees is None:
+                point_counts = self.points.query_ball_point(
+                    self.points.data, r=self.point_balance_radius
+                )
+                weights = [1 / len(point_count) for point_count in point_counts]
+                self.cumulative_weights = list(itertools.accumulate(weights))
+
+            else:
+
+                point_counts = {
+                    k: self.points.query_ball_point(
+                        [
+                            attrs["location"]
+                            if non_empty_g.degree(p) == k
+                            else self.points.mins - self.point_balance_radius
+                            for p, attrs in non_empty_g.nodes.items()
+                        ],
+                        r=self.point_balance_radius,
+                    )
+                    for k in self.balance_degrees
+                }
+                weights = {
+                    k: [
+                        1 / len(point_count) if len(point_count) > 0 else 0
+                        for point_count in point_counts[k]
+                    ]
+                    for k in self.balance_degrees
+                }
+                logger.warning(
+                    f"{non_empty_g.number_of_nodes()} nodes and "
+                    f"{[(k, len(v)) for k,v in weights.items()]} weights"
+                )
+                self.cumulative_weights = {
+                    k: list(itertools.accumulate(weights[k]))
+                    for k in self.balance_degrees
+                }
 
             logger.debug("retrieved %d points", len(self.points.data))
 
@@ -167,25 +213,24 @@ class CustomRandomLocation(BatchFilter):
 
         if request.array_specs.keys():
 
-            lcm_voxel_size = self.spec.get_lcm_voxel_size(
-                request.array_specs.keys())
-            shift_roi = shift_roi.snap_to_grid(lcm_voxel_size, mode='shrink')
-            lcm_shift_roi = shift_roi/lcm_voxel_size
+            lcm_voxel_size = self.spec.get_lcm_voxel_size(request.array_specs.keys())
+            shift_roi = shift_roi.snap_to_grid(lcm_voxel_size, mode="shrink")
+            lcm_shift_roi = shift_roi / lcm_voxel_size
             logger.debug("lcm voxel size: %s", lcm_voxel_size)
 
             logger.debug(
                 "restricting random locations to multiples of voxel size %s",
-                lcm_voxel_size)
+                lcm_voxel_size,
+            )
 
         else:
 
-            lcm_voxel_size = Coordinate((1,)*shift_roi.dims())
+            lcm_voxel_size = Coordinate((1,) * shift_roi.dims())
             lcm_shift_roi = shift_roi
 
         random_shift = self.__select_random_shift(
-            request,
-            lcm_shift_roi,
-            lcm_voxel_size)
+            request, lcm_shift_roi, lcm_voxel_size
+        )
 
         self.random_shift = random_shift
         self.__shift_request(request, random_shift)
@@ -205,10 +250,10 @@ class CustomRandomLocation(BatchFilter):
             batch.graphs[graph_key].shift(-self.random_shift)
 
     def accepts(self, request):
-        '''Should return True if the randomly chosen location is acceptable
+        """Should return True if the randomly chosen location is acceptable
         (besided meeting other criteria like ``min_masked`` and/or
         ``ensure_nonempty``). Subclasses can overwrite this method to implement
-        additional tests for acceptable locations.'''
+        additional tests for acceptable locations."""
 
         return True
 
@@ -224,11 +269,8 @@ class CustomRandomLocation(BatchFilter):
             request_roi = spec.roi
             provided_roi = self.upstream_spec[key].roi
 
-            shift_roi = provided_roi.shift(
-                -request_roi.get_begin()
-            ).grow(
-                (0,)*request_roi.dims(),
-                -request_roi.get_shape()
+            shift_roi = provided_roi.shift(-request_roi.get_begin()).grow(
+                (0,) * request_roi.dims(), -request_roi.get_shape()
             )
 
             if total_shift_roi is None:
@@ -241,42 +283,37 @@ class CustomRandomLocation(BatchFilter):
 
         assert not total_shift_roi.unbounded() or self.ensure_nonempty is not None, (
             "Can not pick a random location, intersection of upstream ROIs is "
-            "unbounded.")
+            "unbounded."
+        )
         assert total_shift_roi.get_begin() is not None, (
-            "Can not satisfy batch request, no location covers all requested "
-            "ROIs.")
+            "Can not satisfy batch request, no location covers all requested " "ROIs."
+        )
 
         return total_shift_roi
 
     def __select_random_shift(self, request, lcm_shift_roi, lcm_voxel_size):
 
-        ensure_points = (
-            self.ensure_nonempty is not None
-            and
-            random() <= self.p_nonempty)
+        ensure_points = self.ensure_nonempty is not None and random() <= self.p_nonempty
 
         while True:
 
             if ensure_points:
                 random_shift = self.__select_random_location_with_points(
-                    request,
-                    lcm_shift_roi,
-                    lcm_voxel_size)
+                    request, lcm_shift_roi, lcm_voxel_size
+                )
             else:
                 random_shift = self.__select_random_location(
-                    lcm_shift_roi,
-                    lcm_voxel_size)
+                    lcm_shift_roi, lcm_voxel_size
+                )
 
             logger.debug("random shift: " + str(random_shift))
 
             if not self.__is_min_masked(random_shift, request):
-                logger.debug(
-                    "random location does not meet 'min_masked' criterium")
+                logger.debug("random location does not meet 'min_masked' criterium")
                 continue
 
             if not self.__accepts(random_shift, request):
-                logger.debug(
-                    "random location does not meet user-provided criterium")
+                logger.debug("random location does not meet user-provided criterium")
                 continue
 
             return random_shift
@@ -292,17 +329,17 @@ class CustomRandomLocation(BatchFilter):
 
         # get coordinates inside mask array
         mask_voxel_size = self.spec[self.mask].voxel_size
-        request_mask_roi_in_array = request_mask_roi/mask_voxel_size
-        request_mask_roi_in_array -= self.mask_spec.roi.get_offset()/mask_voxel_size
+        request_mask_roi_in_array = request_mask_roi / mask_voxel_size
+        request_mask_roi_in_array -= self.mask_spec.roi.get_offset() / mask_voxel_size
 
         # get number of masked-in voxels
         num_masked_in = integrate(
             self.mask_integral,
             [request_mask_roi_in_array.get_begin()],
-            [request_mask_roi_in_array.get_end()-(1,)*self.mask_integral.ndim]
+            [request_mask_roi_in_array.get_end() - (1,) * self.mask_integral.ndim],
         )[0]
 
-        mask_ratio = float(num_masked_in)/request_mask_roi_in_array.size()
+        mask_ratio = float(num_masked_in) / request_mask_roi_in_array.size()
         logger.debug("mask ratio is %f", mask_ratio)
 
         return mask_ratio >= self.min_masked
@@ -326,10 +363,8 @@ class CustomRandomLocation(BatchFilter):
                 specs_type[key].roi = roi
 
     def __select_random_location_with_points(
-            self,
-            request,
-            lcm_shift_roi,
-            lcm_voxel_size):
+        self, request, lcm_shift_roi, lcm_voxel_size
+    ):
 
         request_points = request.graph_specs.get(self.ensure_nonempty)
         if request_points is None:
@@ -387,36 +422,52 @@ class CustomRandomLocation(BatchFilter):
             #                 request.shape-1
 
             # pick a random point
-            point = choices(self.points.data, cum_weights=self.cumulative_weights)[0]
+            if self.balance_degrees is not None:
+                probabilities = sorted((k, v) for k, v in self.balance_degrees.items())
+                logger.warning(f"probabilities: {probabilities}")
+                choice = random()
+                logger.warning(f"choice: {choice}")
+                degree = None
+                for i in range(len(probabilities)):
+                    choice -= probabilities[i][1]
+                    if choice <= 0:
+                        degree = probabilities[i][0]
+                        break
+
+                logger.warning(f"selecting a node with degree {degree} as center")
+                point = choices(
+                    self.points.data, cum_weights=self.cumulative_weights[degree]
+                )[0]
+            else:
+                point = choices(self.points.data, cum_weights=self.cumulative_weights)[0]
 
             logger.debug("select random point at %s", point)
 
             # get the lcm voxel that contains this point
-            lcm_location = Coordinate(point/lcm_voxel_size)
-            logger.debug(
-                "belongs to lcm voxel %s",
-                lcm_location)
+            lcm_location = Coordinate(point / lcm_voxel_size)
+            logger.debug("belongs to lcm voxel %s", lcm_location)
 
             # mark all dimensions in which the point lies on the lower boundary
             # of the lcm voxel
-            on_lower_boundary = lcm_location*lcm_voxel_size == point
+            on_lower_boundary = lcm_location * lcm_voxel_size == point
             logger.debug(
                 "lies on the lower boundary of the lcm voxel in dimensions %s",
-                on_lower_boundary)
+                on_lower_boundary,
+            )
 
             # for each of these dimensions, we have to change the shape of the
             # shift ROI using the following correction
-            lower_boundary_correction = Coordinate((
-                -1 if o else 0
-                for o in on_lower_boundary
-            ))
+            lower_boundary_correction = Coordinate(
+                (-1 if o else 0 for o in on_lower_boundary)
+            )
             logger.debug(
                 "lower bound correction for shape of shift ROI %s",
-                lower_boundary_correction)
+                lower_boundary_correction,
+            )
 
             # get the request ROI's shape in lcm
-            lcm_roi_begin = request_points_roi.get_begin()/lcm_voxel_size
-            lcm_roi_shape = request_points_roi.get_shape()/lcm_voxel_size
+            lcm_roi_begin = request_points_roi.get_begin() / lcm_voxel_size
+            lcm_roi_shape = request_points_roi.get_shape() / lcm_voxel_size
             logger.debug("Point request ROI: %s", request_points_roi)
             logger.debug("Point request lcm ROI shape: %s", lcm_roi_shape)
 
@@ -446,23 +497,26 @@ class CustomRandomLocation(BatchFilter):
             if not lcm_point_shift_roi.intersects(lcm_shift_roi):
                 logger.debug(
                     "reject random shift, random point %s shift ROI %s does "
-                    "not intersect total shift ROI %s", point,
-                    lcm_point_shift_roi, lcm_shift_roi)
+                    "not intersect total shift ROI %s",
+                    point,
+                    lcm_point_shift_roi,
+                    lcm_shift_roi,
+                )
                 continue
             lcm_point_shift_roi = lcm_point_shift_roi.intersect(lcm_shift_roi)
 
             # select a random shift from all possible shifts
             random_shift = self.__select_random_location(
-                lcm_point_shift_roi,
-                lcm_voxel_size)
+                lcm_point_shift_roi, lcm_voxel_size
+            )
             logger.debug("random shift: %s", random_shift)
 
             # count all points inside the shifted ROI
-            points = self.__get_points_in_roi(
-                request_points_roi.shift(random_shift))
+            points = self.__get_points_in_roi(request_points_roi.shift(random_shift))
             assert point in points, (
                 "Requested batch to contain point %s, but got points "
-                "%s"%(point, points))
+                "%s" % (point, points)
+            )
             num_points = len(points)
 
             return random_shift
@@ -472,7 +526,8 @@ class CustomRandomLocation(BatchFilter):
         # select a random point inside ROI
         random_shift = Coordinate(
             randint(int(begin), int(end))
-            for begin, end in zip(lcm_shift_roi.get_begin(), lcm_shift_roi.get_end()))
+            for begin, end in zip(lcm_shift_roi.get_begin(), lcm_shift_roi.get_end())
+        )
 
         random_shift *= lcm_voxel_size
 
@@ -483,7 +538,7 @@ class CustomRandomLocation(BatchFilter):
         points = []
 
         center = roi.get_center()
-        radius = math.ceil(float(max(roi.get_shape()))/2)
+        radius = math.ceil(float(max(roi.get_shape())) / 2)
         candidates = self.points.query_ball_point(center, radius, p=np.inf)
 
         for i in candidates:

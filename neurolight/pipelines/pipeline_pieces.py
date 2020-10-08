@@ -184,6 +184,17 @@ def get_mouselight_data_sources(
 
     # Graph matching parameters
     point_balance_radius = setup_config.random_location.point_balance_radius
+    if setup_config.random_location.balance_degree_keys is not None:
+        balance_degrees = {
+            k: v
+            for k, v in zip(
+                setup_config.random_location.balance_degree_keys,
+                setup_config.random_location.balance_degree_values,
+            )
+        }
+    else:
+        balance_degrees = None
+
     matching_failures_dir = setup_config.matching.matching_failures_dir
     matching_failures_dir = (
         matching_failures_dir
@@ -230,7 +241,7 @@ def get_mouselight_data_sources(
         "ensure_nonempty": ensure_nonempty,
         "ensure_centered": True,
         "point_balance_radius": point_balance_radius * micron_scale,
-        "balance_degrees": [0.5, 0.45]
+        "balance_degrees": balance_degrees,
     }
 
     data_sources = (
@@ -424,7 +435,7 @@ def get_neuron_pair(
     if blend_mode == "add":
         if post_fusion:
             pipeline = pipeline + scipyCLAHE(
-                [raw_add, raw_base],
+                [raw_fused],
                 gp.Coordinate([20, 64, 64]) * voxel_size,
                 clip_limit=clip_limit,
                 normalize=normalize,
@@ -448,9 +459,30 @@ def get_neuron_pair(
     )
 
 
-def add_data_augmentation(pipeline, raw):
+def add_data_augmentation(pipeline, setup_config: DictConfig, raw):
     # TODO: fix elastic augment parameters
     # TODO: Config these
+
+    noise_kwargs = {}
+    noise_mean_mean = setup_config.data_augmentation.noise_mean_mean
+    noise_mean_var = setup_config.data_augmentation.noise_mean_var
+    if noise_mean_var > 0:
+        noise_kwargs["range_mean"] = (
+            noise_mean_mean - noise_mean_var,
+            noise_mean_mean + noise_mean_var,
+        )
+    else:
+        noise_kwargs["mean"] = noise_mean_mean
+    noise_var_mean = setup_config.data_augmentation.noise_var_mean
+    noise_var_var = setup_config.data_augmentation.noise_var_var
+    if noise_var_var > 0:
+        noise_kwargs["range_var"] = (
+            noise_mean_mean - noise_var_var,
+            noise_mean_mean + noise_var_var,
+        )
+    else:
+        noise_kwargs["var"] = noise_var_mean
+
     pipeline = (
         pipeline
         + gp.ElasticAugment(
@@ -461,16 +493,17 @@ def add_data_augmentation(pipeline, raw):
             use_fast_points_transform=True,
             recompute_missing_points=False,
         )
+        + gp.NoiseAugment(raw, **noise_kwargs)
         # + gp.SimpleAugment(mirror_only=[1, 2], transpose_only=[1, 2])
-        + gp.IntensityAugment(raw, 0.8, 1.2, -0.001, 0.001)
+        + gp.IntensityAugment(raw, 0.8, 1.2, -0.05, 0.05)
     )
     return pipeline
 
 
-def add_label_processing(pipeline, setup_config: DictConfig, labels):
+def add_label_processing(pipeline, setup_config: DictConfig, labels, suffix=""):
     assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
     if setup_config.pipeline.distances:
-        return add_distance_label_processing(pipeline, setup_config, labels)
+        return add_distance_label_processing(pipeline, setup_config, labels, suffix)
     else:
         return add_binary_label_processing(pipeline, setup_config, labels)
 
@@ -482,7 +515,7 @@ def add_binary_label_processing(pipeline, setup_config: DictConfig, labels):
     voxel_size = gp.Coordinate(setup_config.data.voxel_size)
     micron_scale = voxel_size[0]
 
-    # Somewhat arbitrary Hyperparameter
+    # Hyperparameter
     neuron_radius = setup_config.data_processing.neuron_radius
     mask_radius = setup_config.data_processing.mask_radius
 
@@ -514,20 +547,22 @@ def guarantee_nonempty(pipeline, setup_config: DictConfig, key):
     return pipeline
 
 
-def add_distance_label_processing(pipeline, setup_config: DictConfig, labels):
+def add_distance_label_processing(
+    pipeline, setup_config: DictConfig, labels, suffix=""
+):
     assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
 
     # Data Properties
     voxel_size = gp.Coordinate(setup_config.data.voxel_size)
     micron_scale = voxel_size[0]
 
-    # Somewhat arbitrary Hyperparameter
+    # Hyperparameter
     distance_threshold = setup_config.data_processing.distance_threshold
     scale = setup_config.data_processing.distance_scale
 
     # New array keys
-    gt_fg = ArrayKey("GT_FG")
-    loss_weights = ArrayKey("LOSS_WEIGHTS")  # binary
+    gt_fg = ArrayKey(f"GT_FG{suffix}")
+    loss_weights = ArrayKey(f"LOSS_WEIGHTS{suffix}")  # binary
 
     pipeline = (
         pipeline
@@ -589,7 +624,7 @@ def add_embedding_prediction(pipeline, setup_config: DictConfig, raw):
     assert isinstance(setup_config, DictConfig), "Not using an OmegaConf for configs!"
     checkpoint = setup_config.emb_model.checkpoint
     voxel_size = Coordinate(setup_config.data.voxel_size)
-    
+
     checkpoint_file = (
         f"{setup_config.emb_model.directory}/{setup_config.emb_model.setup}/"
         f"{setup_config.emb_model.net_name}_checkpoint_{setup_config.emb_model.checkpoint}"

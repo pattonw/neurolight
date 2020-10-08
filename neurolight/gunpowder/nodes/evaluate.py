@@ -83,6 +83,42 @@ class MergeGraphs(gp.BatchFilter):
         return outputs
 
 
+class MSEEvaluate(gp.BatchFilter):
+    def __init__(self, gt_fg, pred_fg, score, roi, weights=None):
+        self.gt_fg = gt_fg
+        self.pred_fg = pred_fg
+        self.score = score
+        self.roi = roi
+        self.weights = weights
+
+    def setup(self):
+        self.enable_autoskip()
+        self.provides(self.score, gp.ArraySpec(nonspatial=True))
+
+    def prepare(self, request):
+        deps = gp.BatchRequest()
+        deps[self.gt_fg] = gp.ArraySpec(roi=self.roi)
+        deps[self.pred_fg] = gp.ArraySpec(roi=self.roi)
+        if self.weights is not None:
+            deps[self.weights] = gp.ArraySpec(roi=self.roi)
+        return deps
+
+    def process(self, batch, request):
+        outputs = gp.Batch()
+
+        gt_fg = batch[self.gt_fg].data
+        pred_fg = batch[self.pred_fg].data
+        if self.weights is not None:
+            weights = batch[self.weights].data
+            pred_fg = pred_fg * weights
+
+        mse = ((gt_fg - pred_fg) ** 2).sum()
+
+        outputs[self.score] = gp.Array(mse, gp.ArraySpec(nonspatial=True))
+
+        return outputs
+
+
 class Evaluate(gp.BatchFilter):
     def __init__(
         self,
@@ -170,9 +206,7 @@ class Evaluate(gp.BatchFilter):
                 )
             for edge, attrs in gt_graph.edges.items():
                 matching_details_graph.add_edge(
-                    edge[0] + node_offset,
-                    edge[1] + node_offset,
-                    **copy.deepcopy(attrs),
+                    edge[0] + node_offset, edge[1] + node_offset, **copy.deepcopy(attrs)
                 )
 
         edges = [

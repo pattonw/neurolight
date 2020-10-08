@@ -17,6 +17,7 @@ class Eval:
     component_threshold_emb: float = 10000
     device: str = "cuda"
     blocks: List[int] = field(default_factory=lambda: list(range(1, 26)))
+    tile_scan: bool = True
     snapshot: Snapshot = Snapshot(
         every=1, directory="eval_results", file_name="{checkpoint}_{block}.zarr"
     )

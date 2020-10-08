@@ -5,6 +5,7 @@ import neurolight as nl
 from neurolight.transforms.swc_to_graph import parse_swc
 from neurolight.gunpowder.nodes.snapshot_source import SnapshotSource
 from neurolight.pipelines import DEFAULT_CONFIG
+from neurolight.pipelines.pipeline_pieces import add_label_processing
 
 from neurolight.gunpowder.nodes.maxima import Skeletonize
 from neurolight.gunpowder.nodes.skeletonize_candidates import (
@@ -12,11 +13,10 @@ from neurolight.gunpowder.nodes.skeletonize_candidates import (
     SinSample,
 )
 
-from neurolight.gunpowder.nodes.minimax import MiniMax, MiniMaxEmbeddings
+from neurolight.gunpowder.nodes.minimax import MiniMax
 from neurolight.gunpowder.nodes.emst import EMST
-from neurolight.gunpowder.nodes.evaluate import Evaluate, MergeGraphs
+from neurolight.gunpowder.nodes.evaluate import Evaluate, MSEEvaluate, MergeGraphs
 from neurolight.gunpowder.nodes.clahe import scipyCLAHE
-from neurolight.gunpowder.nodes.score_edges import ScoreEdges
 from neurolight.gunpowder.nodes.threshold_edges import ThresholdEdges
 from neurolight.gunpowder.nodes.rasterize_skeleton import RasterizeSkeleton
 from neurolight.gunpowder.nodes.emst_components import ComponentWiseEMST
@@ -27,7 +27,8 @@ from omegaconf import OmegaConf
 import copy
 from pathlib import Path
 import logging
-import json
+
+logger = logging.getLogger(__name__)
 
 
 class MergeScores(gp.BatchFilter):
@@ -150,7 +151,6 @@ def emb_validation_pipeline(
             array_datasets[fg_pred] = fg_pred_path.format(block=block)
         raw_source = SnapshotSource(snapshot_file, datasets=array_datasets)
 
-
         # Graph Source
         graph_datasets = {gt: gt_path.format(block=block)}
         graph_directionality = {gt: False}
@@ -160,8 +160,10 @@ def emb_validation_pipeline(
             graph_datasets[fg_mst_full] = candidates_mst_path.format(block=block)
             graph_directionality[fg_mst_full] = False
             edge_attrs[fg_mst_full] = [distance_attr]
-            
-            graph_datasets[fg_mst_dense_full] = candidates_mst_dense_path.format(block=block)
+
+            graph_datasets[fg_mst_dense_full] = candidates_mst_dense_path.format(
+                block=block
+            )
             graph_directionality[fg_mst_dense_full] = False
             edge_attrs[fg_mst_dense_full] = [distance_attr]
         gt_source = SnapshotSource(
@@ -239,7 +241,9 @@ def emb_validation_pipeline(
         block_spec[fg_mst_full] = gp.GraphSpec(cube_roi_shifted, directed=False)
         block_spec[fg_mst_dense_full] = gp.GraphSpec(cube_roi_shifted, directed=False)
         block_spec[fg_mst_thresholded] = gp.GraphSpec(cube_roi_shifted, directed=False)
-        block_spec[fg_mst_dense_thresholded] = gp.GraphSpec(cube_roi_shifted, directed=False)
+        block_spec[fg_mst_dense_thresholded] = gp.GraphSpec(
+            cube_roi_shifted, directed=False
+        )
         block_spec[emb_mst] = gp.GraphSpec(cube_roi_shifted, directed=False)
         # block_spec[mst_dense_2] = gp.GraphSpec(cube_roi_shifted, directed=False)
         block_spec[score] = gp.ArraySpec(nonspatial=True)
@@ -256,9 +260,15 @@ def emb_validation_pipeline(
             additional_request[neighborhood] = gp.ArraySpec(cube_roi_shifted)
         additional_request[gt] = gp.GraphSpec(cube_roi_shifted, directed=False)
         additional_request[fg_mst_full] = gp.GraphSpec(cube_roi_shifted, directed=False)
-        additional_request[fg_mst_dense_full] = gp.GraphSpec(cube_roi_shifted, directed=False)
-        additional_request[fg_mst_thresholded] = gp.GraphSpec(cube_roi_shifted, directed=False)
-        additional_request[fg_mst_dense_thresholded] = gp.GraphSpec(cube_roi_shifted, directed=False)
+        additional_request[fg_mst_dense_full] = gp.GraphSpec(
+            cube_roi_shifted, directed=False
+        )
+        additional_request[fg_mst_thresholded] = gp.GraphSpec(
+            cube_roi_shifted, directed=False
+        )
+        additional_request[fg_mst_dense_thresholded] = gp.GraphSpec(
+            cube_roi_shifted, directed=False
+        )
         additional_request[emb_mst] = gp.GraphSpec(cube_roi_shifted, directed=False)
         # additional_request[mst_dense_2] = gp.GraphSpec(cube_roi_shifted, directed=False)
         additional_request[details] = gp.GraphSpec(cube_roi_shifted, directed=False)
@@ -330,7 +340,7 @@ def emb_validation_pipeline(
                     fg_mst_thresholded: [distance_attr],
                     fg_mst_dense_thresholded: [distance_attr],
                     emb_mst: [distance_attr],
-                    # optimal_mst: [distance_attr], # it is unclear how to add distances if using connectivity graph
+                    # optimal_mst: [distance_attr],
                     # mst_dense_2: [distance_attr],
                     details: ["details", "label_pair"],
                 },
@@ -351,9 +361,10 @@ def emb_validation_pipeline(
     return validation_pipeline, final_score
 
 
-def fg_validation_pipeline(config, snapshot_file, raw_path, gt_path):
+def fg_validation_pipeline(config, snapshot_file, raw_path, gt_path, mse_diff=False):
     checkpoint = config.fg_model.checkpoint
     blocks = config.eval.blocks
+    tile_scan = config.eval.tile_scan
     benchmark_datasets_path = Path(config.data.benchmark_data_path)
     sample = config.eval.sample
     transform_template = config.data.transform_template
@@ -400,16 +411,15 @@ def fg_validation_pipeline(config, snapshot_file, raw_path, gt_path):
             np.array(voxel_size[::-1]),
         )
 
-        candidates = gp.ArrayKey(f"CANDIDATES_{block}")
         raw = gp.ArrayKey(f"RAW_{block}")
-        mst = gp.GraphKey(f"MST_{block}")
         gt = gp.GraphKey(f"GT_{block}")
         score = gp.ArrayKey(f"SCORE_{block}")
-        details = gp.GraphKey(f"DETAILS_{block}")
 
         raw_source = SnapshotSource(
             snapshot_file, datasets={raw: raw_path.format(block=block)}
         )
+        if tile_scan:
+            raw_source = raw_source + gp.Pad(raw, None)
         gt_source = SnapshotSource(
             snapshot_file,
             datasets={gt: gt_path.format(block=block)},
@@ -417,6 +427,10 @@ def fg_validation_pipeline(config, snapshot_file, raw_path, gt_path):
         )
 
         if config.clahe.enabled:
+            logger.warning(
+                f"Applying clahe with clip_limit: {clip_limit} "
+                f"and normalization: {normalize}!"
+            )
             raw_source = raw_source + scipyCLAHE(
                 [raw],
                 kernel_size=kernel_size * voxel_size,
@@ -433,64 +447,136 @@ def fg_validation_pipeline(config, snapshot_file, raw_path, gt_path):
         input_roi = cube_roi.grow(
             (input_size - output_size) // 2, (input_size - output_size) // 2
         )
-        cube_roi_shifted = gp.Roi(
-            (0,) * len(cube_roi.get_shape()), cube_roi.get_shape()
-        )
-        input_roi = cube_roi_shifted.grow(
+        output_roi = gp.Roi((0,) * len(cube_roi.get_shape()), cube_roi.get_shape())
+        input_roi = output_roi.grow(
             (input_size - output_size) // 2, (input_size - output_size) // 2
         )
 
+        if tile_scan and False:
+            # make sure the output roi is a multiple of the output size for scan:
+            output_tiles = (
+                output_roi.get_shape()
+                + output_shape
+                - gp.Coordinate((1,) * output_roi.dims())
+            ) / output_shape
+            tiled_output_size = output_tiles * output_shape
+            size_diff = tiled_output_size - output_roi.get_shape()
+            halved = size_diff / 2
+
+            tiled_output_roi = output_roi.grow(halved, size_diff - halved)
+            tiled_input_roi = input_roi.grow(halved, size_diff - halved)
+
+            input_roi = tiled_input_roi
+            output_roi = tiled_output_roi
+        else:
+            logger.warning(
+                "Should change the shape of the roi to avoid " "scan border artifacts"
+            )
+
         block_spec = specs.setdefault(block, {})
-        block_spec[raw] = gp.ArraySpec(input_roi)
-        block_spec[candidates] = gp.ArraySpec(cube_roi_shifted)
-        block_spec[fg] = gp.ArraySpec(cube_roi_shifted)
-        block_spec[gt] = gp.GraphSpec(cube_roi_shifted, directed=False)
-        block_spec[mst] = gp.GraphSpec(cube_roi_shifted, directed=False)
         block_spec[score] = gp.ArraySpec(nonspatial=True)
 
         additional_request = BatchRequest()
         additional_request[raw] = gp.ArraySpec(input_roi)
-        additional_request[candidates] = gp.ArraySpec(cube_roi_shifted)
-        additional_request[fg] = gp.ArraySpec(cube_roi_shifted)
-        additional_request[gt] = gp.GraphSpec(cube_roi_shifted, directed=False)
-        additional_request[mst] = gp.GraphSpec(cube_roi_shifted, directed=False)
-        additional_request[details] = gp.GraphSpec(cube_roi_shifted, directed=False)
+        additional_request[fg] = gp.ArraySpec(output_roi)
+        additional_request[gt] = gp.GraphSpec(output_roi, directed=False)
 
-        pipeline = (
-            (fg_source, gt_source)
-            + gp.MergeProvider()
-            + Skeletonize(fg, candidates, candidate_spacing, candidate_threshold)
-            + MiniMax(fg, candidates, mst, distance_attr=distance_attr)
-        )
+        snapshot_datasets = {
+            raw: f"volumes/raw",
+            fg: f"volumes/foreground",
+            gt: f"points/gt",
+        }
+        edge_attrs = {}
+        node_attrs = {}
 
-        pipeline += Evaluate(
-            gt,
-            mst,
-            score,
-            roi=cube_roi_shifted,
-            details=details,
-            edge_threshold_attr=distance_attr,
-            num_thresholds=num_thresholds,
-            threshold_range=threshold_range,
-            small_component_threshold=component_threshold,
-        )
+        if not mse_diff:
+            candidates = gp.ArrayKey(f"CANDIDATES_{block}")
+            mst = gp.GraphKey(f"MST_{block}")
+            mst_dense = gp.GraphKey(f"MST_DENSE_{block}")
+            details = gp.GraphKey(f"DETAILS_{block}")
+
+            snapshot_datasets.update(
+                {
+                    candidates: f"volumes/candidates",
+                    mst: f"points/mst",
+                    mst_dense: f"points/mst_dense",
+                    details: f"points/details",
+                }
+            )
+            edge_attrs.update(
+                {mst: [distance_attr], details: ["details", "label_pair"]}
+            )
+            node_attrs.update({details: ["details", "label_pair"]})
+
+            additional_request[candidates] = gp.ArraySpec(output_roi)
+            additional_request[mst] = gp.GraphSpec(output_roi, directed=False)
+            additional_request[details] = gp.GraphSpec(output_roi, directed=False)
+
+            pipeline = (
+                (fg_source, gt_source)
+                + gp.MergeProvider()
+                + Skeletonize(fg, candidates, candidate_spacing, candidate_threshold)
+                + MiniMax(
+                    intensities=fg,
+                    mask=candidates,
+                    mst=mst,
+                    dense_mst=mst_dense,
+                    distance_attr=distance_attr,
+                    threshold=candidate_threshold,
+                )
+            )
+
+            pipeline += Evaluate(
+                gt,
+                mst,
+                score,
+                roi=output_roi,
+                details=details,
+                edge_threshold_attr=distance_attr,
+                num_thresholds=num_thresholds,
+                threshold_range=threshold_range,
+                small_component_threshold=component_threshold,
+            )
+
+        else:
+            labels = gp.ArrayKey(f"LABELS_{block}")
+
+            gt_source = gt_source + RasterizeSkeleton(
+                points=gt,
+                array=labels,
+                array_spec=gp.ArraySpec(
+                    interpolatable=False, voxel_size=voxel_size, dtype=np.int64
+                ),
+            )
+            gt_source, gt_fg, loss_weights = add_label_processing(
+                gt_source, config, labels, f"_{block}"
+            )
+
+            additional_request[labels] = gp.ArraySpec(output_roi)
+            additional_request[gt_fg] = gp.ArraySpec(output_roi)
+            additional_request[loss_weights] = gp.ArraySpec(output_roi)
+
+            snapshot_datasets.update(
+                {
+                    labels: f"volumes/labels",
+                    gt_fg: f"volumes/gt_fg",
+                    loss_weights: f"volumes/loss_weights",
+                }
+            )
+
+            pipeline = (fg_source, gt_source) + gp.MergeProvider()
+
+            pipeline += MSEEvaluate(gt_fg, fg, score, output_roi, weights=loss_weights)
 
         if config.eval.snapshot.every > 0:
             pipeline += gp.Snapshot(
-                {
-                    raw: f"volumes/raw",
-                    fg: f"volumes/foreground",
-                    candidates: f"volumes/candidates",
-                    mst: f"points/mst",
-                    gt: f"points/gt",
-                    details: f"points/details",
-                },
+                dataset_names=snapshot_datasets,
                 output_dir=config.eval.snapshot.directory,
                 output_filename=config.eval.snapshot.file_name.format(
                     checkpoint=checkpoint, block=block
                 ),
-                edge_attrs={mst: [distance_attr], details: ["details", "label_pair"]},
-                node_attrs={details: ["details", "label_pair"]},
+                edge_attrs=edge_attrs,
+                node_attrs=node_attrs,
                 additional_request=additional_request,
             )
 
@@ -749,7 +835,7 @@ def add_emb_pred(config, pipeline, raw, block, model):
     return pipeline, emb_pred, neighborhood
 
 
-def get_fg_model(config):
+def get_fg_model(config, ret_checkpoint=False):
     model_config = copy.deepcopy(DEFAULT_CONFIG)
 
     setup = config.fg_model.setup
@@ -770,12 +856,14 @@ def get_fg_model(config):
         f"{config.fg_model.net_name}_checkpoint_{config.fg_model.checkpoint}",
     )
 
-    if checkpoint_file.exists():
+    if checkpoint_file.exists() and not ret_checkpoint:
         checkpoint = torch.load(checkpoint_file, map_location=device)
         if "model_state_dict" in checkpoint:
             model.load_state_dict(checkpoint["model_state_dict"])
         else:
             model.load_state_dict(checkpoint)
+    elif ret_checkpoint:
+        return model, checkpoint_file
     else:
         raise ValueError(f"Checkpoint {checkpoint_file} does not exist!")
 
@@ -897,25 +985,27 @@ def validation_pipeline(config):
             ],
         )
 
-        additional_request = BatchRequest()
         input_roi = cube_roi.grow(
             (input_size - output_size) // 2, (input_size - output_size) // 2
         )
+        output_roi = cube_roi
+
+        additional_request = BatchRequest()
         block_spec = specs.setdefault(block, {})
         block_spec["raw"] = (raw, gp.ArraySpec(input_roi))
         additional_request[raw] = gp.ArraySpec(roi=input_roi)
-        block_spec["ground_truth"] = (ground_truth, gp.GraphSpec(cube_roi))
-        additional_request[ground_truth] = gp.GraphSpec(roi=cube_roi)
-        block_spec["labels"] = (labels, gp.ArraySpec(cube_roi))
-        additional_request[labels] = gp.ArraySpec(roi=cube_roi)
-        block_spec["fg_pred"] = (fg, gp.ArraySpec(cube_roi))
-        additional_request[fg] = gp.ArraySpec(roi=cube_roi)
-        block_spec["emb_pred"] = (emb, gp.ArraySpec(cube_roi))
-        additional_request[emb] = gp.ArraySpec(roi=cube_roi)
-        block_spec["candidates"] = (candidates, gp.ArraySpec(cube_roi))
-        additional_request[candidates] = gp.ArraySpec(roi=cube_roi)
-        block_spec["mst_pred"] = (mst, gp.GraphSpec(cube_roi))
-        additional_request[mst] = gp.GraphSpec(roi=cube_roi)
+        block_spec["ground_truth"] = (ground_truth, gp.GraphSpec(output_roi))
+        additional_request[ground_truth] = gp.GraphSpec(roi=output_roi)
+        block_spec["labels"] = (labels, gp.ArraySpec(output_roi))
+        additional_request[labels] = gp.ArraySpec(roi=output_roi)
+        block_spec["fg_pred"] = (fg, gp.ArraySpec(output_roi))
+        additional_request[fg] = gp.ArraySpec(roi=output_roi)
+        block_spec["emb_pred"] = (emb, gp.ArraySpec(output_roi))
+        additional_request[emb] = gp.ArraySpec(roi=output_roi)
+        block_spec["candidates"] = (candidates, gp.ArraySpec(output_roi))
+        additional_request[candidates] = gp.ArraySpec(roi=output_roi)
+        block_spec["mst_pred"] = (mst, gp.GraphSpec(output_roi))
+        additional_request[mst] = gp.GraphSpec(roi=output_roi)
 
         pipeline = (
             (swc_source, pred_source)

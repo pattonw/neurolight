@@ -53,7 +53,7 @@ def train_fg(setup, secrets, num_iterations):
         for key, shape in requests:
             request.add(key, shape)
         with gp.build(pipeline):
-            for i in num_iterations:
+            for i in range(num_iterations):
                 pipeline.request_batch(request)
 
 
@@ -61,7 +61,9 @@ def train_fg(setup, secrets, num_iterations):
 @click.argument("setup", type=click.Path(exists=True, file_okay=False, writable=True))
 @click.option("--checkpoint-range", type=(int, int), default=(-1, -1))
 @click.option("--test", type=bool, default=False, is_flag=True)
-def grid_search_fg(setup, checkpoint_range, test):
+@click.option("--mse", type=bool, default=False, is_flag=True)
+@click.option("--raw", type=click.Choice(["raw", "clahe", "ahe"], case_sensitive=False), default="raw")
+def grid_search_fg(setup, checkpoint_range, test, mse, raw):
     from neurolight.pipelines.validation_pipeline import fg_validation_pipeline
     from neurolight.pipelines import DEFAULT_CONFIG
 
@@ -90,7 +92,7 @@ def grid_search_fg(setup, checkpoint_range, test):
         else:
             checkpoints = [
                 checkpoint
-                for checkpoint in checkpoints
+                for checkpoint in all_checkpoints
                 if checkpoint_range[0] <= checkpoint <= checkpoint_range[1]
             ]
 
@@ -100,9 +102,10 @@ def grid_search_fg(setup, checkpoint_range, test):
         )
         raw_path = "volumes/{block}/raw"
         raw_clahe_path = "volumes/{block}/raw_clahe"
+        raw_ahe_path = "volumes/{block}/raw_ahe"
         gt_path = "points/{block}/ground_truth"
 
-        grid_search_parameters = [("eval.component_threshold_fg", [10000, 30000])]
+        grid_search_parameters = [("eval.component_threshold_fg", [10000])]
 
         for checkpoint in checkpoints:
             grid_search_keys = [k for k, v in grid_search_parameters]
@@ -133,6 +136,7 @@ def grid_search_fg(setup, checkpoint_range, test):
                     checkpoint == latest_checkpoint or len(checkpoints) == 1
                 )
                 prefix = "test_" if test else ""
+                prefix += "mse_" if mse else ""
                 output_dir = (
                     f"eval_grid_search/{prefix}"
                     f"{'-'.join([k.split('.')[-1].lower() for k, _ in grid_search_parameters])}"
@@ -146,10 +150,13 @@ def grid_search_fg(setup, checkpoint_range, test):
                     f"{{checkpoint}}_{{block}}_{grid_iter_name}.zarr"
                 )
 
-                # to add clahe to the raw data:
-                config.eval.clahe.enabled = False
-                if config.clahe.enabled:
-                    raw_path = raw_clahe_path
+                if raw != "raw":
+                    # to add clahe to the raw data:
+                    config.clahe.enabled = False
+                    if raw == "clahe":
+                        raw_path = raw_clahe_path
+                    if raw == "ahe":
+                        raw_path = raw_ahe_path
 
                 scores_file = f"{{checkpoint}}_{grid_iter_name}.obj"
                 if Path(output_dir, scores_file.format(checkpoint=checkpoint)).exists():
@@ -170,7 +177,7 @@ def grid_search_fg(setup, checkpoint_range, test):
                     OmegaConf.update(config, k, v)
 
                 pipeline, score_key = fg_validation_pipeline(
-                    config, snapshot_file, raw_path, gt_path
+                    config, snapshot_file, raw_path, gt_path, mse_diff=mse
                 )
                 request = BatchRequest()
                 request[score_key] = ArraySpec(nonspatial=True)
@@ -178,16 +185,19 @@ def grid_search_fg(setup, checkpoint_range, test):
                     batch = pipeline.request_batch(request)
                     scores = batch[score_key].data
 
-                    distances = scores[0, 0, :]
-                    optimal_threshold = np.argmin(distances)
-                    optimal_score = distances[optimal_threshold]
-                    np.set_printoptions(precision=3)
-                    np.set_printoptions(suppress=True)
-                    if config.eval.snapshot.every:
-                        logger.info(
-                            f"Optimal score: {optimal_score} at {scores[0,1,optimal_threshold]}"
-                        )
-                        logger.info(scores)
+                    if not mse:
+                        distances = scores[0, 0, :]
+                        optimal_threshold = np.argmin(distances)
+                        optimal_score = distances[optimal_threshold]
+                        np.set_printoptions(precision=3)
+                        np.set_printoptions(suppress=True)
+                        if config.eval.snapshot.every:
+                            logger.info(
+                                f"Optimal score: {optimal_score} at {scores[0,1,optimal_threshold]}"
+                            )
+                            logger.info(scores)
+                    else:
+                        print(scores)
 
                 pickle.dump(
                     scores,
